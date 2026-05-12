@@ -1,0 +1,32 @@
+[loop]
+max_iterations       = 30
+session_timeout_secs = 3600
+memory_limit_bytes   = "7G"
+sleep_between_secs   = 5
+
+[runner]
+command = "claude"
+args    = ["--dangerously-skip-permissions", "--output-format=json"]
+model   = "opus"
+
+# Isolation is Linux-only via systemd-run --user --scope. No knob.
+
+[gate]
+timeout_secs = 600
+soft_fail    = true
+run_when     = "commits-only"
+
+[backoff]
+unknown_secs           = 30
+oom_secs               = 120
+timeout_secs           = 60
+rate_limit_default     = 900
+dead_session_threshold = 3
+dirty_revert_threshold = 3
+
+[budget]
+max_cost_usd       = 0
+max_wallclock_secs = 0
+
+[review]
+base_branch = "main"

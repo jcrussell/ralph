@@ -1,0 +1,272 @@
+// Package bd is a thin typed wrapper over the bd (beads) CLI used by
+// the orchestrator. It exists for orchestrator convenience only —
+// there is no ralph subcommand that wraps a bd surface. Users invoke
+// bd directly.
+//
+// Every method shells out to the bd binary; we do not reimplement bd
+// semantics. If bd is missing or returns garbage, the orchestrator
+// surfaces the underlying error.
+package bd
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os/exec"
+	"strings"
+)
+
+// Client invokes the bd CLI. The zero value uses "bd" on PATH; use
+// New to override the binary or working directory.
+type Client struct {
+	binary string // empty -> "bd"
+	dir    string // working directory; cwd of caller if empty
+}
+
+// New returns a Client. binary is looked up on PATH if non-absolute;
+// pass an empty string for the default "bd". dir sets the cwd
+// (matters because bd resolves .beads/ relative to cwd).
+func New(binary, dir string) *Client {
+	return &Client{binary: binary, dir: dir}
+}
+
+func (c *Client) bin() string {
+	if c.binary == "" {
+		return "bd"
+	}
+	return c.binary
+}
+
+// Issue is the slice of fields we read from `bd list/ready --json`.
+// Other fields are preserved in Raw for callers that need them.
+type Issue struct {
+	ID       string         `json:"id"`
+	Title    string         `json:"title"`
+	Status   string         `json:"status"`
+	Priority int            `json:"priority"`
+	Type     string         `json:"type,omitempty"`
+	Labels   []string       `json:"labels,omitempty"`
+	Raw      map[string]any `json:"-"`
+}
+
+// Ready returns issues with no blockers, optionally filtered to a
+// single label (empty label = unscoped).
+func (c *Client) Ready(ctx context.Context, label string) ([]Issue, error) {
+	args := []string{"ready", "--json"}
+	if label != "" {
+		args = append(args, "-l", label)
+	}
+	return c.runList(ctx, args)
+}
+
+// List returns issues filtered by status and optionally label.
+// status="" passes --all so closed/deferred/etc. are included; use a
+// specific status ("open", "in_progress", "closed", …) to filter.
+func (c *Client) List(ctx context.Context, status, label string) ([]Issue, error) {
+	args := []string{"list", "--json", "-n", "0"}
+	if status == "" {
+		args = append(args, "--all")
+	} else {
+		args = append(args, "--status="+status)
+	}
+	if label != "" {
+		args = append(args, "-l", label)
+	}
+	return c.runList(ctx, args)
+}
+
+// Create files a new issue. Returns the new ID.
+type CreateOpts struct {
+	Title       string
+	Description string
+	Type        string // task, bug, feature, decision; empty -> task
+	Priority    int    // 0-4; 0 = highest
+	Labels      []string
+}
+
+// Create files a new issue via `bd q` (quiet capture, returns ID on
+// stdout). Falls back to `bd create` semantics if extra fields are
+// needed beyond what `q` accepts.
+func (c *Client) Create(ctx context.Context, opts CreateOpts) (string, error) {
+	if opts.Title == "" {
+		return "", errors.New("bd: Create requires Title")
+	}
+	args := []string{"create", "--title", opts.Title}
+	if opts.Description != "" {
+		args = append(args, "--description", opts.Description)
+	}
+	if opts.Type != "" {
+		args = append(args, "--type", opts.Type)
+	}
+	args = append(args, "--priority", fmt.Sprintf("%d", opts.Priority))
+	for _, l := range opts.Labels {
+		args = append(args, "--label", l)
+	}
+	args = append(args, "--json")
+	out, err := c.run(ctx, args...)
+	if err != nil {
+		return "", err
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(out, &created); err != nil {
+		// Fallback: bd create may print a one-line "Created issue:
+		// <id>" without JSON depending on version.
+		line := strings.TrimSpace(string(out))
+		if line != "" {
+			return line, nil
+		}
+		return "", fmt.Errorf("bd: parse create output: %w", err)
+	}
+	return created.ID, nil
+}
+
+// Close marks the given IDs closed. Multiple IDs in one call match
+// bd's batch idiom.
+func (c *Client) Close(ctx context.Context, ids ...string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	args := append([]string{"close"}, ids...)
+	_, err := c.run(ctx, args...)
+	return err
+}
+
+// Defer marks id deferred until the given when string (bd accepts
+// "+6h", "tomorrow", "2026-06-01", etc.). reason is optional.
+func (c *Client) Defer(ctx context.Context, id, when, reason string) error {
+	args := []string{"defer", id, "--until", when}
+	if reason != "" {
+		args = append(args, "--reason", reason)
+	}
+	_, err := c.run(ctx, args...)
+	return err
+}
+
+// Remember stores a persistent note under the given key (or
+// auto-keyed if key=="").
+func (c *Client) Remember(ctx context.Context, key, body string) error {
+	args := []string{"remember"}
+	if key != "" {
+		args = append(args, "--key", key)
+	}
+	args = append(args, body)
+	_, err := c.run(ctx, args...)
+	return err
+}
+
+// Snapshot is a labelled list of open issues at a point in time.
+// Diff produces opened/closed/created/deferred sets between two
+// snapshots taken before and after an iteration.
+type Snapshot struct {
+	IDs    map[string]Issue
+	Status map[string]string
+}
+
+// Snapshot returns the current set of issues (any status) for use as
+// the "before" or "after" input to Diff.
+func (c *Client) Snapshot(ctx context.Context) (*Snapshot, error) {
+	issues, err := c.List(ctx, "", "") // all statuses
+	if err != nil {
+		return nil, err
+	}
+	s := &Snapshot{
+		IDs:    make(map[string]Issue, len(issues)),
+		Status: make(map[string]string, len(issues)),
+	}
+	for _, i := range issues {
+		s.IDs[i.ID] = i
+		s.Status[i.ID] = i.Status
+	}
+	return s, nil
+}
+
+// Diff captures the bead-level deltas between two snapshots. Used by
+// internal/narrative to compose the per-iteration narrative line.
+type Diff struct {
+	Created    []string // present in after, absent in before
+	Closed     []string // before.open -> after.closed
+	Opened     []string // before.closed -> after.open
+	Deferred   []string // status moved to deferred
+	InProgress []string // status moved to in_progress
+}
+
+// DiffSnapshots computes the deltas going from before to after.
+func DiffSnapshots(before, after *Snapshot) Diff {
+	d := Diff{}
+	if before == nil {
+		before = &Snapshot{IDs: map[string]Issue{}, Status: map[string]string{}}
+	}
+	if after == nil {
+		after = &Snapshot{IDs: map[string]Issue{}, Status: map[string]string{}}
+	}
+	for id, st := range after.Status {
+		old, existed := before.Status[id]
+		if !existed {
+			d.Created = append(d.Created, id)
+			continue
+		}
+		if st == old {
+			continue
+		}
+		switch {
+		case isClosed(st) && !isClosed(old):
+			d.Closed = append(d.Closed, id)
+		case !isClosed(st) && isClosed(old):
+			d.Opened = append(d.Opened, id)
+		case st == "deferred":
+			d.Deferred = append(d.Deferred, id)
+		case st == "in_progress":
+			d.InProgress = append(d.InProgress, id)
+		}
+	}
+	return d
+}
+
+func isClosed(status string) bool {
+	return status == "closed" || status == "resolved"
+}
+
+// run executes bd with args and returns stdout. stderr is appended
+// to the error context on non-zero exit.
+func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, c.bin(), args...)
+	if c.dir != "" {
+		cmd.Dir = c.dir
+	}
+	var out, errBuf bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
+	if err := cmd.Run(); err != nil {
+		return out.Bytes(), fmt.Errorf("bd %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(errBuf.String()))
+	}
+	return out.Bytes(), nil
+}
+
+// runList runs args and unmarshals stdout as a JSON array of issues.
+func (c *Client) runList(ctx context.Context, args []string) ([]Issue, error) {
+	out, err := c.run(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	out = bytes.TrimSpace(out)
+	if len(out) == 0 || bytes.Equal(out, []byte("null")) {
+		return nil, nil
+	}
+	// First decode into the typed slice; then re-decode into Raw maps
+	// alongside so callers needing untyped fields can have both.
+	var typed []Issue
+	if err := json.Unmarshal(out, &typed); err != nil {
+		return nil, fmt.Errorf("bd: parse %s: %w", strings.Join(args, " "), err)
+	}
+	var raws []map[string]any
+	if err := json.Unmarshal(out, &raws); err == nil && len(raws) == len(typed) {
+		for i := range typed {
+			typed[i].Raw = raws[i]
+		}
+	}
+	return typed, nil
+}

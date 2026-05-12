@@ -1,0 +1,3 @@
+#!/bin/sh
+# Default no-op hook. Replace with real implementation when needed.
+exit 0

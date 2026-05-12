@@ -1,0 +1,8 @@
+#!/bin/sh
+# Run on iterations where commits happened (per [gate] run_when = "commits-only").
+# Failure here surfaces in .GateResult for the next prompt; soft_fail=true means
+# the FSM does NOT enter `failed` on regression.
+set -e
+make build
+go vet ./...
+go test ./...
