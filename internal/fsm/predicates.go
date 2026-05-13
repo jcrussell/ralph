@@ -1,13 +1,11 @@
 package fsm
 
 import (
-	"bytes"
 	"context"
-	"fmt"
-	"os/exec"
 
 	"github.com/jcrussell/ralph/internal/bd"
 	"github.com/jcrussell/ralph/internal/config"
+	"github.com/jcrussell/ralph/internal/git"
 )
 
 // BDLister is the narrow surface predicates need from bd. The full
@@ -19,17 +17,10 @@ type BDLister interface {
 }
 
 // GitClean reports whether the working tree at repo is clean, ignoring
-// untracked files. Mirrors Python detect_git_state.
+// untracked files. Thin wrapper over internal/git.Clean kept here so
+// predicates form one coherent surface.
 func GitClean(ctx context.Context, repo string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain", "--untracked-files=no")
-	cmd.Dir = repo
-	var out, errBuf bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errBuf
-	if err := cmd.Run(); err != nil {
-		return false, fmt.Errorf("fsm: git status in %s: %w: %s", repo, err, errBuf.String())
-	}
-	return len(bytes.TrimSpace(out.Bytes())) == 0, nil
+	return git.Clean(ctx, repo)
 }
 
 // GitDirty is !GitClean.
