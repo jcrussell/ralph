@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/jcrussell/ralph/internal/config"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 	"github.com/jcrussell/ralph/pkg/iostreams"
 )
@@ -165,6 +167,31 @@ func TestScaffoldFallsBackToCwdWhenNoRepoMarker(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".ralph/config.toml")); errors.Is(err, fs.ErrNotExist) {
 		t.Errorf(".ralph/config.toml was not created in cwd")
+	}
+}
+
+// TestShippedConfigTomlLoadsToDefaults exercises the embedded
+// defaults/config.toml end-to-end through ralph init + config.Load,
+// and asserts the result equals config.Defaults(). The shipped file
+// is all-comments by design, so the user gets the built-in defaults
+// for every field. A drift in either file should fail this test.
+func TestShippedConfigTomlLoadsToDefaults(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.Setenv("XDG_CONFIG_HOME", t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Unsetenv("XDG_CONFIG_HOME") })
+
+	f, _ := newFactory(repo)
+	if err := run(context.Background(), &Options{F: f}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	got, err := config.Load(repo)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if diff := cmp.Diff(config.Defaults(), got); diff != "" {
+		t.Errorf("shipped config drifted from Defaults() (-want +got):\n%s", diff)
 	}
 }
 
