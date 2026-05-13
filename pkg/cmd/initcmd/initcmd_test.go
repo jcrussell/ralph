@@ -46,6 +46,9 @@ func TestScaffoldCreatesExpectedTree(t *testing.T) {
 		".ralph/hooks/states/review/enter",
 		".ralph/hooks/states/review/exit",
 		".ralph/hooks/states/review/gate",
+		".ralph/hooks/states/revert/enter",
+		".ralph/hooks/states/revert/exit",
+		".ralph/hooks/states/revert/gate",
 	}
 	for _, rel := range mustExist {
 		if _, err := os.Stat(filepath.Join(repo, rel)); err != nil {
