@@ -2,6 +2,24 @@
 
 Each state has a markdown prompt at `.ralph/prompts/<state>.md`. Rendered with Go `text/template`. Optional `_header.md` and `_footer.md` wrap every state's prompt — the final order is **`_header → <state> → _footer`**.
 
+## Composition
+
+```mermaid
+flowchart LR
+  H["_header.md (optional)"]
+  S["<state>.md"]
+  F["_footer.md (optional)"]
+  H --> J([joinNonEmpty])
+  S --> J
+  F --> J
+  J --> R([text/template.Execute])
+  V[("Vars: .Iter, .State, .GitHead,<br/>.GitDirty, .GateResult, .Review.*, ...")]
+  V --> R
+  R --> P[rendered prompt → runner]
+```
+
+Implementation: `internal/promptlib/promptlib.go`. The composed string is parsed once per iteration with `Option("missingkey=error")` — referencing an undefined variable fails the render rather than silently producing `<no value>` in the wrong spot.
+
 ## Template variables
 
 | Variable             | Meaning                                                                           |
@@ -21,10 +39,10 @@ Each state has a markdown prompt at `.ralph/prompts/<state>.md`. Rendered with G
 ## The `include` helper
 
 ```
-{{include "prompts/_shared/safety-rules.md"}}
+{{include "_shared/safety-rules.md"}}
 ```
 
-Reads the file relative to the repo root and substitutes its rendered contents. Lets you keep one source of truth for snippets reused across prompts.
+Reads the file *relative to `.ralph/prompts/`* and substitutes its rendered contents. Lets you keep one source of truth for snippets reused across prompts. Climbs above the prompts/ directory (`../`) are rejected; absolute paths are rejected.
 
 ## Composition order
 
