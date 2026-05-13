@@ -18,6 +18,8 @@ Available template variables (Go text/template syntax):
   .Review.Base         string  review-mode base
   .Review.OpenFindings int     count of open bd findings on review:<branch>
 
-Includes are supported: {{include "snippet.md"}} pastes another file
-from the same prompts/ directory. ../ climbs are rejected.
+Includes are supported via the include template function: a directive
+like {{`{{include "snippet.md"}}`}} (without the surrounding backticks)
+pastes another file from the same prompts/ directory. Climbs above
+the prompts/ directory are rejected.
 -->
