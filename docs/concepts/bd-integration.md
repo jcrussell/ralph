@@ -11,17 +11,37 @@ No SQLite. No second index. No ralph subcommand wraps a bd surface — when you 
 
 ## What the orchestrator calls
 
-The orchestrator (`internal/bd/`) shells out to bd for:
+`internal/bd/bd.go` is a thin typed wrapper over the `bd` binary. Every method shells out — no reimplementation of bd semantics. The surface is intentionally small:
 
-| Call                                  | When                                                                |
-|---------------------------------------|---------------------------------------------------------------------|
-| `bd ready --json -l <label>`          | Predicate evaluation (`bd_ready_count`).                            |
-| `bd list --status in_progress -l <label> --json` | Predicate evaluation (`bd_in_progress_count`).           |
-| `bd defer <id>`                       | Auto-revert path; remove a stuck task from in-progress.            |
-| `bd remember --key <topic> "..."`     | Auto-revert path; record the failure mode.                          |
-| `bd create -t task -l "..." "..."`    | Used by `internal/review` to file `merge:<branch>` beads if/when the orchestrator opts to do so. (Currently the *agent* files the merge bead per prompt instruction; the orchestrator helper exists as a backstop.) |
+| `bd.Client` method  | Underlying call                                  | When the orchestrator uses it |
+|---------------------|--------------------------------------------------|-------------------------------|
+| `Ready(ctx, label)` | `bd ready --json [-l <label>]`                   | `BDReadyCount` predicate; unscoped + `review:<branch>` flavors. |
+| `List(ctx, status, label)` | `bd list --json -n 0 --status <s> [-l <l>]` | `BDInProgressCount` predicate; `Snapshot` for bead-diff. |
+| `Create(ctx, opts)` | `bd create -t <type> ...`                        | Backstop for filing `merge:<branch>` beads when the agent fails to file one itself. |
+| `Close(ctx, ids...)` | `bd close <id>...`                              | Reserved — present so the orchestrator can close beads it created. |
+| `Defer(ctx, id, when, reason)` | `bd defer <id> --until ... --reason ...` | Auto-revert path: defer the bead that triggered the streak. |
+| `Remember(ctx, key, body)` | `bd remember --key <k> <body>`            | Auto-revert path: record the failure mode for future search. |
+| `Snapshot(ctx)`     | `bd list --json --all -n 0`                      | Pre/post-iteration snapshot for bead-diff. |
 
-Everything else — claiming, closing, exploring decisions, searching memories — is the *agent's* job, driven by the prompt's workflow. The orchestrator stays out of the agent's queue management.
+```mermaid
+sequenceDiagram
+  participant Loop as orchestrator loop
+  participant Pred as fsm predicates
+  participant BD as bd.Client
+  participant CLI as bd binary
+  Loop->>Pred: SelectNextState(ctx, in)
+  Pred->>BD: Ready(ctx, "")
+  BD->>CLI: bd ready --json
+  CLI-->>BD: []Issue
+  BD-->>Pred: count
+  Pred->>BD: List(ctx, "in_progress", "")
+  BD->>CLI: bd list --json --status=in_progress -n 0
+  CLI-->>BD: []Issue
+  BD-->>Pred: count
+  Pred-->>Loop: Outcome
+```
+
+Everything else — claiming, exploring decisions, searching memories from the *agent* — is the agent's job, driven by the prompt's workflow. The orchestrator stays out of the agent's queue management.
 
 ## Why bd is first-class
 
