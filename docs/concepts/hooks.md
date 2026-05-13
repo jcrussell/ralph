@@ -12,6 +12,7 @@ Hooks are executable scripts under `.ralph/hooks/`. Any language; just `chmod +x
 └── states/
     ├── clean/{enter,exit,gate}
     ├── dirty/{enter,exit,gate}
+    ├── revert/{enter,exit,gate}
     └── review/{enter,exit,gate}
 ```
 
@@ -19,25 +20,21 @@ Names are single verbs (`enter`, `exit`, `gate`) — not `on_enter`/`on_exit`.
 
 ## Lifecycle per iteration
 
-```
-selectNextState() ──► [enter hook]  ──► [pre-iteration hook]
-                                          │
-                                          ▼
-                            render prompt + run runner
-                                          │
-                                          ▼
-                                    [gate hook]
-                                          │
-                                          ▼
-                                    write iteration record
-                                          │
-                                          ▼
-                              [post-iteration hook]
-                                          │
-                                          ▼
-                              selectNextState()
-                                          │
-                              if state changed: [exit hook]
+```mermaid
+flowchart TD
+  A[SelectNextState] --> B{state changed?}
+  B -->|yes| C["states/&lt;state&gt;/enter"]
+  B -->|no| D[pre-iteration]
+  C --> D
+  D --> E[render prompt + run runner]
+  E --> F["states/&lt;state&gt;/gate"]
+  F --> G[write iteration record]
+  G --> H[post-iteration]
+  H --> I[SelectNextState]
+  I --> J{state changing?}
+  J -->|yes| K["states/&lt;prev&gt;/exit"]
+  J -->|no| A
+  K --> A
 ```
 
 ## Hook contracts
