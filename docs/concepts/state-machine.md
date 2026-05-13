@@ -2,6 +2,33 @@
 
 The FSM is defined in `internal/fsm/`. Topology is fixed in the binary; `.ralph/` customizes prompts and hooks per state, never the topology.
 
+## Topology
+
+```mermaid
+stateDiagram-v2
+  [*] --> start
+  start --> clean
+  start --> dirty
+  start --> review
+  start --> done
+  clean --> clean
+  clean --> dirty
+  clean --> done
+  clean --> failed
+  dirty --> clean
+  dirty --> dirty
+  dirty --> revert
+  dirty --> failed
+  revert --> clean
+  review --> review
+  review --> done
+  review --> failed
+  done --> [*]
+  failed --> [*]
+```
+
+Render this against a real run with `ralph fsm graph` — that overlays observed edge counts from `transitions.jsonl`.
+
 ## States
 
 | State            | Kind     | What it means                                                                              |
@@ -18,23 +45,22 @@ There is no `idle` state. A state with no prompt and no hook is just a function 
 
 ## Routing
 
-After every iteration, `selectNextState(ctx)` evaluates predicates in order and returns the next state. Pseudocode (real source: `internal/fsm/select.go`):
+After every iteration, `fsm.SelectNextState(ctx, in)` evaluates predicates in order and returns the next `Outcome`. Real source: `internal/fsm/select.go`. The eight-step decision tree:
 
 ```
-if terminal_runner_failure                                              -> failed{<mode>}
-if budget_exhausted                                                     -> failed{Budget}
-if caps_exceeded                                                        -> done{IterCap}
-
-if review_mode_on:
-    if review_queue_empty && git_clean                                  -> done{QueueEmpty}
-    return review
-
-if dirty_streak_exceeded                                                -> revert
-if git_dirty                                                            -> dirty
-if bd_ready_count(unscoped) == 0 && bd_in_progress_count == 0 && git_clean
-                                                                        -> done{QueueEmpty}
-return clean
+1. RunnerFailure ∈ {auth, budget, runner_terminal}  -> failed{<reason>}
+2. BudgetExhausted                                  -> failed{budget}
+3. CapsExceeded                                     -> done{iter_cap}
+4. ReviewMode:
+     if ReviewQueueEmpty && GitClean                -> done{queue_empty}
+     else                                           -> review
+5. DirtyStreakExceeded                              -> revert
+6. GitDirty                                         -> dirty
+7. bd_ready==0 && bd_in_progress==0 && GitClean     -> done{queue_empty}
+8. otherwise                                        -> clean
 ```
+
+`RunnerFailure` is a `fsm.Reason` — the loop maps `internal/runner.Mode` (auth, budget, dead_session-after-threshold) to a Reason before calling `SelectNextState`. This keeps `internal/fsm` independent of `internal/runner`.
 
 Notes on ordering:
 
@@ -47,26 +73,26 @@ Notes on ordering:
 
 All predicates are pure Go functions in `internal/fsm/predicates.go`:
 
-- `git_clean(ctx)` / `git_dirty(ctx)` — working-tree status, excluding untracked.
-- `bd_ready_count(ctx, label)` — `len(bd ready -l <label> --json)`. Empty label = unscoped.
-- `bd_in_progress_count(ctx, label)` — `len(bd list --status in_progress -l <label> --json)`.
-- `review_queue_empty(ctx)` — `bd_ready_count(ctx, "review:"+branch) == 0 && bd_in_progress_count(ctx, "review:"+branch) == 0`.
-- `dirty_streak_exceeded(ctx)` — `fsm.consecutive_dirty >= [backoff] dirty_revert_threshold`.
-- `caps_exceeded(ctx)` — `fsm.iter >= [loop] max_iterations`.
-- `budget_exhausted(ctx)` — cost or wallclock cap exceeded.
-- `terminal_runner_failure(ctx)` — runner reports `auth_error` or claude-side `budget_exhausted`.
-- `review_mode_on(ctx)` — `fsm.review_mode` flag, set by `ralph review`.
+- `GitClean(ctx, repo)` / `GitDirty(ctx, repo)` — working-tree status, excluding untracked. Thin wrappers over `internal/git.Clean`.
+- `BDReadyCount(ctx, bd, label)` — `len(bd ready -l <label> --json)`. Empty label = unscoped.
+- `BDInProgressCount(ctx, bd, label)` — `len(bd list --status in_progress -l <label> --json)`.
+- `ReviewQueueEmpty(ctx, bd, branch)` — `BDReadyCount(_, "review:"+branch) == 0 && BDInProgressCount(_, "review:"+branch) == 0`.
+- `DirtyStreakExceeded(fsm, cfg)` — `fsm.ConsecutiveDirty >= cfg.Backoff.DirtyRevertThreshold` (zero threshold disables).
+- `CapsExceeded(fsm, cfg)` — `fsm.Iter >= cfg.Loop.MaxIterations` (zero disables).
+- `BudgetExhausted(fsm, cfg)` — cost or wallclock cap exceeded (zero disables each).
+
+Terminal runner failure is *not* a predicate — it's a `fsm.Reason` the loop passes into `RouteInput.RunnerFailure` after classifying the runner session via `internal/runner.Classify`.
 
 ## Counters
 
-In `internal/fsm/counters.go`:
+In `internal/fsm/counters.go`. The loop calls `ObserveTransition(next)` *before* mutating `f.State`, so the "from" side reads the current state:
 
-- `iter` increments once per loop iteration.
-- `consecutive_dirty` increments on `* → dirty`, resets on `* → clean` or `* → revert`.
+- `iter` increments once per loop iteration (`BumpIter`).
+- `consecutive_dirty` increments on `* → dirty`, resets on `* → clean` or `* → revert`. Other transitions leave it unchanged.
 
 ## Persistence
 
-`state/fsm.json` records: current state + reason, counters, review fields, cumulative cost/wallclock. Survives orchestrator restarts. `ralph run` resumes from it unless `--fresh` is passed.
+`state/fsm.json` records: schema version, current state + reason, counters, review fields, cumulative cost/wallclock, last gate result. Survives orchestrator restarts. `ralph run` resumes from it unless `--fresh` is passed. Writes are atomic (temp-in-same-dir + fsync + rename) and schema-versioned — a newer file is rejected with `fsm.ErrSchemaTooNew`.
 
 ## The review state carries its own routing logic
 
