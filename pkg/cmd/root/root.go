@@ -2,6 +2,7 @@ package root
 
 import (
 	"github.com/jcrussell/ralph/pkg/cmd/doctor"
+	fsmcmd "github.com/jcrussell/ralph/pkg/cmd/fsm"
 	"github.com/jcrussell/ralph/pkg/cmd/hook"
 	"github.com/jcrussell/ralph/pkg/cmd/initcmd"
 	"github.com/jcrussell/ralph/pkg/cmd/logs"
@@ -36,6 +37,7 @@ func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 	}
 
 	addTo(doctor.NewCmdDoctor(f, nil), "setup")
+	addTo(fsmcmd.NewCmdFSM(f, nil, nil), "obs")
 	addTo(hook.NewCmdHook(f, nil), "setup")
 	addTo(initcmd.NewCmdInit(f, nil), "setup")
 	addTo(logs.NewCmdLogs(f, nil), "obs")
