@@ -1,3 +1,6 @@
+// Package root assembles the cobra command tree for ralph.
+//
+//go:generate go run ../../../tools/gendocs ../../../docs/reference
 package root
 
 import (
