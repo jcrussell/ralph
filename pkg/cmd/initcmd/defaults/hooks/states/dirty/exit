@@ -1,0 +1,3 @@
+#!/bin/sh
+# states/dirty/exit
+exit 0

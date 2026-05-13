@@ -1,0 +1,213 @@
+// Package logs implements `ralph logs`: raw access to the JSONL
+// iteration stream at .ralph/state/logs/summary.jsonl.
+package logs
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/jcrussell/ralph/pkg/cmdutil"
+	"github.com/spf13/cobra"
+)
+
+const summaryRel = ".ralph/state/logs/summary.jsonl"
+
+type Options struct {
+	F *cmdutil.Factory
+
+	Iter int  // 0 = all; >0 = single iter
+	Tail bool // follow appends
+	JSON bool // raw JSONL instead of pretty narrative
+
+	// Test seam: override the poll cadence in --tail mode.
+	pollInterval time.Duration
+}
+
+func NewCmdLogs(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
+	opts := &Options{F: f, pollInterval: 200 * time.Millisecond}
+	cmd := &cobra.Command{
+		Use:   "logs",
+		Short: "Stream the per-iteration log",
+		Long: `Reads .ralph/state/logs/summary.jsonl.
+Default: one narrative line per iteration.
+--iter N selects a single record (pretty JSON).
+--tail follows appends until interrupted.
+--json emits raw JSONL.`,
+		RunE: func(c *cobra.Command, args []string) error {
+			if opts.Iter < 0 {
+				return cmdutil.FlagErrorf("--iter must be non-negative")
+			}
+			if opts.Iter > 0 && opts.Tail {
+				return cmdutil.FlagErrorf("--iter and --tail are mutually exclusive")
+			}
+			if runF != nil {
+				return runF(opts)
+			}
+			return run(c.Context(), opts)
+		},
+	}
+	cmd.Flags().IntVar(&opts.Iter, "iter", 0, "only print the record with this iter")
+	cmd.Flags().BoolVar(&opts.Tail, "tail", false, "follow new records as they're appended")
+	cmd.Flags().BoolVar(&opts.JSON, "json", false, "emit raw JSONL")
+	return cmd
+}
+
+func run(ctx context.Context, opts *Options) error {
+	repo, err := opts.F.RepoRoot()
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(repo, summaryRel)
+	if opts.Tail {
+		return tailFile(ctx, path, opts)
+	}
+	return scanFile(path, opts)
+}
+
+func scanFile(path string, opts *Options) error {
+	f, err := os.Open(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("logs: no records at %s", path)
+	}
+	if err != nil {
+		return fmt.Errorf("logs: open %s: %w", path, err)
+	}
+	defer f.Close()
+	return emit(f, opts)
+}
+
+func emit(r io.Reader, opts *Options) error {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		if err := emitLine(line, opts); err != nil {
+			return err
+		}
+	}
+	return sc.Err()
+}
+
+func emitLine(line []byte, opts *Options) error {
+	rec, err := decode(line)
+	if err != nil {
+		// Skip unparseable lines but surface to ErrOut so they're not
+		// lost.
+		fmt.Fprintf(opts.F.IOStreams.ErrOut, "logs: skip malformed line: %v\n", err)
+		return nil
+	}
+	if opts.Iter > 0 && rec.Iter != opts.Iter {
+		return nil
+	}
+	switch {
+	case opts.JSON:
+		fmt.Fprintf(opts.F.IOStreams.Out, "%s\n", line)
+	case opts.Iter > 0:
+		// Single-record mode: pretty JSON.
+		pretty, err := json.MarshalIndent(rec.raw, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(opts.F.IOStreams.Out, "%s\n", pretty)
+	default:
+		fmt.Fprintln(opts.F.IOStreams.Out, formatNarrative(rec))
+	}
+	return nil
+}
+
+// record is the slice of summary.jsonl we read. Unknown fields are
+// preserved in raw.
+type record struct {
+	Iter      int    `json:"iter"`
+	State     string `json:"state"`
+	PrevState string `json:"prev_state,omitempty"`
+	Narrative string `json:"narrative,omitempty"`
+
+	raw map[string]any
+}
+
+func decode(line []byte) (record, error) {
+	var raw map[string]any
+	if err := json.Unmarshal(line, &raw); err != nil {
+		return record{}, err
+	}
+	var rec record
+	if err := json.Unmarshal(line, &rec); err != nil {
+		return record{}, err
+	}
+	rec.raw = raw
+	return rec, nil
+}
+
+func formatNarrative(rec record) string {
+	if rec.Narrative != "" {
+		return fmt.Sprintf("iter %04d  %s", rec.Iter, rec.Narrative)
+	}
+	return fmt.Sprintf("iter %04d  %s", rec.Iter, rec.State)
+}
+
+// tailFile prints the entire file once, then polls for appends until
+// ctx is canceled. KISS — simple seek+sleep loop, no inotify.
+func tailFile(ctx context.Context, path string, opts *Options) error {
+	f, err := os.Open(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		// File may not exist yet; create-and-wait.
+		f, err = waitForFile(ctx, path, opts.pollInterval)
+		if err != nil {
+			return err
+		}
+	} else if err != nil {
+		return fmt.Errorf("logs: open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	rdr := bufio.NewReader(f)
+	for {
+		line, err := rdr.ReadBytes('\n')
+		if len(line) > 0 {
+			if e := emitLine(bytes.TrimSpace(line), opts); e != nil {
+				return e
+			}
+		}
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, io.EOF) {
+			return fmt.Errorf("logs: read %s: %w", path, err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(opts.pollInterval):
+		}
+	}
+}
+
+func waitForFile(ctx context.Context, path string, every time.Duration) (*os.File, error) {
+	for {
+		f, err := os.Open(path)
+		if err == nil {
+			return f, nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("logs: open %s: %w", path, err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(every):
+		}
+	}
+}

@@ -1,0 +1,33 @@
+# ralph configuration. Defaults are documented in internal/config.
+# Empty file = use all defaults.
+
+[loop]
+# max_iterations = 30
+# session_timeout_secs = 3600
+# memory_limit_bytes = "7G"
+# sleep_between_secs = 5
+
+[runner]
+# command = "claude"
+# args = ["--dangerously-skip-permissions", "--output-format=json"]
+# model = "opus"
+
+[gate]
+# timeout_secs = 600
+# soft_fail = true
+# run_when = "commits-only"
+
+[backoff]
+# dirty_revert_threshold = 3
+# dead_session_threshold = 3
+# unknown_secs = 30
+# oom_secs = 120
+# timeout_secs = 60
+# rate_limit_default = 900
+
+[budget]
+# max_cost_usd = 0       # 0 = unlimited
+# max_wallclock_secs = 0 # 0 = unlimited
+
+[review]
+# base_branch = "main"

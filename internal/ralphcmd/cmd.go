@@ -34,6 +34,10 @@ func Run(args []string) int {
 		fmt.Fprintln(f.IOStreams.ErrOut, err)
 		return 2
 	default:
+		var exit *cmdutil.ExitCodeError
+		if errors.As(err, &exit) {
+			return exit.Code
+		}
 		fmt.Fprintln(f.IOStreams.ErrOut, "error:", err)
 		return 1
 	}

@@ -1,0 +1,3 @@
+#!/bin/sh
+# states/clean/exit
+exit 0

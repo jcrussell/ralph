@@ -2,6 +2,12 @@ package root
 
 import (
 	"github.com/jcrussell/ralph/pkg/cmd/doctor"
+	"github.com/jcrussell/ralph/pkg/cmd/hook"
+	"github.com/jcrussell/ralph/pkg/cmd/initcmd"
+	"github.com/jcrussell/ralph/pkg/cmd/logs"
+	"github.com/jcrussell/ralph/pkg/cmd/prompt"
+	"github.com/jcrussell/ralph/pkg/cmd/report"
+	"github.com/jcrussell/ralph/pkg/cmd/trace"
 	"github.com/jcrussell/ralph/pkg/cmd/version"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 	"github.com/spf13/cobra"
@@ -29,6 +35,12 @@ func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 	}
 
 	addTo(doctor.NewCmdDoctor(f, nil), "setup")
+	addTo(hook.NewCmdHook(f, nil), "setup")
+	addTo(initcmd.NewCmdInit(f, nil), "setup")
+	addTo(logs.NewCmdLogs(f, nil), "obs")
+	addTo(prompt.NewCmdPrompt(f, nil), "setup")
+	addTo(report.NewCmdReport(f, nil), "obs")
+	addTo(trace.NewCmdTrace(f, nil), "obs")
 	addTo(version.NewCmdVersion(f, nil), "info")
 
 	return root

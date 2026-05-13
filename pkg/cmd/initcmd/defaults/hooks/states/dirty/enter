@@ -1,0 +1,3 @@
+#!/bin/sh
+# states/dirty/enter
+exit 0
