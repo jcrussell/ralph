@@ -23,6 +23,7 @@ Prompts and hooks customize behavior *within* states. The state topology is fixe
 - **[hooks](docs/concepts/hooks.md)** — git-style executable scripts that slot into state lifecycle events.
 - **[prompts](docs/concepts/prompts.md)** — templated markdown per state, with optional `_header.md` and `_footer.md`.
 - **[bd integration](docs/concepts/bd-integration.md)** — why `bd` is first-class and how the orchestrator uses it.
+- **Design decisions** — inherited from [byob-go-cli](https://github.com/jcrussell/byob-go-cli); browse with `bd list --type=decision`.
 
 ## Reference
 

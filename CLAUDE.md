@@ -50,20 +50,28 @@ bd close <id>         # Complete work
 <!-- END BEADS INTEGRATION -->
 
 
-## Build & Test
-
-_Add your build and test commands here_
+## Build & test
 
 ```bash
-# Example:
-# npm install
-# npm test
+make            # see targets
+go run ./cmd/ralph fsm graph     # smoke
 ```
 
-## Architecture Overview
+Pure Go (`CGO_ENABLED=0`). Tests land with code in the same change — no deferral.
 
-_Add a brief overview of your project architecture_
+## Architecture
 
-## Conventions & Patterns
+See [README.md](./README.md). Project-specific rules and design conventions live in `bd memories` — run `bd memories <keyword>` to consult.
 
-_Add your project-specific conventions here_
+## Decision discovery — before designing
+
+This repo's `bd` carries architectural decisions seeded from [byob-go-cli](https://github.com/jcrussell/byob-go-cli). Before writing code in a new area, run:
+
+```bash
+bd list --type=decision         # one-time orientation
+bd search byob-<area-keyword>   # before each design step
+```
+
+Examples: editing `pkg/cmd/foo/` → `bd search byob-command-shape`. Editing `internal/config/` → `bd search byob-config`. Skip the search only if you know the area has no relevant byob decision.
+
+Deliberate deviation: `byob-storage` (ralph uses bd + JSONL, not SQL). See `bd memories storage-rules`.
