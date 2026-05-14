@@ -13,6 +13,7 @@ import (
 	"github.com/jcrussell/ralph/internal/fsm"
 	"github.com/jcrussell/ralph/internal/lock"
 	"github.com/jcrussell/ralph/internal/runner"
+	"github.com/jcrussell/ralph/pkg/iostreams"
 )
 
 // Start state with an empty bd queue + clean tree routes immediately
@@ -199,6 +200,78 @@ func TestRun_TerminalFailureFiresFailureHookAndIncident(t *testing.T) {
 	incidents, _ := filepath.Glob(filepath.Join(repo, ".ralph", "state", "incidents", "*-terminal-failure.md"))
 	if len(incidents) == 0 {
 		t.Errorf("no terminal-failure incident written")
+	}
+}
+
+// Pre-seeded terminal FSM + no --fresh: Run writes a notice to ErrOut,
+// returns ErrTerminalState, and creates no run dir (so we don't pollute
+// state/runs/ with empty manifests every time the user reruns).
+func TestRun_TerminalFSMWithoutFreshReturnsErrTerminalState(t *testing.T) {
+	repo := scaffoldRepo(t)
+	seedTerminalFSM(t, repo, fsm.Outcome{State: fsm.StateDone, Reason: fsm.ReasonQueueEmpty})
+
+	ios, bufs := iostreams.Test()
+	opts := baseOpts(t, repo)
+	opts.IO = ios
+	opts.Runner = &fakeRunner{Errs: []error{errors.New("runner must not be invoked on terminal-state no-op")}}
+	opts.Clock = newFakeClock()
+
+	_, err := Run(context.Background(), opts)
+	if !errors.Is(err, ErrTerminalState) {
+		t.Fatalf("err = %v, want ErrTerminalState", err)
+	}
+	notice := bufs.ErrOut.String()
+	if !strings.Contains(notice, "done{queue_empty}") {
+		t.Errorf("ErrOut missing outcome rendering; got %q", notice)
+	}
+	if !strings.Contains(notice, "--fresh") {
+		t.Errorf("ErrOut missing remediation hint; got %q", notice)
+	}
+	// No run dir should have been created — runs.Begin() must not run
+	// when the loop refuses to start.
+	matches, _ := filepath.Glob(filepath.Join(repo, ".ralph", "state", "runs", "*"))
+	if len(matches) != 0 {
+		t.Errorf("run dir created on terminal-state refusal: %v", matches)
+	}
+}
+
+// --fresh on a terminal FSM resets fsm.json to start and iterates normally.
+func TestRun_TerminalFSMWithFreshResetsAndIterates(t *testing.T) {
+	repo := scaffoldRepo(t)
+	seedTerminalFSM(t, repo, fsm.Outcome{State: fsm.StateFailed, Reason: fsm.ReasonRunnerTerminal})
+
+	opts := baseOpts(t, repo)
+	opts.Fresh = true
+	opts.Runner = &fakeRunner{}
+	opts.Clock = newFakeClock()
+	// Empty queue → start routes virtually to done{queue_empty}; nothing
+	// to assert about the runner, just that we exited cleanly from a
+	// fresh state instead of bouncing off the seeded terminal.
+
+	out, err := Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Run with --fresh on terminal FSM: %v", err)
+	}
+	if (out != fsm.Outcome{State: fsm.StateDone, Reason: fsm.ReasonQueueEmpty}) {
+		t.Errorf("outcome = %+v, want done{queue_empty}", out)
+	}
+	// The persisted FSM should not be the seeded failed{runner_terminal}
+	// — the reset wiped it and the loop re-terminated with its own
+	// outcome.
+	f := fsmAt(t, repo)
+	if f.Reason == fsm.ReasonRunnerTerminal {
+		t.Errorf("--fresh did not reset: persisted reason still %q", f.Reason)
+	}
+}
+
+// seedTerminalFSM writes fsm.json directly so a subsequent Run() loads
+// it pre-positioned in the given terminal Outcome.
+func seedTerminalFSM(t *testing.T, repo string, o fsm.Outcome) {
+	t.Helper()
+	f := fsm.Fresh()
+	f.Outcome = o
+	if err := f.Save(repo); err != nil {
+		t.Fatalf("seed terminal fsm: %v", err)
 	}
 }
 

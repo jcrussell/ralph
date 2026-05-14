@@ -13,7 +13,7 @@ func TestNewCmdRunMetadata(t *testing.T) {
 		t.Errorf("Use = %q, want %q", c.Use, "run")
 	}
 	for _, name := range []string{
-		"once", "skip-gate", "dry-run", "label",
+		"once", "skip-gate", "dry-run", "fresh", "label",
 		"max-iterations", "timeout", "memory",
 	} {
 		if c.Flags().Lookup(name) == nil {
@@ -35,6 +35,7 @@ func TestNewCmdRunFlagsCaptured(t *testing.T) {
 		"--once",
 		"--skip-gate",
 		"--dry-run",
+		"--fresh",
 		"--label=foo",
 		"--max-iterations=7",
 		"--timeout=30",
@@ -46,7 +47,7 @@ func TestNewCmdRunFlagsCaptured(t *testing.T) {
 	if got == nil {
 		t.Fatal("runF was not invoked")
 	}
-	if !got.Once || !got.SkipGate || !got.DryRun {
+	if !got.Once || !got.SkipGate || !got.DryRun || !got.Fresh {
 		t.Errorf("bool flags wrong: %+v", got)
 	}
 	if got.Label != "foo" {

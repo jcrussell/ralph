@@ -14,7 +14,7 @@ func TestNewCmdReviewMetadata(t *testing.T) {
 	}
 	for _, name := range []string{
 		"branch", "base", "pr", "no-label", "max-rounds",
-		"once", "skip-gate", "dry-run", "label",
+		"once", "skip-gate", "dry-run", "fresh", "label",
 	} {
 		if c.Flags().Lookup(name) == nil {
 			t.Errorf("--%s flag missing", name)
@@ -37,6 +37,7 @@ func TestNewCmdReviewFlagsCaptured(t *testing.T) {
 		"--once",
 		"--skip-gate",
 		"--dry-run",
+		"--fresh",
 		"--label=custom",
 	})
 	if err := c.Execute(); err != nil {
@@ -51,7 +52,7 @@ func TestNewCmdReviewFlagsCaptured(t *testing.T) {
 	if !got.NoLabel || got.MaxRounds != 10 {
 		t.Errorf("review-specific flags wrong: %+v", got)
 	}
-	if !got.Once || !got.SkipGate || !got.DryRun || got.Label != "custom" {
+	if !got.Once || !got.SkipGate || !got.DryRun || !got.Fresh || got.Label != "custom" {
 		t.Errorf("shared flags wrong: %+v", got)
 	}
 }

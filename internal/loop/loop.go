@@ -35,11 +35,19 @@ type Options struct {
 	Once     bool
 	SkipGate bool
 	DryRun   bool
+	Fresh    bool
 
 	Runner Runner
 	BD     BDClient
 	Clock  Clock
 }
+
+// ErrTerminalState is returned by Run when fsm.json is already in a
+// terminal state (done{*} or failed{*}) and Options.Fresh is false. The
+// human-facing notice is written to Options.IO.ErrOut before the error
+// is returned, so command wrappers should map this to cmdutil.ErrSilent
+// (silent exit, non-zero code) rather than printing again.
+var ErrTerminalState = errors.New("loop: fsm is in terminal state without --fresh")
 
 // runContext is the per-Run scratch space passed to iteration helpers.
 // Unexported because nothing outside the loop package constructs it.
@@ -115,10 +123,28 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 	if err != nil {
 		return fsm.Outcome{}, fmt.Errorf("loop: load fsm: %w", err)
 	}
+	// --fresh resets persisted state to start before any other handling,
+	// so it composes with ReviewMode (review --fresh re-enters review
+	// mode from a fresh FSM). Save immediately so an early crash doesn't
+	// leave the stale terminal state on disk.
+	if opts.Fresh {
+		f = fsm.Fresh()
+		if err := f.Save(opts.Repo); err != nil {
+			return fsm.Outcome{}, fmt.Errorf("loop: reset fsm: %w", err)
+		}
+	}
 	if opts.ReviewMode {
 		f.ReviewMode = true
 		f.ReviewBranch = opts.ReviewBranch
 		f.ReviewBase = opts.ReviewBase
+	}
+	// Refuse to silently no-op against a pre-existing terminal FSM. Done
+	// before runs.Begin so no zombie run dir is created.
+	if f.Outcome.State.Terminal() {
+		fmt.Fprintf(opts.IO.ErrOut,
+			"ralph: fsm is in terminal state %s; pass --fresh to reset, or inspect .ralph/state/fsm.json\n",
+			f.Outcome)
+		return fsm.Outcome{}, ErrTerminalState
 	}
 
 	// Begin a new run; Finalize is deferred so a panic or early error

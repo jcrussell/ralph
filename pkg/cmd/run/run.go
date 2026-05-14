@@ -7,6 +7,7 @@ package run
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jcrussell/ralph/internal/config"
 	"github.com/jcrussell/ralph/internal/loop"
@@ -21,6 +22,7 @@ type Options struct {
 	Once     bool
 	SkipGate bool
 	DryRun   bool
+	Fresh    bool
 	Label    string
 
 	MaxIterations  int    // 0 = use config
@@ -66,6 +68,7 @@ and exit 1.`,
 	cmd.Flags().BoolVar(&opts.Once, "once", false, "run one iteration then exit")
 	cmd.Flags().BoolVar(&opts.SkipGate, "skip-gate", false, "skip the per-state gate hook")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "render prompts and route states without invoking the runner")
+	cmd.Flags().BoolVar(&opts.Fresh, "fresh", false, "reset fsm.json before starting (use when the prior run reached a terminal state)")
 	cmd.Flags().StringVar(&opts.Label, "label", "", "iteration label recorded in summary.jsonl")
 	cmd.Flags().IntVar(&opts.MaxIterations, "max-iterations", 0, "override [loop] max_iterations (0 = config)")
 	cmd.Flags().IntVar(&opts.SessionTimeout, "timeout", 0, "override [loop] session_timeout_secs (0 = config)")
@@ -92,8 +95,12 @@ func runRun(ctx context.Context, opts *Options) error {
 		Once:     opts.Once,
 		SkipGate: opts.SkipGate,
 		DryRun:   opts.DryRun,
+		Fresh:    opts.Fresh,
 	})
 	if err != nil {
+		if errors.Is(err, loop.ErrTerminalState) {
+			return cmdutil.ErrSilent
+		}
 		return err
 	}
 	if code := out.ExitCode(); code != 0 {

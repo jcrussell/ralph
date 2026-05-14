@@ -8,6 +8,7 @@ package review
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jcrussell/ralph/internal/config"
 	"github.com/jcrussell/ralph/internal/loop"
@@ -29,6 +30,7 @@ type Options struct {
 	Once     bool
 	SkipGate bool
 	DryRun   bool
+	Fresh    bool
 	Label    string
 }
 
@@ -79,6 +81,7 @@ not a hard dependency of ralph itself.`,
 	cmd.Flags().BoolVar(&opts.Once, "once", false, "run one iteration then exit")
 	cmd.Flags().BoolVar(&opts.SkipGate, "skip-gate", false, "skip the per-state gate hook")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "render prompts and route states without invoking the runner")
+	cmd.Flags().BoolVar(&opts.Fresh, "fresh", false, "reset fsm.json before starting (use when the prior run reached a terminal state)")
 	cmd.Flags().StringVar(&opts.Label, "label", "", "explicit iteration label (overrides the review:<branch> default)")
 	return cmd
 }
@@ -122,8 +125,12 @@ func runReview(ctx context.Context, opts *Options) error {
 		Once:         opts.Once,
 		SkipGate:     opts.SkipGate,
 		DryRun:       opts.DryRun,
+		Fresh:        opts.Fresh,
 	})
 	if err != nil {
+		if errors.Is(err, loop.ErrTerminalState) {
+			return cmdutil.ErrSilent
+		}
 		return err
 	}
 	if code := out.ExitCode(); code != 0 {
