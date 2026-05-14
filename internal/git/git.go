@@ -85,6 +85,27 @@ var shortstatRE = regexp.MustCompile(
 	`(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?`,
 )
 
+// CountCommits returns the number of commits in the range from..to.
+// Empty from is rejected; empty to defaults to HEAD. Used by the loop
+// to count agent-made commits per iteration.
+func CountCommits(ctx context.Context, repo, from, to string) (int, error) {
+	if strings.TrimSpace(from) == "" {
+		return 0, fmt.Errorf("git: CountCommits requires from")
+	}
+	if to == "" {
+		to = "HEAD"
+	}
+	out, err := run(ctx, repo, "rev-list", "--count", from+".."+to)
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, fmt.Errorf("git: rev-list --count: parse %q: %w", strings.TrimSpace(string(out)), err)
+	}
+	return n, nil
+}
+
 // DiffStat returns the short-stat between two revisions. Empty from/to
 // pass through to git, which then defaults to HEAD vs. the index.
 func DiffStat(ctx context.Context, repo, from, to string) (Stat, error) {

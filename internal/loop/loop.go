@@ -1,0 +1,264 @@
+package loop
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+
+	"github.com/jcrussell/ralph/internal/bd"
+	"github.com/jcrussell/ralph/internal/config"
+	"github.com/jcrussell/ralph/internal/fsm"
+	"github.com/jcrussell/ralph/internal/hooks"
+	ralphlog "github.com/jcrussell/ralph/internal/log"
+	"github.com/jcrussell/ralph/internal/lock"
+	"github.com/jcrussell/ralph/internal/runner"
+	"github.com/jcrussell/ralph/internal/runs"
+	"github.com/jcrussell/ralph/pkg/iostreams"
+)
+
+// Options configures one Run. Repo, Cfg, and IO are required; everything
+// else has a sensible zero value. Runner, BD, and Clock are test seams
+// — production callers leave them nil and Run constructs defaults.
+type Options struct {
+	Repo string
+	Cfg  *config.Config
+	IO   *iostreams.IOStreams
+
+	ReviewMode   bool
+	ReviewBranch string
+	ReviewBase   string
+
+	Label    string
+	Once     bool
+	SkipGate bool
+	DryRun   bool
+
+	Runner Runner
+	BD     BDClient
+	Clock  Clock
+}
+
+// runContext is the per-Run scratch space passed to iteration helpers.
+// Unexported because nothing outside the loop package constructs it.
+type runContext struct {
+	opts     Options
+	cfg      *config.Config
+	repo     string
+	io       *iostreams.IOStreams
+	log      *slog.Logger
+	fsm      *fsm.FSM
+	run      *runs.Run
+	sum      *ralphlog.JSONL
+	bdClient BDClient
+	runr     Runner
+	clock    Clock
+
+	// Per-iteration scratch (reset at the top of runIteration).
+	paths iterPaths
+
+	// Streaks the FSM doesn't track — owned by the loop.
+	consecFailures   int
+	deadStreak       int
+	lastEnteredState fsm.State
+	lastGateResult   string
+}
+
+// Run drives the FSM until a terminal outcome (done or failed). Run
+// returns the terminal Outcome it persisted. Errors are returned only
+// for infrastructure failures (lock contention, disk-full when
+// persisting, invalid options) — runner failures get routed through
+// the FSM, not returned here.
+func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
+	if err := validateOptions(&opts); err != nil {
+		return fsm.Outcome{}, err
+	}
+	if opts.Runner == nil {
+		opts.Runner = runner.New(opts.Cfg.Runner.Command, opts.Cfg.Runner.Args)
+	}
+	if opts.BD == nil {
+		opts.BD = bd.New("", opts.Repo)
+	}
+	if opts.Clock == nil {
+		opts.Clock = defaultClock{}
+	}
+
+	// Acquire the repo lock first — bail fast if another orchestrator
+	// is running. ErrHeld is surfaced via %w so callers can distinguish.
+	lockPath := filepath.Join(opts.Repo, ".ralph", "state", "pid.lock")
+	l, err := lock.Acquire(lockPath)
+	if err != nil {
+		return fsm.Outcome{}, fmt.Errorf("loop: acquire lock: %w", err)
+	}
+	defer func() { _ = l.Release() }()
+
+	// Open slog → orchestrator.log; warnings & errors go here.
+	logPath := filepath.Join(opts.Repo, ".ralph", "state", "logs", "orchestrator.log")
+	logger, logCloser, err := ralphlog.NewSlog(logPath, slog.LevelInfo)
+	if err != nil {
+		return fsm.Outcome{}, fmt.Errorf("loop: open orchestrator.log: %w", err)
+	}
+	defer func() { _ = logCloser.Close() }()
+
+	// Open summary.jsonl once for the whole run.
+	sumPath := filepath.Join(opts.Repo, ".ralph", "state", "logs", "summary.jsonl")
+	sum, err := ralphlog.OpenJSONL(sumPath)
+	if err != nil {
+		return fsm.Outcome{}, fmt.Errorf("loop: open summary.jsonl: %w", err)
+	}
+	defer func() { _ = sum.Close() }()
+
+	// Load FSM (or Fresh()) and apply review-mode setup.
+	f, err := fsm.Load(opts.Repo)
+	if err != nil {
+		return fsm.Outcome{}, fmt.Errorf("loop: load fsm: %w", err)
+	}
+	if opts.ReviewMode {
+		f.ReviewMode = true
+		f.ReviewBranch = opts.ReviewBranch
+		f.ReviewBase = opts.ReviewBase
+	}
+
+	// Begin a new run; Finalize is deferred so a panic or early error
+	// still stamps end_time + exit_outcome.
+	r, err := runs.Begin(opts.Repo)
+	if err != nil {
+		return fsm.Outcome{}, fmt.Errorf("loop: begin run: %w", err)
+	}
+	finalOutcome := f.Outcome
+	defer func() {
+		// Finalize requires a valid (terminal) outcome. If we exit
+		// early with a non-terminal state, synthesize a failed-runner
+		// outcome so the manifest is well-formed.
+		out := finalOutcome
+		if !out.State.Terminal() {
+			out = fsm.Outcome{State: fsm.StateFailed, Reason: fsm.ReasonRunnerTerminal}
+		}
+		if err := r.Finalize(out); err != nil {
+			logger.Error("runs.Finalize failed", "err", err)
+		}
+	}()
+
+	rc := &runContext{
+		opts:     opts,
+		cfg:      opts.Cfg,
+		repo:     opts.Repo,
+		io:       opts.IO,
+		log:      logger,
+		fsm:      f,
+		run:      r,
+		sum:      sum,
+		bdClient: opts.BD,
+		runr:     opts.Runner,
+		clock:    opts.Clock,
+	}
+
+	// Handle the virtual start state inline: route immediately without
+	// running the runner, hooks, or rendering a prompt.
+	if rc.fsm.Outcome.State == fsm.StateStart {
+		if err := handleStartState(ctx, rc); err != nil {
+			return rc.fsm.Outcome, err
+		}
+		finalOutcome = rc.fsm.Outcome
+	}
+
+	// Main loop — terminates when the FSM enters a terminal state, ctx
+	// is cancelled, or --once after one non-terminal iteration.
+	for !rc.fsm.Outcome.State.Terminal() {
+		if err := ctx.Err(); err != nil {
+			finalOutcome = rc.fsm.Outcome
+			return rc.fsm.Outcome, err
+		}
+		next, err := runIteration(ctx, rc)
+		if err != nil {
+			finalOutcome = next
+			return next, err
+		}
+		finalOutcome = next
+		if rc.opts.Once && !next.State.Terminal() {
+			return next, nil
+		}
+	}
+
+	// Terminal dispatch: failure hook fires on failed{}.
+	if rc.fsm.Outcome.State == fsm.StateFailed {
+		env := hooks.Env{
+			Repo:          rc.repo,
+			Iter:          rc.fsm.Iter,
+			State:         string(rc.fsm.Outcome.State),
+			FailureMode:   string(rc.fsm.Outcome.Reason), // best mapping we have post-routing
+			FailureReason: string(rc.fsm.Outcome.Reason),
+		}
+		if _, hErr := hooks.Run(ctx, hooks.GlobalPath(rc.repo, "failure"), env, nil); hErr != nil {
+			logger.Warn("failure hook error", "err", hErr)
+		}
+	}
+	return rc.fsm.Outcome, nil
+}
+
+// handleStartState routes out of the virtual start state. No runner,
+// no hooks, no prompt — just one SelectNextState call.
+func handleStartState(ctx context.Context, rc *runContext) error {
+	prev := rc.fsm.Outcome
+	next, err := fsm.SelectNextState(ctx, fsm.RouteInput{
+		FSM:  rc.fsm,
+		Cfg:  rc.cfg,
+		BD:   rc.bdClient,
+		Repo: rc.repo,
+	})
+	if err != nil {
+		return fmt.Errorf("loop: start route: %w", err)
+	}
+	rc.fsm.ObserveTransition(next.State)
+	rc.fsm.Outcome = next
+	if err := rc.fsm.Save(rc.repo); err != nil {
+		return fmt.Errorf("loop: start save: %w", err)
+	}
+	now := rc.clock.Now().UTC()
+	if err := rc.run.AppendTransition(runs.Transition{
+		Ts:     now,
+		Iter:   rc.fsm.Iter,
+		From:   string(prev.State),
+		To:     string(next.State),
+		Reason: string(next.Reason),
+	}); err != nil {
+		rc.log.Error("start: append transition", "err", err)
+	}
+	return nil
+}
+
+// validateOptions enforces the byob-input-validation.5 contract:
+// Options gets vetted before any side effect (lock, run dir, hooks).
+func validateOptions(opts *Options) error {
+	if opts == nil {
+		return errors.New("loop: nil Options")
+	}
+	if opts.Repo == "" {
+		return errors.New("loop: Options.Repo is required")
+	}
+	if !filepath.IsAbs(opts.Repo) {
+		return fmt.Errorf("loop: Options.Repo must be absolute, got %q", opts.Repo)
+	}
+	if info, err := os.Stat(opts.Repo); err != nil {
+		return fmt.Errorf("loop: Options.Repo: %w", err)
+	} else if !info.IsDir() {
+		return fmt.Errorf("loop: Options.Repo is not a directory: %s", opts.Repo)
+	}
+	if opts.Cfg == nil {
+		return errors.New("loop: Options.Cfg is required")
+	}
+	if opts.IO == nil {
+		return errors.New("loop: Options.IO is required")
+	}
+	if opts.ReviewMode {
+		if opts.ReviewBranch == "" {
+			return errors.New("loop: ReviewMode requires ReviewBranch")
+		}
+		if opts.ReviewBranch == opts.ReviewBase {
+			return fmt.Errorf("loop: ReviewBranch %q must differ from ReviewBase", opts.ReviewBranch)
+		}
+	}
+	return nil
+}

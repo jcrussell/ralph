@@ -200,6 +200,46 @@ func TestDiffStatEmptyWhenNoChanges(t *testing.T) {
 	}
 }
 
+func TestCountCommits(t *testing.T) {
+	repo := newRepo(t)
+	ctx := context.Background()
+	from, err := HeadSHA(ctx, repo)
+	if err != nil {
+		t.Fatalf("HeadSHA: %v", err)
+	}
+
+	// Zero new commits since `from`.
+	got, err := CountCommits(ctx, repo, from, "HEAD")
+	if err != nil {
+		t.Fatalf("CountCommits zero: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("CountCommits zero: got %d, want 0", got)
+	}
+
+	// Two new commits.
+	runGit(t, repo, "commit", "--allow-empty", "-q", "-m", "one")
+	runGit(t, repo, "commit", "--allow-empty", "-q", "-m", "two")
+	got, err = CountCommits(ctx, repo, from, "HEAD")
+	if err != nil {
+		t.Fatalf("CountCommits two: %v", err)
+	}
+	if got != 2 {
+		t.Errorf("CountCommits two: got %d, want 2", got)
+	}
+
+	// Empty `to` defaults to HEAD.
+	got, err = CountCommits(ctx, repo, from, "")
+	if err != nil || got != 2 {
+		t.Errorf("CountCommits empty-to: got %d err %v, want 2 nil", got, err)
+	}
+
+	// Empty `from` is an error.
+	if _, err := CountCommits(ctx, repo, "", "HEAD"); err == nil {
+		t.Error("CountCommits empty-from: nil err, want failure")
+	}
+}
+
 func TestRunErrorIncludesStderr(t *testing.T) {
 	// Run against a non-git directory.
 	tmp := t.TempDir()
