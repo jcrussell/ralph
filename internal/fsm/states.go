@@ -96,6 +96,17 @@ func (o Outcome) String() string {
 	return fmt.Sprintf("%s{%s}", o.State, o.Reason)
 }
 
+// ExitCode is the process exit code a terminal outcome maps to: 0 for
+// done{*}, 1 for failed{*}. Non-terminal outcomes also return 0 — they
+// shouldn't reach an exit-mapping site in production, and a permissive
+// zero keeps test fixtures simple.
+func (o Outcome) ExitCode() int {
+	if o.State == StateFailed {
+		return 1
+	}
+	return 0
+}
+
 // Validate reports an error if o is malformed: an unknown state, a
 // terminal state missing a reason, a non-terminal state carrying one,
 // or a reason that doesn't belong to its state.

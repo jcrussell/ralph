@@ -86,6 +86,29 @@ func TestOutcomeString(t *testing.T) {
 	}
 }
 
+func TestOutcomeExitCode(t *testing.T) {
+	cases := []struct {
+		o    Outcome
+		want int
+	}{
+		// Terminal done{*} → 0.
+		{Outcome{State: StateDone, Reason: ReasonQueueEmpty}, 0},
+		{Outcome{State: StateDone, Reason: ReasonIterCap}, 0},
+		// Terminal failed{*} → 1.
+		{Outcome{State: StateFailed, Reason: ReasonBudget}, 1},
+		{Outcome{State: StateFailed, Reason: ReasonAuth}, 1},
+		{Outcome{State: StateFailed, Reason: ReasonRunnerTerminal}, 1},
+		// Non-terminal — permissive zero by design.
+		{Outcome{State: StateClean}, 0},
+		{Outcome{State: StateReview}, 0},
+	}
+	for _, c := range cases {
+		if got := c.o.ExitCode(); got != c.want {
+			t.Errorf("Outcome %s: ExitCode() = %d, want %d", c.o, got, c.want)
+		}
+	}
+}
+
 func TestOutcomeValidate(t *testing.T) {
 	ok := []Outcome{
 		{State: StateStart},
