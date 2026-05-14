@@ -12,6 +12,7 @@ import (
 	"github.com/jcrussell/ralph/pkg/cmd/prompt"
 	"github.com/jcrussell/ralph/pkg/cmd/report"
 	"github.com/jcrussell/ralph/pkg/cmd/status"
+	"github.com/jcrussell/ralph/pkg/cmd/timeline"
 	"github.com/jcrussell/ralph/pkg/cmd/trace"
 	"github.com/jcrussell/ralph/pkg/cmd/version"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
@@ -47,6 +48,7 @@ func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 	addTo(prompt.NewCmdPrompt(f, nil), "setup")
 	addTo(report.NewCmdReport(f, nil), "obs")
 	addTo(status.NewCmdStatus(f, nil), "obs")
+	addTo(timeline.NewCmdTimeline(f, nil), "obs")
 	addTo(trace.NewCmdTrace(f, nil), "obs")
 	addTo(version.NewCmdVersion(f, nil), "info")
 
