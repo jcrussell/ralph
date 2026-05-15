@@ -141,7 +141,7 @@ func TestSnapshotAndDiff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot before: %v", err)
 	}
-	if _, ok := before.IDs[idA]; !ok {
+	if _, ok := before.Status[idA]; !ok {
 		t.Errorf("before missing %s", idA)
 	}
 
@@ -172,7 +172,7 @@ func TestSnapshotAndDiff(t *testing.T) {
 	if len(d.Opened) != 0 {
 		t.Errorf("Opened = %v, want empty", d.Opened)
 	}
-	if _, ok := after.IDs[idB]; !ok {
+	if _, ok := after.Status[idB]; !ok {
 		t.Errorf("after missing %s", idB)
 	}
 }

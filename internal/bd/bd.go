@@ -40,15 +40,13 @@ func (c *Client) bin() string {
 }
 
 // Issue is the slice of fields we read from `bd list/ready --json`.
-// Other fields are preserved in Raw for callers that need them.
 type Issue struct {
-	ID       string         `json:"id"`
-	Title    string         `json:"title"`
-	Status   string         `json:"status"`
-	Priority int            `json:"priority"`
-	Type     string         `json:"type,omitempty"`
-	Labels   []string       `json:"labels,omitempty"`
-	Raw      map[string]any `json:"-"`
+	ID       string   `json:"id"`
+	Title    string   `json:"title"`
+	Status   string   `json:"status"`
+	Priority int      `json:"priority"`
+	Type     string   `json:"type,omitempty"`
+	Labels   []string `json:"labels,omitempty"`
 }
 
 // Ready returns issues with no blockers, optionally filtered to a
@@ -163,7 +161,6 @@ func (c *Client) Remember(ctx context.Context, key, body string) error {
 // Diff produces opened/closed/created/deferred sets between two
 // snapshots taken before and after an iteration.
 type Snapshot struct {
-	IDs    map[string]Issue
 	Status map[string]string
 }
 
@@ -175,11 +172,9 @@ func (c *Client) Snapshot(ctx context.Context) (*Snapshot, error) {
 		return nil, err
 	}
 	s := &Snapshot{
-		IDs:    make(map[string]Issue, len(issues)),
 		Status: make(map[string]string, len(issues)),
 	}
 	for _, i := range issues {
-		s.IDs[i.ID] = i
 		s.Status[i.ID] = i.Status
 	}
 	return s, nil
@@ -199,10 +194,10 @@ type Diff struct {
 func DiffSnapshots(before, after *Snapshot) Diff {
 	d := Diff{}
 	if before == nil {
-		before = &Snapshot{IDs: map[string]Issue{}, Status: map[string]string{}}
+		before = &Snapshot{Status: map[string]string{}}
 	}
 	if after == nil {
-		after = &Snapshot{IDs: map[string]Issue{}, Status: map[string]string{}}
+		after = &Snapshot{Status: map[string]string{}}
 	}
 	for id, st := range after.Status {
 		old, existed := before.Status[id]
@@ -257,17 +252,9 @@ func (c *Client) runList(ctx context.Context, args []string) ([]Issue, error) {
 	if len(out) == 0 || bytes.Equal(out, []byte("null")) {
 		return nil, nil
 	}
-	// First decode into the typed slice; then re-decode into Raw maps
-	// alongside so callers needing untyped fields can have both.
 	var typed []Issue
 	if err := json.Unmarshal(out, &typed); err != nil {
 		return nil, fmt.Errorf("bd: parse %s: %w", strings.Join(args, " "), err)
-	}
-	var raws []map[string]any
-	if err := json.Unmarshal(out, &raws); err == nil && len(raws) == len(typed) {
-		for i := range typed {
-			typed[i].Raw = raws[i]
-		}
 	}
 	return typed, nil
 }

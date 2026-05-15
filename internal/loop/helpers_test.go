@@ -81,7 +81,7 @@ func (b *fakeBD) Snapshot(_ context.Context) (*bd.Snapshot, error) {
 	if b.Snap != nil {
 		return b.Snap, nil
 	}
-	return &bd.Snapshot{IDs: map[string]bd.Issue{}, Status: map[string]string{}}, nil
+	return &bd.Snapshot{Status: map[string]string{}}, nil
 }
 
 // fakeClock records Sleep durations and pins Now to a deterministic
