@@ -83,9 +83,6 @@ func (l *Lock) Release() error {
 	return nil
 }
 
-// Path returns the lockfile path.
-func (l *Lock) Path() string { return l.path }
-
 // PID returns the PID written to the lockfile.
 func (l *Lock) PID() int { return l.pid }
 
