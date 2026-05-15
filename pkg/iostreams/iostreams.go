@@ -60,5 +60,13 @@ func (s *IOStreams) IsStdoutTTY() bool { return s.stdoutIsTTY }
 // IsStderrTTY reports whether stderr was a TTY at construction time.
 func (s *IOStreams) IsStderrTTY() bool { return s.stderrIsTTY }
 
+// SetStdoutTTY overrides the stdout TTY flag and re-derives the color
+// scheme so callers that branch on either stay consistent. Intended for
+// tests that exercise TTY-adaptive renderers without a real terminal.
+func (s *IOStreams) SetStdoutTTY(v bool) {
+	s.stdoutIsTTY = v
+	s.cs = NewColorScheme(v && EnvAllowsColor())
+}
+
 // ColorScheme returns the color renderer attached to these streams.
 func (s *IOStreams) ColorScheme() *ColorScheme { return s.cs }

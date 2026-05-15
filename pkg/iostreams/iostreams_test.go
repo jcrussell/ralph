@@ -29,6 +29,39 @@ func TestTestStreamsDefaultToNonTTY(t *testing.T) {
 	}
 }
 
+func TestSetStdoutTTYRederivesColor(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	ios, _ := Test()
+	if ios.IsStdoutTTY() || ios.ColorScheme().Enabled() {
+		t.Fatalf("Test() defaults = (tty=%v, color=%v); want both false",
+			ios.IsStdoutTTY(), ios.ColorScheme().Enabled())
+	}
+	ios.SetStdoutTTY(true)
+	if !ios.IsStdoutTTY() {
+		t.Errorf("IsStdoutTTY() = false after SetStdoutTTY(true)")
+	}
+	if !ios.ColorScheme().Enabled() {
+		t.Errorf("ColorScheme().Enabled() = false after SetStdoutTTY(true)")
+	}
+	ios.SetStdoutTTY(false)
+	if ios.IsStdoutTTY() || ios.ColorScheme().Enabled() {
+		t.Errorf("after SetStdoutTTY(false): tty=%v color=%v; want both false",
+			ios.IsStdoutTTY(), ios.ColorScheme().Enabled())
+	}
+}
+
+func TestSetStdoutTTYHonorsNoColor(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	ios, _ := Test()
+	ios.SetStdoutTTY(true)
+	if !ios.IsStdoutTTY() {
+		t.Errorf("IsStdoutTTY() = false")
+	}
+	if ios.ColorScheme().Enabled() {
+		t.Errorf("ColorScheme().Enabled() = true with NO_COLOR=1; want false")
+	}
+}
+
 func TestSystemPopulatesAllStreams(t *testing.T) {
 	ios := System()
 	if ios.In == nil || ios.Out == nil || ios.ErrOut == nil {
