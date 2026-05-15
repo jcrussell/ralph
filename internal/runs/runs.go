@@ -329,7 +329,7 @@ func parseID(id string) (time.Time, error) {
 }
 
 func readManifest(dir string) (*Manifest, error) {
-	b, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	b, err := os.ReadFile(filepath.Join(dir, "manifest.json")) //nolint:gosec // dir is a per-run state dir built inside this package
 	if err != nil {
 		return nil, fmt.Errorf("runs: read manifest %s: %w", dir, err)
 	}
