@@ -22,20 +22,21 @@ Names are single verbs (`enter`, `exit`, `gate`) — not `on_enter`/`on_exit`.
 
 ```mermaid
 flowchart TD
-  A[SelectNextState] --> B{state changed?}
+  A[pre-iteration] --> B{state changed?}
   B -->|yes| C["states/&lt;state&gt;/enter"]
-  B -->|no| D[pre-iteration]
+  B -->|no| D[render prompt + run runner]
   C --> D
-  D --> E[render prompt + run runner]
-  E --> F["states/&lt;state&gt;/gate"]
-  F --> G[write iteration record]
-  G --> H[post-iteration]
-  H --> I[SelectNextState]
-  I --> J{state changing?}
-  J -->|yes| K["states/&lt;prev&gt;/exit"]
-  J -->|no| A
-  K --> A
+  D --> E["states/&lt;state&gt;/gate"]
+  E --> F[write iteration record]
+  F --> G[post-iteration]
+  G --> H[SelectNextState]
+  H --> I{state changing?}
+  I -->|yes| J["states/&lt;prev&gt;/exit"]
+  I -->|no| A
+  J --> A
 ```
+
+`pre-iteration` runs first so it can short-circuit the tick (non-zero exit → skip the runner). `enter` runs after, but only on entry into a new state.
 
 ## Hook contracts
 
