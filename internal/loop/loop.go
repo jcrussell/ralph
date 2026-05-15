@@ -167,14 +167,21 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 	}
 	finalOutcome := f.Outcome
 	defer func() {
-		// Finalize requires a valid (terminal) outcome. If we exit
-		// early with a non-terminal state, synthesize a failed-runner
-		// outcome so the manifest is well-formed.
-		out := finalOutcome
-		if !out.State.Terminal() {
-			out = fsm.Outcome{State: fsm.StateFailed, Reason: fsm.ReasonRunnerTerminal}
+		// Only record an ExitOutcome for runs that actually reached a
+		// terminal FSM state. --once and ctx-cancel exits stop mid-flight
+		// — synthesizing a failure here would mislabel them. The manifest
+		// still gets EndTime + aggregates so the run is well-formed.
+		var oc *fsm.Outcome
+		if finalOutcome.State.Terminal() {
+			v := finalOutcome
+			oc = &v
 		}
-		if err := r.Finalize(out); err != nil {
+		if err := r.Finalize(runs.FinalizeInput{
+			Outcome:                 oc,
+			TotalIters:              f.Iter,
+			CumulativeCostUSD:       f.CumulativeCostUSD,
+			CumulativeWallclockSecs: f.CumulativeWallclockSecs,
+		}); err != nil {
 			logger.Error("runs.Finalize failed", "err", err)
 		}
 	}()

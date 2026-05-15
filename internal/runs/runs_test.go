@@ -128,11 +128,24 @@ func TestFinalize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.AppendTransition(Transition{Iter: 1, From: "start", To: "clean"}); err != nil {
-		t.Fatal(err)
+	// Three transitions: state_counts should be {clean: 2, dirty: 1}.
+	for _, tr := range []Transition{
+		{Iter: 1, From: "start", To: "clean"},
+		{Iter: 2, From: "clean", To: "dirty"},
+		{Iter: 3, From: "dirty", To: "clean"},
+	} {
+		if aerr := r.AppendTransition(tr); aerr != nil {
+			t.Fatal(aerr)
+		}
 	}
 	out := fsm.Outcome{State: fsm.StateDone, Reason: fsm.ReasonQueueEmpty}
-	if err := r.Finalize(out); err != nil {
+	in := FinalizeInput{
+		Outcome:                 &out,
+		TotalIters:              3,
+		CumulativeCostUSD:       2.50,
+		CumulativeWallclockSecs: 600,
+	}
+	if err := r.Finalize(in); err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
 	m, _ := r.ReadManifest()
@@ -142,14 +155,75 @@ func TestFinalize(t *testing.T) {
 	if m.ExitOutcome == nil || *m.ExitOutcome != out {
 		t.Errorf("ExitOutcome = %v, want %v", m.ExitOutcome, out)
 	}
+	if m.TotalIters != 3 {
+		t.Errorf("TotalIters = %d, want 3", m.TotalIters)
+	}
+	if m.CumulativeCostUSD != 2.50 {
+		t.Errorf("CumulativeCostUSD = %v, want 2.50", m.CumulativeCostUSD)
+	}
+	if m.CumulativeWallclockSecs != 600 {
+		t.Errorf("CumulativeWallclockSecs = %d, want 600", m.CumulativeWallclockSecs)
+	}
+	wantCounts := map[string]int{"clean": 2, "dirty": 1}
+	if diff := cmp.Diff(wantCounts, m.StateCounts); diff != "" {
+		t.Errorf("StateCounts mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestFinalizePartialRunOmitsExitOutcome(t *testing.T) {
+	// --once exit (or ctx cancel) finishes the run mid-flight: nil
+	// Outcome means "no terminal verdict recorded" — not a failure.
+	repo := t.TempDir()
+	r, _ := Begin(repo)
+	if err := r.AppendTransition(Transition{Iter: 1, From: "start", To: "clean"}); err != nil {
+		t.Fatal(err)
+	}
+	in := FinalizeInput{
+		Outcome:           nil,
+		TotalIters:        1,
+		CumulativeCostUSD: 1.29,
+	}
+	if err := r.Finalize(in); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	m, _ := r.ReadManifest()
+	if m.EndTime == nil {
+		t.Fatal("EndTime nil after Finalize")
+	}
+	if m.ExitOutcome != nil {
+		t.Errorf("ExitOutcome = %v, want nil for partial run", *m.ExitOutcome)
+	}
+	if m.TotalIters != 1 || m.CumulativeCostUSD != 1.29 {
+		t.Errorf("aggregates not populated: %+v", m)
+	}
+	if m.StateCounts["clean"] != 1 {
+		t.Errorf("StateCounts = %v, want clean=1", m.StateCounts)
+	}
 }
 
 func TestFinalizeRejectsInvalidOutcome(t *testing.T) {
 	repo := t.TempDir()
 	r, _ := Begin(repo)
-	err := r.Finalize(fsm.Outcome{State: fsm.StateDone}) // missing reason
+	bad := fsm.Outcome{State: fsm.StateDone} // missing reason
+	err := r.Finalize(FinalizeInput{Outcome: &bad})
 	if err == nil {
 		t.Fatal("Finalize on invalid Outcome: nil err, want failure")
+	}
+}
+
+func TestFinalizeNoTransitionsYieldsEmptyCounts(t *testing.T) {
+	repo := t.TempDir()
+	r, _ := Begin(repo)
+	out := fsm.Outcome{State: fsm.StateDone, Reason: fsm.ReasonQueueEmpty}
+	if err := r.Finalize(FinalizeInput{Outcome: &out}); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	m, _ := r.ReadManifest()
+	if m.StateCounts == nil {
+		t.Fatal("StateCounts is nil")
+	}
+	if len(m.StateCounts) != 0 {
+		t.Errorf("StateCounts = %v, want empty", m.StateCounts)
 	}
 }
 

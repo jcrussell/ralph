@@ -230,20 +230,63 @@ func (r *Run) UpdateManifest(fn func(*Manifest)) error {
 	return writeManifest(r.dir, m)
 }
 
-// Finalize stamps the end time and exit outcome on the manifest, then
-// closes the transitions writer. Safe to call exactly once.
-func (r *Run) Finalize(out fsm.Outcome) error {
-	if err := out.Validate(); err != nil {
+// FinalizeInput bundles the run-level aggregates stamped onto the
+// manifest at end-of-run. Outcome is nil when the run stops without
+// reaching a terminal FSM state (e.g., --once exit after a non-terminal
+// iteration, or ctx cancellation); ExitOutcome stays absent in that
+// case. Iter / cost / wallclock are taken from the in-process FSM so
+// they reflect what actually ran.
+type FinalizeInput struct {
+	Outcome                 *fsm.Outcome
+	TotalIters              int
+	CumulativeCostUSD       float64
+	CumulativeWallclockSecs int
+}
+
+// Finalize stamps the end time, exit outcome, and run aggregates on the
+// manifest, then closes the transitions writer. StateCounts is derived
+// from transitions.jsonl by counting each .To occurrence. Safe to call
+// exactly once.
+func (r *Run) Finalize(in FinalizeInput) error {
+	if in.Outcome != nil {
+		if err := in.Outcome.Validate(); err != nil {
+			return fmt.Errorf("runs: finalize: %w", err)
+		}
+	}
+	counts, err := r.stateCounts()
+	if err != nil {
 		return fmt.Errorf("runs: finalize: %w", err)
 	}
 	now := time.Now().UTC()
 	if err := r.UpdateManifest(func(m *Manifest) {
 		m.EndTime = &now
-		m.ExitOutcome = &out
+		m.ExitOutcome = in.Outcome
+		m.TotalIters = in.TotalIters
+		m.CumulativeCostUSD = in.CumulativeCostUSD
+		m.CumulativeWallclockSecs = in.CumulativeWallclockSecs
+		m.StateCounts = counts
 	}); err != nil {
 		return err
 	}
 	return r.Close()
+}
+
+// stateCounts tallies the destination state of every transition. Empty
+// (or never-opened) transitions.jsonl yields an empty map, not nil, so
+// the manifest reads as `{}` rather than `null`.
+func (r *Run) stateCounts() (map[string]int, error) {
+	trs, err := r.ReadTransitions()
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int, len(trs))
+	for _, t := range trs {
+		if t.To == "" {
+			continue
+		}
+		counts[t.To]++
+	}
+	return counts, nil
 }
 
 // Close closes the transitions writer if it was opened. Safe to call
