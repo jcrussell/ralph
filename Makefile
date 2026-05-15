@@ -6,9 +6,9 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 LDFLAGS := -s -w \
-	-X github.com/jcrussell/ralph/pkg/cmd/version.Version=$(VERSION) \
-	-X github.com/jcrussell/ralph/pkg/cmd/version.Commit=$(COMMIT) \
-	-X github.com/jcrussell/ralph/pkg/cmd/version.Date=$(DATE)
+	-X github.com/jcrussell/ralph/internal/ralphcmd/build.Version=$(VERSION) \
+	-X github.com/jcrussell/ralph/internal/ralphcmd/build.Commit=$(COMMIT) \
+	-X github.com/jcrussell/ralph/internal/ralphcmd/build.Date=$(DATE)
 
 export CGO_ENABLED := 0
 

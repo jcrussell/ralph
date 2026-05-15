@@ -3,18 +3,12 @@ package version
 import (
 	"context"
 	"fmt"
-	"runtime/debug"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/jcrussell/ralph/internal/ralphcmd/build"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
-)
-
-// Set at build time via -ldflags; empty in `go run` / `go build` without flags.
-var (
-	Version = ""
-	Commit  = ""
-	Date    = ""
 )
 
 // Options is the three-part command shape's Options struct.
@@ -38,32 +32,22 @@ func NewCmdVersion(f *cmdutil.Factory, runF func(context.Context, *Options) erro
 }
 
 func versionRun(_ context.Context, opts *Options) error {
-	v, commit := Version, Commit
-	if v == "" || commit == "" {
-		if info, ok := debug.ReadBuildInfo(); ok {
-			if v == "" {
-				v = info.Main.Version
-			}
-			for _, s := range info.Settings {
-				if commit == "" && s.Key == "vcs.revision" {
-					commit = s.Value
-				}
-				if Date == "" && s.Key == "vcs.time" {
-					Date = s.Value
-				}
-			}
-		}
-	}
-	if v == "" {
-		v = "dev"
-	}
-	_, _ = fmt.Fprintf(opts.F.IOStreams.Out, "ralph %s", v)
-	if commit != "" {
-		_, _ = fmt.Fprintf(opts.F.IOStreams.Out, " (%s)", commit)
-	}
-	if Date != "" {
-		_, _ = fmt.Fprintf(opts.F.IOStreams.Out, " built %s", Date)
-	}
-	_, _ = fmt.Fprintln(opts.F.IOStreams.Out)
+	_, _ = fmt.Fprintln(opts.F.IOStreams.Out, format(build.Info()))
 	return nil
+}
+
+// format renders a single-line version banner. Sentinel-valued commit
+// and date are omitted so a bare `go run` shows just "ralph dev".
+// Separated from versionRun because build.Info is cached at process
+// scope (sync.OnceValue) and is not injectable from tests.
+func format(info build.BuildInfo) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "ralph %s", info.Version)
+	if info.Commit != build.CommitNone {
+		fmt.Fprintf(&b, " (%s)", info.Commit)
+	}
+	if info.Date != build.DateUnknown {
+		fmt.Fprintf(&b, " built %s", info.Date)
+	}
+	return b.String()
 }
