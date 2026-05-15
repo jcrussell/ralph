@@ -31,6 +31,11 @@ func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	// Route cobra's own help/usage/error output through IOStreams (per
+	// byob-iostreams.1). Cascades to subcommands via cobra's writer lookup.
+	root.SetIn(f.IOStreams.In)
+	root.SetOut(f.IOStreams.Out)
+	root.SetErr(f.IOStreams.ErrOut)
 	// Wrap pflag's flag-parse errors as *FlagError so the top-level
 	// runner maps them to exit 2. Cascades to subcommands via cobra's
 	// FlagErrorFunc lookup.
