@@ -37,7 +37,7 @@ func (o *Options) Validate() error {
 }
 
 // NewCmdStatus returns the cobra command for `ralph status`.
-func NewCmdStatus(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
+func NewCmdStatus(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
 	opts := &Options{F: f, Tail: 5}
 	cmd := &cobra.Command{
 		Use:   "status",
@@ -68,7 +68,7 @@ informational.`,
 				return err
 			}
 			if runF != nil {
-				return runF(opts)
+				return runF(c.Context(), opts)
 			}
 			return runStatus(c.Context(), opts)
 		},

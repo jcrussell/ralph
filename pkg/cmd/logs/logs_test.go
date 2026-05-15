@@ -149,7 +149,7 @@ func TestTailCancelsCleanly(t *testing.T) {
 
 func TestNewCmdLogsRejectsConflictingFlags(t *testing.T) {
 	f := &cmdutil.Factory{IOStreams: iostreams.System()}
-	cmd := NewCmdLogs(f, func(*Options) error { return nil })
+	cmd := NewCmdLogs(f, func(context.Context, *Options) error { return nil })
 	cmd.SetArgs([]string{"--iter", "1", "--tail"})
 	err := cmd.Execute()
 	if err == nil {

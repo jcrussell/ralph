@@ -1,6 +1,7 @@
 package version
 
 import (
+	"context"
 	"fmt"
 	"runtime/debug"
 
@@ -22,21 +23,21 @@ type Options struct {
 }
 
 // NewCmdVersion returns the cobra command for `ralph version`.
-func NewCmdVersion(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
+func NewCmdVersion(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
 	opts := &Options{F: f}
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print ralph version information",
 		RunE: func(c *cobra.Command, args []string) error {
 			if runF != nil {
-				return runF(opts)
+				return runF(c.Context(), opts)
 			}
-			return versionRun(opts)
+			return versionRun(c.Context(), opts)
 		},
 	}
 }
 
-func versionRun(opts *Options) error {
+func versionRun(_ context.Context, opts *Options) error {
 	v, commit := Version, Commit
 	if v == "" || commit == "" {
 		if info, ok := debug.ReadBuildInfo(); ok {

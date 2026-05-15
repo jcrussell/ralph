@@ -47,7 +47,7 @@ func (o *Options) Validate() error {
 }
 
 // NewCmdRun returns the cobra command for `ralph run`.
-func NewCmdRun(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
+func NewCmdRun(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
 	opts := &Options{F: f}
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -79,7 +79,7 @@ and exit 1.`,
 				return err
 			}
 			if runF != nil {
-				return runF(opts)
+				return runF(c.Context(), opts)
 			}
 			return runRun(c.Context(), opts)
 		},

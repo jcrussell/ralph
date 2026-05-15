@@ -42,7 +42,7 @@ func (o *Options) Validate() error {
 }
 
 // NewCmdPrompt returns the `ralph prompt` command tree.
-func NewCmdPrompt(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
+func NewCmdPrompt(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "prompt",
 		Short: "Inspect ralph prompts",
@@ -51,7 +51,7 @@ func NewCmdPrompt(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command 
 	return cmd
 }
 
-func newCmdShow(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
+func newCmdShow(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
 	opts := &Options{F: f}
 	cmd := &cobra.Command{
 		Use:   "show <state>",
@@ -66,7 +66,7 @@ wrapped with prompts/_header.md and prompts/_footer.md when present.
 				return err
 			}
 			if runF != nil {
-				return runF(opts)
+				return runF(c.Context(), opts)
 			}
 			return showRun(c.Context(), opts)
 		},

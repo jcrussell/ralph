@@ -48,7 +48,7 @@ func (o *Options) Validate() error {
 }
 
 // NewCmdReview returns the cobra command for `ralph review`.
-func NewCmdReview(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
+func NewCmdReview(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
 	opts := &Options{F: f}
 	cmd := &cobra.Command{
 		Use:   "review",
@@ -84,7 +84,7 @@ not a hard dependency of ralph itself.`,
 				return err
 			}
 			if runF != nil {
-				return runF(opts)
+				return runF(c.Context(), opts)
 			}
 			return runReview(c.Context(), opts)
 		},

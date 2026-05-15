@@ -1,6 +1,7 @@
 package run
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -37,7 +38,7 @@ func TestOptionsValidate(t *testing.T) {
 }
 
 func TestNewCmdRunMetadata(t *testing.T) {
-	c := NewCmdRun(&cmdutil.Factory{}, func(*Options) error { return nil })
+	c := NewCmdRun(&cmdutil.Factory{}, func(context.Context, *Options) error { return nil })
 	if c.Use != "run" {
 		t.Errorf("Use = %q, want %q", c.Use, "run")
 	}
@@ -56,7 +57,7 @@ func TestNewCmdRunMetadata(t *testing.T) {
 // flag round-trips into Options.
 func TestNewCmdRunFlagsCaptured(t *testing.T) {
 	var got *Options
-	c := NewCmdRun(&cmdutil.Factory{}, func(o *Options) error {
+	c := NewCmdRun(&cmdutil.Factory{}, func(_ context.Context, o *Options) error {
 		got = o
 		return nil
 	})

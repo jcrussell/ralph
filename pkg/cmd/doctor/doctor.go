@@ -60,7 +60,7 @@ type Options struct {
 }
 
 // NewCmdDoctor returns the cobra command for `ralph doctor`.
-func NewCmdDoctor(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
+func NewCmdDoctor(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
 	opts := &Options{F: f, Probes: SystemProbes()}
 	return &cobra.Command{
 		Use:   "doctor",
@@ -70,7 +70,7 @@ Linux, systemd-run --user --scope, claude, bd, git, and the
 .ralph/ and .beads/ directories in the current repo.`,
 		RunE: func(c *cobra.Command, args []string) error {
 			if runF != nil {
-				return runF(opts)
+				return runF(c.Context(), opts)
 			}
 			return doctorRun(c.Context(), opts)
 		},

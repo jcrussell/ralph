@@ -45,7 +45,7 @@ func (o *Options) Validate() error {
 }
 
 // NewCmdReport returns the cobra command for `ralph report`.
-func NewCmdReport(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
+func NewCmdReport(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
 	opts := &Options{F: f, Since: "24h"}
 	cmd := &cobra.Command{
 		Use:   "report",
@@ -55,7 +55,7 @@ func NewCmdReport(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command 
 				return err
 			}
 			if runF != nil {
-				return runF(opts)
+				return runF(c.Context(), opts)
 			}
 			return run(c.Context(), opts)
 		},

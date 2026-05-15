@@ -201,7 +201,7 @@ func TestTailNBounds(t *testing.T) {
 }
 
 func TestNewCmdStatusFlags(t *testing.T) {
-	c := NewCmdStatus(&cmdutil.Factory{}, func(*Options) error { return nil })
+	c := NewCmdStatus(&cmdutil.Factory{}, func(context.Context, *Options) error { return nil })
 	if c.Use != "status" {
 		t.Errorf("Use = %s, want status", c.Use)
 	}

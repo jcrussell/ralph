@@ -135,7 +135,7 @@ func TestValidateRejectsBadEnv(t *testing.T) {
 func TestNewCmdHookRunFInjection(t *testing.T) {
 	called := false
 	f := &cmdutil.Factory{IOStreams: iostreams.System()}
-	cmd := NewCmdHook(f, func(opts *Options) error {
+	cmd := NewCmdHook(f, func(_ context.Context, opts *Options) error {
 		called = true
 		if opts.Path != "some/hook" {
 			t.Errorf("opts.Path = %q, want some/hook", opts.Path)
@@ -153,7 +153,7 @@ func TestNewCmdHookRunFInjection(t *testing.T) {
 
 func TestNewCmdHookRejectsBadState(t *testing.T) {
 	f := &cmdutil.Factory{IOStreams: iostreams.System()}
-	cmd := NewCmdHook(f, func(*Options) error { return nil })
+	cmd := NewCmdHook(f, func(context.Context, *Options) error { return nil })
 	cmd.SetArgs([]string{"run", "x", "--state", "bogus"})
 	err := cmd.Execute()
 	var fe *cmdutil.FlagError

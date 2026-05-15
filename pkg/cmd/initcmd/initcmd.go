@@ -29,7 +29,7 @@ type Options struct {
 }
 
 // NewCmdInit returns the cobra command for `ralph init`.
-func NewCmdInit(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
+func NewCmdInit(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
 	opts := &Options{F: f}
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -39,7 +39,7 @@ func NewCmdInit(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 files are preserved unless --force is given.`,
 		RunE: func(c *cobra.Command, args []string) error {
 			if runF != nil {
-				return runF(opts)
+				return runF(c.Context(), opts)
 			}
 			return run(c.Context(), opts)
 		},

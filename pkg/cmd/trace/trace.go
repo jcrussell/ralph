@@ -44,7 +44,7 @@ func (o *Options) Validate() error {
 }
 
 // NewCmdTrace returns the cobra command for `ralph trace`.
-func NewCmdTrace(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
+func NewCmdTrace(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
 	opts := &Options{F: f, TailLines: 50}
 	cmd := &cobra.Command{
 		Use:   "trace <iter>",
@@ -60,7 +60,7 @@ func NewCmdTrace(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 				return err
 			}
 			if runF != nil {
-				return runF(opts)
+				return runF(c.Context(), opts)
 			}
 			return run(c.Context(), opts)
 		},

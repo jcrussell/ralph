@@ -1,6 +1,7 @@
 package review
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -36,7 +37,7 @@ func TestOptionsValidate(t *testing.T) {
 }
 
 func TestNewCmdReviewMetadata(t *testing.T) {
-	c := NewCmdReview(&cmdutil.Factory{}, func(*Options) error { return nil })
+	c := NewCmdReview(&cmdutil.Factory{}, func(context.Context, *Options) error { return nil })
 	if c.Use != "review" {
 		t.Errorf("Use = %q, want %q", c.Use, "review")
 	}
@@ -52,7 +53,7 @@ func TestNewCmdReviewMetadata(t *testing.T) {
 
 func TestNewCmdReviewFlagsCaptured(t *testing.T) {
 	var got *Options
-	c := NewCmdReview(&cmdutil.Factory{}, func(o *Options) error {
+	c := NewCmdReview(&cmdutil.Factory{}, func(_ context.Context, o *Options) error {
 		got = o
 		return nil
 	})

@@ -46,7 +46,7 @@ func (o *Options) Validate() error {
 }
 
 // NewCmdTimeline returns the cobra command for `ralph timeline`.
-func NewCmdTimeline(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
+func NewCmdTimeline(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
 	opts := &Options{F: f}
 	cmd := &cobra.Command{
 		Use:   "timeline",
@@ -59,7 +59,7 @@ on iter number.`,
 				return err
 			}
 			if runF != nil {
-				return runF(opts)
+				return runF(c.Context(), opts)
 			}
 			return run(c.Context(), opts)
 		},

@@ -173,7 +173,7 @@ func TestDoctorRunAllGreen(t *testing.T) {
 func TestNewCmdDoctorRunFInjection(t *testing.T) {
 	called := false
 	f := &cmdutil.Factory{IOStreams: iostreams.System()}
-	cmd := NewCmdDoctor(f, func(opts *Options) error {
+	cmd := NewCmdDoctor(f, func(_ context.Context, opts *Options) error {
 		called = true
 		if opts.F != f {
 			t.Errorf("opts.F not propagated")

@@ -199,7 +199,7 @@ func TestShippedConfigTomlLoadsToDefaults(t *testing.T) {
 func TestNewCmdInitRunFInjection(t *testing.T) {
 	called := false
 	f := &cmdutil.Factory{IOStreams: iostreams.System()}
-	cmd := NewCmdInit(f, func(opts *Options) error {
+	cmd := NewCmdInit(f, func(_ context.Context, opts *Options) error {
 		called = true
 		if !opts.Force {
 			t.Errorf("--force not propagated")

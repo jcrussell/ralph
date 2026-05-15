@@ -43,7 +43,7 @@ func (o *Options) Validate() error {
 }
 
 // NewCmdHook returns the cobra command for `ralph hook`.
-func NewCmdHook(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
+func NewCmdHook(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hook",
 		Short: "Inspect and run ralph hooks",
@@ -52,7 +52,7 @@ func NewCmdHook(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	return cmd
 }
 
-func newCmdRun(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
+func newCmdRun(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
 	opts := &Options{F: f}
 	cmd := &cobra.Command{
 		Use:   "run <path>",
@@ -67,7 +67,7 @@ to ralph's exit code; stdout and stderr are passed through.`,
 				return err
 			}
 			if runF != nil {
-				return runF(opts)
+				return runF(c.Context(), opts)
 			}
 			return run(c.Context(), opts)
 		},

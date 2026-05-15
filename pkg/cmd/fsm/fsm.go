@@ -26,7 +26,7 @@ import (
 )
 
 // NewCmdFSM returns the `ralph fsm` command with its two subcommands.
-func NewCmdFSM(f *cmdutil.Factory, runShowF, runGraphF func(*Options) error) *cobra.Command {
+func NewCmdFSM(f *cmdutil.Factory, runShowF, runGraphF func(context.Context, *Options) error) *cobra.Command {
 	showCmd := newShow(f, runShowF)
 	graphCmd := newGraph(f, runGraphF)
 	cmd := &cobra.Command{
@@ -58,7 +58,7 @@ type Options struct {
 	NoCounts bool
 }
 
-func newShow(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
+func newShow(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
 	opts := &Options{F: f}
 	cmd := &cobra.Command{
 		Use:   "show",
@@ -67,7 +67,7 @@ func newShow(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
   ralph fsm show --json | jq .`,
 		RunE: func(c *cobra.Command, args []string) error {
 			if runF != nil {
-				return runF(opts)
+				return runF(c.Context(), opts)
 			}
 			return runShow(c.Context(), opts)
 		},
@@ -76,7 +76,7 @@ func newShow(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	return cmd
 }
 
-func newGraph(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
+func newGraph(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
 	opts := &Options{F: f, Run: "latest"}
 	cmd := &cobra.Command{
 		Use:   "graph",
@@ -103,7 +103,7 @@ Use --no-counts to render bare topology.`,
   ralph fsm graph --no-counts`,
 		RunE: func(c *cobra.Command, args []string) error {
 			if runF != nil {
-				return runF(opts)
+				return runF(c.Context(), opts)
 			}
 			return runGraph(c.Context(), opts)
 		},

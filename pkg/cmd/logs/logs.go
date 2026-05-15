@@ -48,7 +48,7 @@ func (o *Options) Validate() error {
 }
 
 // NewCmdLogs returns the cobra command for `ralph logs`.
-func NewCmdLogs(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
+func NewCmdLogs(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
 	opts := &Options{F: f, pollInterval: 200 * time.Millisecond}
 	cmd := &cobra.Command{
 		Use:   "logs",
@@ -63,7 +63,7 @@ Default: one narrative line per iteration.
 				return err
 			}
 			if runF != nil {
-				return runF(opts)
+				return runF(c.Context(), opts)
 			}
 			return run(c.Context(), opts)
 		},

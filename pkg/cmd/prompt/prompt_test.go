@@ -105,7 +105,7 @@ func TestShowRunUsesHeaderFooter(t *testing.T) {
 func TestNewCmdPromptRunFInjection(t *testing.T) {
 	called := false
 	f := &cmdutil.Factory{IOStreams: iostreams.System()}
-	cmd := NewCmdPrompt(f, func(opts *Options) error {
+	cmd := NewCmdPrompt(f, func(_ context.Context, opts *Options) error {
 		called = true
 		if opts.State != "clean" {
 			t.Errorf("opts.State = %q, want clean", opts.State)
@@ -123,7 +123,7 @@ func TestNewCmdPromptRunFInjection(t *testing.T) {
 
 func TestNewCmdPromptRejectsBadState(t *testing.T) {
 	f := &cmdutil.Factory{IOStreams: iostreams.System()}
-	cmd := NewCmdPrompt(f, func(*Options) error { return nil })
+	cmd := NewCmdPrompt(f, func(context.Context, *Options) error { return nil })
 	cmd.SetArgs([]string{"show", "done"})
 	err := cmd.Execute()
 	if err == nil {

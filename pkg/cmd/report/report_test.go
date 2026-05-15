@@ -148,7 +148,7 @@ func TestRenderEmpty(t *testing.T) {
 
 func TestNewCmdReportInvalidSince(t *testing.T) {
 	f := &cmdutil.Factory{IOStreams: iostreams.System()}
-	cmd := NewCmdReport(f, func(*Options) error { return nil })
+	cmd := NewCmdReport(f, func(context.Context, *Options) error { return nil })
 	cmd.SetArgs([]string{"--since", "bogus"})
 	err := cmd.Execute()
 	var fe *cmdutil.FlagError
