@@ -36,6 +36,10 @@ lint:
 tidy:
 	go mod tidy
 
+.PHONY: docs
+docs:
+	go generate ./pkg/cmd/root/
+
 .PHONY: clean
 clean:
 	rm -f $(BIN)
