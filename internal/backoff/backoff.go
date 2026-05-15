@@ -69,7 +69,10 @@ func Compute(in Input, cfg *config.BackoffConfig) time.Duration {
 	}
 
 	base := dur(cfg.RateLimitDefault, 300*time.Second)
-	threshold := orDefault(cfg.DeadSessionThreshold, 3)
+	threshold := cfg.DeadSessionThreshold
+	if threshold <= 0 {
+		threshold = 3
+	}
 
 	switch in.Mode {
 	case runner.ModeRateLimit:
@@ -91,7 +94,7 @@ func Compute(in Input, cfg *config.BackoffConfig) time.Duration {
 		if in.Streaks.DeadSession >= threshold {
 			return capDur(expBackoff(base, in.Streaks.DeadSession-threshold))
 		}
-		if exit := exitCode(in.Session); exit != 0 {
+		if in.Session != nil && in.Session.ExitCode != 0 {
 			return dur(cfg.UnknownSecs, 60*time.Second)
 		}
 		return OKBackoff
@@ -128,20 +131,6 @@ func dur(secs int, fallback time.Duration) time.Duration {
 		return time.Duration(secs) * time.Second
 	}
 	return fallback
-}
-
-func orDefault(v, fallback int) int {
-	if v > 0 {
-		return v
-	}
-	return fallback
-}
-
-func exitCode(s *runner.Session) int {
-	if s == nil {
-		return 0
-	}
-	return s.ExitCode
 }
 
 // resetRE matches "resets 4am (UTC)" style hints in runner stderr.

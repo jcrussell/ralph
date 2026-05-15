@@ -49,8 +49,10 @@ func Compose(in Input) string {
 	if s := joinIDs("claimed", in.Diff.InProgress); s != "" {
 		segs = append(segs, s)
 	}
-	if in.Commits > 0 {
-		segs = append(segs, plural(in.Commits, "commit"))
+	if in.Commits == 1 {
+		segs = append(segs, "1 commit")
+	} else if in.Commits > 1 {
+		segs = append(segs, fmt.Sprintf("%d commits", in.Commits))
 	}
 	if s := joinIDs("closed", in.Diff.Closed); s != "" {
 		segs = append(segs, s)
@@ -91,14 +93,6 @@ func joinIDs(verb string, ids []string) string {
 	default:
 		return fmt.Sprintf("%s %s +%d more", verb, ids[0], len(ids)-1)
 	}
-}
-
-// plural renders "1 commit" / "2 commits".
-func plural(n int, word string) string {
-	if n == 1 {
-		return fmt.Sprintf("1 %s", word)
-	}
-	return fmt.Sprintf("%d %ss", n, word)
 }
 
 // gateLabel maps internal gate strings to the human form. "" returns

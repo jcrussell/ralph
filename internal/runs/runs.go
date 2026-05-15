@@ -328,10 +328,8 @@ func parseID(id string) (time.Time, error) {
 	return time.Parse("20060102T150405Z", stem)
 }
 
-func manifestPath(dir string) string { return filepath.Join(dir, "manifest.json") }
-
 func readManifest(dir string) (*Manifest, error) {
-	b, err := os.ReadFile(manifestPath(dir))
+	b, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
 	if err != nil {
 		return nil, fmt.Errorf("runs: read manifest %s: %w", dir, err)
 	}
@@ -388,7 +386,7 @@ func writeManifest(dir string, m *Manifest) error {
 		cleanup()
 		return fmt.Errorf("runs: close %s: %w", tmpPath, err)
 	}
-	if err := os.Rename(tmpPath, manifestPath(dir)); err != nil {
+	if err := os.Rename(tmpPath, filepath.Join(dir, "manifest.json")); err != nil {
 		cleanup()
 		return fmt.Errorf("runs: rename: %w", err)
 	}

@@ -30,9 +30,5 @@ func (s Scope) EventsPath() string { return "" }
 func OOMKilledFile(path string) (bool, error) { return false, ErrUnsupported }
 
 func Available(ctx context.Context) error {
-	return errUnsupported()
-}
-
-func errUnsupported() error {
 	return errors.New("isolation: " + runtime.GOOS + " is not Linux; ralph requires systemd-run --user --scope")
 }
