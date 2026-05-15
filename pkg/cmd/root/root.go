@@ -4,6 +4,8 @@
 package root
 
 import (
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
 
@@ -34,6 +36,8 @@ const envLogLevel = "RALPH_LOG"
 func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 	var verbose int
 	var logLevel string
+	var logFormat string
+	var logFile string
 
 	root := &cobra.Command{
 		Use:           "ralph",
@@ -77,6 +81,18 @@ func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 			if logger == nil {
 				logger = slog.Default()
 			}
+			// byob-logging.4: when the user opts into a different sink
+			// or format, rebuild the logger. The new handler reuses
+			// f.LogLevel so the verbosity ladder still applies; if the
+			// Factory has no LevelVar (bare test factory) we fall back
+			// to the resolved level as a fixed Leveler.
+			if logFile != "" || logFormat != "" {
+				rebuilt, err := buildLogger(f, logFile, logFormat, lvl)
+				if err != nil {
+					return err
+				}
+				logger = rebuilt
+			}
 			cmd.SetContext(ralphlog.WithLogger(cmd.Context(), logger.With("cmd", cmd.CommandPath())))
 			return nil
 		},
@@ -85,6 +101,10 @@ func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 		"increase log verbosity (-v=info, -vv=debug)")
 	root.PersistentFlags().StringVar(&logLevel, "log-level", "",
 		"explicit log level (warn|info|debug); overrides -v")
+	root.PersistentFlags().StringVar(&logFormat, "log-format", "",
+		"log record format (text|json); default text")
+	root.PersistentFlags().StringVar(&logFile, "log-file", "",
+		"append log records to this file instead of stderr")
 	// Route cobra's own help/usage/error output through IOStreams (per
 	// byob-iostreams.1). Cascades to subcommands via cobra's writer lookup.
 	root.SetIn(f.IOStreams.In)
@@ -124,4 +144,36 @@ func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 	addTo(version.NewCmdVersion(f, nil), "info")
 
 	return root
+}
+
+// buildLogger constructs a fresh slog.Logger honoring --log-file and
+// --log-format (byob-logging.4). The handler uses f.LogLevel when
+// available so the verbosity ladder still applies; otherwise the
+// resolved level is baked in as a fixed Leveler. The file handle
+// deliberately lives for the process lifetime — a short-lived CLI
+// exits and the OS reclaims it.
+func buildLogger(f *cmdutil.Factory, logFile, logFormat string, lvl slog.Level) (*slog.Logger, error) {
+	var w io.Writer = f.IOStreams.ErrOut
+	if logFile != "" {
+		fh, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return nil, fmt.Errorf("open --log-file: %w", err)
+		}
+		w = fh
+	}
+	var leveler slog.Leveler = lvl
+	if f.LogLevel != nil {
+		leveler = f.LogLevel
+	}
+	hopts := &slog.HandlerOptions{Level: leveler}
+	var h slog.Handler
+	switch logFormat {
+	case "", "text":
+		h = slog.NewTextHandler(w, hopts)
+	case "json":
+		h = slog.NewJSONHandler(w, hopts)
+	default:
+		return nil, &cmdutil.FlagError{Err: fmt.Errorf("unknown --log-format %q (want text|json)", logFormat)}
+	}
+	return slog.New(h), nil
 }

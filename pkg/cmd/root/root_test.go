@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -172,6 +174,152 @@ func TestRootVerbositySurvivesNilLogLevel(t *testing.T) {
 	root.SetArgs([]string{"-vv", "probe"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
+	}
+}
+
+// byob-logging.4: default invocation (no --log-file, no --log-format)
+// must leave the Factory's logger untouched — chatter and logs share
+// ErrOut, but the Warn default keeps logs silent in the common case.
+func TestRootDefaultKeepsFactoryLogger(t *testing.T) {
+	t.Setenv("RALPH_LOG", "")
+	ios, _ := iostreams.Test()
+	var buf bytes.Buffer
+	lvl := new(slog.LevelVar)
+	original := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: lvl}))
+	f := &cmdutil.Factory{IOStreams: ios, Logger: original, LogLevel: lvl}
+
+	root := NewCmdRoot(f)
+	root.AddCommand(&cobra.Command{
+		Use: "probe",
+		RunE: func(c *cobra.Command, _ []string) error {
+			ralphlog.From(c.Context()).Warn("probed")
+			return nil
+		},
+	})
+	root.SetArgs([]string{"probe"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := buf.String(); !strings.Contains(got, "probed") {
+		t.Errorf("default logger did not receive record; got %q", got)
+	}
+}
+
+// byob-logging.4: --log-format=json swaps the handler to JSONHandler.
+// Records reach the Factory's ErrOut sink as one JSON object per line.
+func TestRootLogFormatJSON(t *testing.T) {
+	t.Setenv("RALPH_LOG", "")
+	ios, bufs := iostreams.Test()
+	lvl := new(slog.LevelVar)
+	f := &cmdutil.Factory{
+		IOStreams: ios,
+		Logger:    slog.New(slog.NewTextHandler(ios.ErrOut, &slog.HandlerOptions{Level: lvl})),
+		LogLevel:  lvl,
+	}
+	root := NewCmdRoot(f)
+	root.AddCommand(&cobra.Command{
+		Use: "probe",
+		RunE: func(c *cobra.Command, _ []string) error {
+			ralphlog.From(c.Context()).Warn("probed")
+			return nil
+		},
+	})
+	root.SetArgs([]string{"--log-format=json", "probe"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	got := bufs.ErrOut.String()
+	if !strings.HasPrefix(strings.TrimSpace(got), "{") {
+		t.Errorf("--log-format=json: stderr does not look like JSON; got %q", got)
+	}
+	if !strings.Contains(got, `"msg":"probed"`) {
+		t.Errorf("--log-format=json: missing msg field; got %q", got)
+	}
+}
+
+// byob-logging.4: --log-file diverts records to a file, leaving ErrOut
+// to chatter alone. The level wiring must still honor the verbosity
+// ladder so -v / --log-level keep working through the new sink.
+func TestRootLogFileDivertsRecords(t *testing.T) {
+	t.Setenv("RALPH_LOG", "")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ralph.log")
+
+	ios, bufs := iostreams.Test()
+	lvl := new(slog.LevelVar)
+	f := &cmdutil.Factory{
+		IOStreams: ios,
+		Logger:    slog.New(slog.NewTextHandler(ios.ErrOut, &slog.HandlerOptions{Level: lvl})),
+		LogLevel:  lvl,
+	}
+	root := NewCmdRoot(f)
+	root.AddCommand(&cobra.Command{
+		Use: "probe",
+		RunE: func(c *cobra.Command, _ []string) error {
+			ralphlog.From(c.Context()).Info("probed")
+			return nil
+		},
+	})
+	root.SetArgs([]string{"-v", "--log-file=" + path, "probe"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := bufs.ErrOut.String(); strings.Contains(got, "probed") {
+		t.Errorf("--log-file: record leaked onto ErrOut: %q", got)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	if !strings.Contains(string(data), "probed") {
+		t.Errorf("--log-file: file missing record; got %q", string(data))
+	}
+}
+
+// An unknown --log-format value must surface as a *FlagError so the
+// top-level runner maps it to exit 2.
+func TestRootLogFormatInvalidIsFlagError(t *testing.T) {
+	t.Setenv("RALPH_LOG", "")
+	ios, _ := iostreams.Test()
+	f := &cmdutil.Factory{IOStreams: ios}
+	root := NewCmdRoot(f)
+	root.AddCommand(&cobra.Command{
+		Use:  "probe",
+		RunE: func(*cobra.Command, []string) error { return nil },
+	})
+	root.SetArgs([]string{"--log-format=yaml", "probe"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("Execute: want error for invalid --log-format, got nil")
+	}
+	var fe *cmdutil.FlagError
+	if !errors.As(err, &fe) {
+		t.Errorf("err = %v (%T); want *FlagError", err, err)
+	}
+}
+
+// --log-file with an unwritable path (parent does not exist) returns a
+// plain error — not a *FlagError. The flag itself parsed cleanly; the
+// problem is a runtime filesystem condition.
+func TestRootLogFileUnopenableReturnsError(t *testing.T) {
+	t.Setenv("RALPH_LOG", "")
+	ios, _ := iostreams.Test()
+	f := &cmdutil.Factory{IOStreams: ios}
+	root := NewCmdRoot(f)
+	root.AddCommand(&cobra.Command{
+		Use:  "probe",
+		RunE: func(*cobra.Command, []string) error { return nil },
+	})
+	root.SetArgs([]string{"--log-file=/no/such/dir/ralph.log", "probe"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("Execute: want error for unopenable --log-file, got nil")
+	}
+	var fe *cmdutil.FlagError
+	if errors.As(err, &fe) {
+		t.Errorf("err = %v (%T); want plain error, got *FlagError", err, err)
 	}
 }
 

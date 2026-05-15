@@ -9,9 +9,11 @@ ralph runs an AI coding agent in a loop, routed by a built-in state machine. See
 ### Options
 
 ```
-  -h, --help               help for ralph
-      --log-level string   explicit log level (warn|info|debug); overrides -v
-  -v, --verbose count      increase log verbosity (-v=info, -vv=debug)
+  -h, --help                help for ralph
+      --log-file string     append log records to this file instead of stderr
+      --log-format string   log record format (text|json); default text
+      --log-level string    explicit log level (warn|info|debug); overrides -v
+  -v, --verbose count       increase log verbosity (-v=info, -vv=debug)
 ```
 
 ### SEE ALSO
