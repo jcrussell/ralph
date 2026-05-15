@@ -24,10 +24,10 @@ type JSONL struct {
 // OpenJSONL opens path for append, creating parent directories as
 // needed. The file is created with 0o644 if absent.
 func OpenJSONL(path string) (*JSONL, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, fmt.Errorf("log: mkdir %s: %w", filepath.Dir(path), err)
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // log files are intentionally world-readable for ops tooling
 	if err != nil {
 		return nil, fmt.Errorf("log: open %s: %w", path, err)
 	}
@@ -64,10 +64,10 @@ func (j *JSONL) Path() string { return j.f.Name() }
 // given level. Closer flushes and closes the underlying file. Parent
 // directories are created if absent.
 func NewSlog(path string, level slog.Level) (*slog.Logger, io.Closer, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, nil, fmt.Errorf("log: mkdir %s: %w", filepath.Dir(path), err)
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // log files are intentionally world-readable for ops tooling
 	if err != nil {
 		return nil, nil, fmt.Errorf("log: open %s: %w", path, err)
 	}

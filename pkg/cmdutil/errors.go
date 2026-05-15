@@ -5,11 +5,15 @@ import (
 	"fmt"
 )
 
+// FlagError is the error type a RunE returns to signal a flag-validation
+// failure. Detected by ralphcmd.Run with errors.As to print usage and
+// exit 2.
 type FlagError struct{ Err error }
 
 func (e *FlagError) Error() string { return e.Err.Error() }
 func (e *FlagError) Unwrap() error { return e.Err }
 
+// FlagErrorf wraps fmt.Errorf into a *FlagError.
 func FlagErrorf(format string, args ...any) error {
 	return &FlagError{Err: fmt.Errorf(format, args...)}
 }

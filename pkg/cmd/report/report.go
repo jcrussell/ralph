@@ -23,15 +23,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jcrussell/ralph/pkg/cmdutil"
 	"github.com/spf13/cobra"
+
+	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
 
+// Options is the three-part command shape's Options struct.
 type Options struct {
 	F     *cmdutil.Factory
 	Since string
 }
 
+// NewCmdReport returns the cobra command for `ralph report`.
 func NewCmdReport(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	opts := &Options{F: f, Since: "24h"}
 	cmd := &cobra.Command{
@@ -77,7 +80,7 @@ func run(ctx context.Context, opts *Options) error {
 // given time. spec is the original --since string (used only for the
 // "Commits" git invocation, which accepts duration strings natively).
 func Render(ctx context.Context, repo string, since time.Time, spec string, w io.Writer) error {
-	fmt.Fprintf(w, "# ralph report (since %s)\n\n", since.Format(time.RFC3339))
+	_, _ = fmt.Fprintf(w, "# ralph report (since %s)\n\n", since.Format(time.RFC3339))
 
 	if err := writeWorkDone(repo, since, w); err != nil {
 		return err
@@ -119,14 +122,14 @@ type bdDiff struct {
 // since. A missing file is not an error; returns an empty slice.
 func readSummary(repo string, since time.Time) ([]iterRecord, error) {
 	path := filepath.Join(repo, ".ralph", "state", "logs", "summary.jsonl")
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // path joined from repo root
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("report: open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var out []iterRecord
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
@@ -180,7 +183,7 @@ func writeWorkDone(repo string, since time.Time, w io.Writer) error {
 			deferred[id] = struct{}{}
 		}
 	}
-	fmt.Fprintln(w, "## Work done")
+	_, _ = fmt.Fprintln(w, "## Work done")
 	bullets := []struct {
 		label string
 		set   map[string]struct{}
@@ -196,12 +199,12 @@ func writeWorkDone(repo string, since time.Time, w io.Writer) error {
 			continue
 		}
 		any = true
-		fmt.Fprintf(w, "- %s: %s\n", b.label, strings.Join(sortedKeys(b.set), ", "))
+		_, _ = fmt.Fprintf(w, "- %s: %s\n", b.label, strings.Join(sortedKeys(b.set), ", "))
 	}
 	if !any {
-		fmt.Fprintln(w, "_(no bead activity in window)_")
+		_, _ = fmt.Fprintln(w, "_(no bead activity in window)_")
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 	return nil
 }
 
@@ -217,13 +220,13 @@ func sortedKeys(s map[string]struct{}) []string {
 // ----- Commits (git log) ---------------------------------------------
 
 func writeCommits(ctx context.Context, repo, spec string, since time.Time, w io.Writer) error {
-	fmt.Fprintln(w, "## Commits")
+	_, _ = fmt.Fprintln(w, "## Commits")
 	sinceArg := spec
 	if _, err := time.ParseDuration(spec); err != nil {
 		// Not a duration; pass RFC3339.
 		sinceArg = since.Format(time.RFC3339)
 	}
-	cmd := exec.CommandContext(ctx, "git", "log",
+	cmd := exec.CommandContext(ctx, "git", "log", //nolint:gosec // sinceArg validated by parseSince upstream; argv literal otherwise
 		"--since="+sinceArg,
 		"--pretty=format:- %h  %s",
 		"--no-merges")
@@ -233,17 +236,17 @@ func writeCommits(ctx context.Context, repo, spec string, since time.Time, w io.
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
 		// Not a git repo or no commits — degrade gracefully.
-		fmt.Fprintln(w, "_(git log unavailable)_")
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, "_(git log unavailable)_")
+		_, _ = fmt.Fprintln(w)
 		return nil
 	}
 	body := strings.TrimSpace(out.String())
 	if body == "" {
-		fmt.Fprintln(w, "_(no commits in window)_")
+		_, _ = fmt.Fprintln(w, "_(no commits in window)_")
 	} else {
-		fmt.Fprintln(w, body)
+		_, _ = fmt.Fprintln(w, body)
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 	return nil
 }
 
@@ -251,11 +254,11 @@ func writeCommits(ctx context.Context, repo, spec string, since time.Time, w io.
 
 func writeIncidents(repo string, since time.Time, w io.Writer) error {
 	dir := filepath.Join(repo, ".ralph", "state", "incidents")
-	fmt.Fprintln(w, "## Incidents")
+	_, _ = fmt.Fprintln(w, "## Incidents")
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
-		fmt.Fprintln(w, "_(none)_")
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, "_(none)_")
+		_, _ = fmt.Fprintln(w)
 		return nil
 	}
 	if err != nil {
@@ -274,23 +277,23 @@ func writeIncidents(repo string, since time.Time, w io.Writer) error {
 		lines = append(lines, fmt.Sprintf("- %s — %s", e.Name(), title))
 	}
 	if len(lines) == 0 {
-		fmt.Fprintln(w, "_(none)_")
+		_, _ = fmt.Fprintln(w, "_(none)_")
 	} else {
 		sort.Strings(lines)
 		for _, l := range lines {
-			fmt.Fprintln(w, l)
+			_, _ = fmt.Fprintln(w, l)
 		}
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 	return nil
 }
 
 func firstHeader(path string) string {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // path constructed from dirent under incidents/
 	if err != nil {
 		return path
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
@@ -327,7 +330,7 @@ func readManifests(repo string, since time.Time) ([]manifest, error) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name(), "manifest.json")
-		b, err := os.ReadFile(path)
+		b, err := os.ReadFile(path) //nolint:gosec // dirent under .ralph/state/runs/
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -353,7 +356,7 @@ func writeStateDistribution(repo string, since time.Time, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(w, "## State distribution")
+	_, _ = fmt.Fprintln(w, "## State distribution")
 	total := map[string]int{}
 	for _, m := range manifests {
 		for k, v := range m.StateDistribution {
@@ -361,13 +364,13 @@ func writeStateDistribution(repo string, since time.Time, w io.Writer) error {
 		}
 	}
 	if len(total) == 0 {
-		fmt.Fprintln(w, "_(no run manifests in window)_")
+		_, _ = fmt.Fprintln(w, "_(no run manifests in window)_")
 	} else {
 		for _, k := range sortedKeys(toSet(total)) {
-			fmt.Fprintf(w, "- %s: %d\n", k, total[k])
+			_, _ = fmt.Fprintf(w, "- %s: %d\n", k, total[k])
 		}
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 	return nil
 }
 
@@ -384,10 +387,10 @@ func writeCost(repo string, since time.Time, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(w, "## Cost")
+	_, _ = fmt.Fprintln(w, "## Cost")
 	if len(manifests) == 0 {
-		fmt.Fprintln(w, "_(no run manifests in window)_")
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, "_(no run manifests in window)_")
+		_, _ = fmt.Fprintln(w)
 		return nil
 	}
 	var cost float64
@@ -398,9 +401,9 @@ func writeCost(repo string, since time.Time, w io.Writer) error {
 		wall += m.WallclockSecs
 		iters += m.Iters
 	}
-	fmt.Fprintf(w, "- iters: %d\n", iters)
-	fmt.Fprintf(w, "- wallclock: %s\n", time.Duration(wall)*time.Second)
-	fmt.Fprintf(w, "- cost: $%.4f\n", cost)
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintf(w, "- iters: %d\n", iters)
+	_, _ = fmt.Fprintf(w, "- wallclock: %s\n", time.Duration(wall)*time.Second)
+	_, _ = fmt.Fprintf(w, "- cost: $%.4f\n", cost)
+	_, _ = fmt.Fprintln(w)
 	return nil
 }

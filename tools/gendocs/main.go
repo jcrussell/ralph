@@ -12,10 +12,12 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+
+	"github.com/spf13/cobra/doc"
 
 	"github.com/jcrussell/ralph/pkg/cmd/root"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
-	"github.com/spf13/cobra/doc"
 )
 
 func main() {
@@ -23,8 +25,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: gendocs <output-dir>")
 		os.Exit(2)
 	}
-	out := os.Args[1]
-	if err := os.MkdirAll(out, 0o755); err != nil {
+	out := filepath.Clean(os.Args[1])
+	if err := os.MkdirAll(out, 0o750); err != nil {
 		fmt.Fprintln(os.Stderr, "mkdir:", err)
 		os.Exit(1)
 	}

@@ -9,11 +9,11 @@ import (
 
 func TestRenderHappyPath(t *testing.T) {
 	fs := fstest.MapFS{
-		"iter-0001-1700000000.json":            {Data: []byte(`{"iter":1,"state":"clean","narrative":"first"}`)},
-		"iter-0001-1700000000-prompt.txt":      {Data: []byte("rendered prompt body\n")},
-		"iter-0001-1700000000-stdout.txt":      {Data: []byte("line1\nline2\nline3\n")},
-		"iter-0001-1700000000-stderr.txt":      {Data: []byte("err line\n")},
-		"iter-0002-1700000010.json":            {Data: []byte(`{"iter":2}`)},
+		"iter-0001-1700000000.json":       {Data: []byte(`{"iter":1,"state":"clean","narrative":"first"}`)},
+		"iter-0001-1700000000-prompt.txt": {Data: []byte("rendered prompt body\n")},
+		"iter-0001-1700000000-stdout.txt": {Data: []byte("line1\nline2\nline3\n")},
+		"iter-0001-1700000000-stderr.txt": {Data: []byte("err line\n")},
+		"iter-0002-1700000010.json":       {Data: []byte(`{"iter":2}`)},
 	}
 	var buf bytes.Buffer
 	if err := Render(fs, 1, 0, &buf); err != nil {
@@ -83,9 +83,9 @@ func TestTailTruncates(t *testing.T) {
 		want string
 	}{
 		{"a\nb\nc\nd\ne\n", 2, "d\ne\n"},
-		{"a\nb\nc\n", 5, "a\nb\nc\n"},   // n > lines: unchanged
-		{"a\nb\nc\n", 0, "a\nb\nc\n"},   // n=0: unchanged
-		{"a\nb\nc", 2, "b\nc"},          // no trailing newline preserved
+		{"a\nb\nc\n", 5, "a\nb\nc\n"}, // n > lines: unchanged
+		{"a\nb\nc\n", 0, "a\nb\nc\n"}, // n=0: unchanged
+		{"a\nb\nc", 2, "b\nc"},        // no trailing newline preserved
 	}
 	for _, c := range cases {
 		if got := tail(c.in, c.n); got != c.want {
@@ -97,10 +97,10 @@ func TestTailTruncates(t *testing.T) {
 func TestRenderTailLines(t *testing.T) {
 	stdout := "L1\nL2\nL3\nL4\nL5\nL6\n"
 	fs := fstest.MapFS{
-		"iter-0001-x.json":        {Data: []byte(`{"iter":1}`)},
-		"iter-0001-x-stdout.txt":  {Data: []byte(stdout)},
-		"iter-0001-x-stderr.txt":  {Data: []byte("ok\n")},
-		"iter-0001-x-prompt.txt":  {Data: []byte("p")},
+		"iter-0001-x.json":       {Data: []byte(`{"iter":1}`)},
+		"iter-0001-x-stdout.txt": {Data: []byte(stdout)},
+		"iter-0001-x-stderr.txt": {Data: []byte("ok\n")},
+		"iter-0001-x-prompt.txt": {Data: []byte("p")},
 	}
 	var buf bytes.Buffer
 	if err := Render(fs, 1, 3, &buf); err != nil {

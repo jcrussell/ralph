@@ -35,7 +35,7 @@ type Lock struct {
 // write. Losers in a race either find a live PID (ErrHeld) or a
 // freshly-released slot and retry.
 func Acquire(path string) (*Lock, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, fmt.Errorf("lock: mkdir %s: %w", filepath.Dir(path), err)
 	}
 	const maxAttempts = 16
@@ -105,7 +105,7 @@ func tryCreate(path string) (*Lock, error) {
 
 	pid := os.Getpid()
 	if _, err := fmt.Fprintf(tmp, "%d\n", pid); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		cleanup()
 		return nil, fmt.Errorf("lock: write temp: %w", err)
 	}
@@ -122,7 +122,7 @@ func tryCreate(path string) (*Lock, error) {
 }
 
 func readPID(path string) (int, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // path is the lock file path provided by Acquire
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return 0, err

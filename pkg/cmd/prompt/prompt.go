@@ -7,12 +7,14 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/jcrussell/ralph/internal/fsm"
 	"github.com/jcrussell/ralph/internal/promptlib"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
-	"github.com/spf13/cobra"
 )
 
+// Options is the three-part command shape's Options struct.
 type Options struct {
 	F *cmdutil.Factory
 
@@ -91,9 +93,9 @@ func showRun(_ context.Context, opts *Options) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprint(opts.F.IOStreams.Out, out)
+	_, _ = fmt.Fprint(opts.F.IOStreams.Out, out)
 	if len(out) == 0 || out[len(out)-1] != '\n' {
-		fmt.Fprintln(opts.F.IOStreams.Out)
+		_, _ = fmt.Fprintln(opts.F.IOStreams.Out)
 	}
 	return nil
 }

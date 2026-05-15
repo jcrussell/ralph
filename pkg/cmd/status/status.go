@@ -10,11 +10,12 @@ import (
 	"io"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/jcrussell/ralph/internal/config"
 	"github.com/jcrussell/ralph/internal/fsm"
 	"github.com/jcrussell/ralph/internal/runs"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
-	"github.com/spf13/cobra"
 )
 
 // Options is the three-part command shape's Options struct.
@@ -69,21 +70,21 @@ informational.`,
 // Decoupling the view from the renderer keeps the table writer pure
 // and the JSON output a one-liner.
 type View struct {
-	RunID                   string             `json:"run_id,omitempty"`
-	State                   string             `json:"state"`
-	Reason                  string             `json:"reason,omitempty"`
-	Iter                    int                `json:"iter"`
-	MaxIterations           int                `json:"max_iterations,omitempty"`
-	ReviewMode              bool               `json:"review_mode"`
-	ReviewBranch            string             `json:"review_branch,omitempty"`
-	ReviewBase              string             `json:"review_base,omitempty"`
-	CumulativeCostUSD       float64            `json:"cumulative_cost_usd"`
-	MaxCostUSD              float64            `json:"max_cost_usd,omitempty"`
-	CumulativeWallclockSecs int                `json:"cumulative_wallclock_secs"`
-	MaxWallclockSecs        int                `json:"max_wallclock_secs,omitempty"`
-	ConsecutiveDirty        int                `json:"consecutive_dirty"`
-	LastGateResult          string             `json:"last_gate_result,omitempty"`
-	Transitions             []runs.Transition  `json:"transitions,omitempty"`
+	RunID                   string            `json:"run_id,omitempty"`
+	State                   string            `json:"state"`
+	Reason                  string            `json:"reason,omitempty"`
+	Iter                    int               `json:"iter"`
+	MaxIterations           int               `json:"max_iterations,omitempty"`
+	ReviewMode              bool              `json:"review_mode"`
+	ReviewBranch            string            `json:"review_branch,omitempty"`
+	ReviewBase              string            `json:"review_base,omitempty"`
+	CumulativeCostUSD       float64           `json:"cumulative_cost_usd"`
+	MaxCostUSD              float64           `json:"max_cost_usd,omitempty"`
+	CumulativeWallclockSecs int               `json:"cumulative_wallclock_secs"`
+	MaxWallclockSecs        int               `json:"max_wallclock_secs,omitempty"`
+	ConsecutiveDirty        int               `json:"consecutive_dirty"`
+	LastGateResult          string            `json:"last_gate_result,omitempty"`
+	Transitions             []runs.Transition `json:"transitions,omitempty"`
 }
 
 func runStatus(_ context.Context, opts *Options) error {
@@ -102,15 +103,15 @@ func runStatus(_ context.Context, opts *Options) error {
 
 	v := buildView(state, cfg)
 
-	if r, err := runs.Latest(repo); err == nil {
+	if r, lerr := runs.Latest(repo); lerr == nil {
 		v.RunID = r.ID()
-		all, err := r.ReadTransitions()
-		if err != nil {
-			return err
+		all, terr := r.ReadTransitions()
+		if terr != nil {
+			return terr
 		}
 		v.Transitions = tailN(all, opts.Tail)
-	} else if !errors.Is(err, runs.ErrNoRuns) {
-		return err
+	} else if !errors.Is(lerr, runs.ErrNoRuns) {
+		return lerr
 	}
 
 	io := opts.F.IOStreams
@@ -153,33 +154,33 @@ func writeJSON(w io.Writer, v View) error {
 
 func writeText(w io.Writer, v View) error {
 	if v.RunID != "" {
-		fmt.Fprintf(w, "ralph status — run %s\n\n", v.RunID)
+		_, _ = fmt.Fprintf(w, "ralph status — run %s\n\n", v.RunID)
 	} else {
-		fmt.Fprintf(w, "ralph status — no runs yet\n\n")
+		_, _ = fmt.Fprintf(w, "ralph status — no runs yet\n\n")
 	}
 
 	stateLine := v.State
 	if v.Reason != "" {
 		stateLine = fmt.Sprintf("%s{%s}", v.State, v.Reason)
 	}
-	fmt.Fprintf(w, "state:             %s\n", stateLine)
-	fmt.Fprintf(w, "iter:              %s\n", iterLine(v.Iter, v.MaxIterations))
-	fmt.Fprintf(w, "review:            %s\n", reviewLine(v))
-	fmt.Fprintf(w, "cost:              %s\n", costLine(v.CumulativeCostUSD, v.MaxCostUSD))
-	fmt.Fprintf(w, "wallclock:         %s\n", wallclockLine(v.CumulativeWallclockSecs, v.MaxWallclockSecs))
-	fmt.Fprintf(w, "consecutive_dirty: %d\n", v.ConsecutiveDirty)
+	_, _ = fmt.Fprintf(w, "state:             %s\n", stateLine)
+	_, _ = fmt.Fprintf(w, "iter:              %s\n", iterLine(v.Iter, v.MaxIterations))
+	_, _ = fmt.Fprintf(w, "review:            %s\n", reviewLine(v))
+	_, _ = fmt.Fprintf(w, "cost:              %s\n", costLine(v.CumulativeCostUSD, v.MaxCostUSD))
+	_, _ = fmt.Fprintf(w, "wallclock:         %s\n", wallclockLine(v.CumulativeWallclockSecs, v.MaxWallclockSecs))
+	_, _ = fmt.Fprintf(w, "consecutive_dirty: %d\n", v.ConsecutiveDirty)
 	if v.LastGateResult != "" {
-		fmt.Fprintf(w, "last_gate:         %s\n", v.LastGateResult)
+		_, _ = fmt.Fprintf(w, "last_gate:         %s\n", v.LastGateResult)
 	}
 
 	if len(v.Transitions) > 0 {
-		fmt.Fprintf(w, "\nlast %d transitions:\n", len(v.Transitions))
+		_, _ = fmt.Fprintf(w, "\nlast %d transitions:\n", len(v.Transitions))
 		for _, t := range v.Transitions {
 			reason := ""
 			if t.Reason != "" {
 				reason = "  reason=" + t.Reason
 			}
-			fmt.Fprintf(w, "  %-4d %-7s → %-7s%s\n", t.Iter, t.From, t.To, reason)
+			_, _ = fmt.Fprintf(w, "  %-4d %-7s → %-7s%s\n", t.Iter, t.From, t.To, reason)
 		}
 	}
 	return nil

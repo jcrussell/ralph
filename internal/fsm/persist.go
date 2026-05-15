@@ -52,7 +52,7 @@ func Fresh() *FSM {
 // error.
 func Load(repoRoot string) (*FSM, error) {
 	path := Path(repoRoot)
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // path joined from repoRoot + literal
 	if errors.Is(err, os.ErrNotExist) {
 		return Fresh(), nil
 	}
@@ -70,7 +70,7 @@ func Load(repoRoot string) (*FSM, error) {
 		// No upgrades defined yet; bump to current.
 		f.Version = SchemaVersion
 	}
-	if err := f.Outcome.Validate(); err != nil {
+	if err := f.Validate(); err != nil {
 		return nil, fmt.Errorf("fsm: %s: %w", path, err)
 	}
 	return &f, nil
@@ -82,13 +82,13 @@ func (f *FSM) Save(repoRoot string) error {
 	if f.Version == 0 {
 		f.Version = SchemaVersion
 	}
-	if err := f.Outcome.Validate(); err != nil {
+	if err := f.Validate(); err != nil {
 		return fmt.Errorf("fsm: refuse to save invalid outcome: %w", err)
 	}
 
 	path := Path(repoRoot)
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("fsm: mkdir %s: %w", dir, err)
 	}
 

@@ -78,7 +78,7 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 	prev := rc.fsm.Outcome
 	now := rc.clock.Now().UTC()
 	rc.paths = newIterPaths(rc.repo, rc.fsm.Iter, now)
-	if err := os.MkdirAll(rc.paths.logsDir, 0o755); err != nil {
+	if err := os.MkdirAll(rc.paths.logsDir, 0o750); err != nil {
 		return prev, fmt.Errorf("loop: mkdir logs: %w", err)
 	}
 
@@ -93,7 +93,7 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 		return prev, fmt.Errorf("loop: pre-iteration: %w", err)
 	}
 	if !preRes.NoHook && preRes.ExitCode != 0 {
-		rc.log.Warn("pre-iteration skipped iteration", "exit", preRes.ExitCode)
+		rc.log.WarnContext(ctx, "pre-iteration skipped iteration", "exit", preRes.ExitCode)
 		return prev, recordSkippedIteration(rc, prev, fmt.Sprintf("pre-iteration exit %d", preRes.ExitCode))
 	}
 
@@ -102,7 +102,7 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 		env := buildHookEnv(rc, hooks.PhaseEnter, "")
 		_, hErr := hooks.Run(ctx, hooks.StatePath(rc.repo, string(prev.State), hooks.PhaseEnter), env, nil)
 		if hErr != nil {
-			rc.log.Warn("enter hook error", "state", prev.State, "err", hErr)
+			rc.log.WarnContext(ctx, "enter hook error", "state", prev.State, "err", hErr)
 		}
 		rc.lastEnteredState = prev.State
 	}
@@ -112,8 +112,8 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 	if err != nil {
 		return prev, err
 	}
-	if err := writeAtomic(rc.paths.prompt, []byte(prompt)); err != nil {
-		return prev, fmt.Errorf("loop: capture prompt: %w", err)
+	if werr := writeAtomic(rc.paths.prompt, []byte(prompt)); werr != nil {
+		return prev, fmt.Errorf("loop: capture prompt: %w", werr)
 	}
 
 	// 4. Run the runner (skipped on --dry-run).
@@ -142,7 +142,7 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 	// 5. Gate hook (post-runner, pre-routing).
 	commits := 0
 	if beforeHead != "" {
-		if n, err := git.CountCommits(ctx, rc.repo, beforeHead, "HEAD"); err == nil {
+		if n, cerr := git.CountCommits(ctx, rc.repo, beforeHead, "HEAD"); cerr == nil {
 			commits = n
 		}
 	}
@@ -150,15 +150,15 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 
 	// 6. Write the iter JSON (post-iteration sees this on stdin + env).
 	preJSON := composeIterRecord(rc, prev, prev, sess, mode, gateResult, bd.Diff{}, commits, now, beforeHead)
-	if err := writeIterJSON(rc.paths.json, preJSON); err != nil {
-		return prev, fmt.Errorf("loop: write iter json: %w", err)
+	if werr := writeIterJSON(rc.paths.json, preJSON); werr != nil {
+		return prev, fmt.Errorf("loop: write iter json: %w", werr)
 	}
 
 	// 7. Global post-iteration hook (stdin = iter json).
 	postEnv := buildHookEnv(rc, hooks.PhaseEnter, "")
 	postEnv.IterJSON = rc.paths.json
 	postEnv.PromptFile = rc.paths.prompt
-	if f, err := os.Open(rc.paths.json); err == nil {
+	if f, oerr := os.Open(rc.paths.json); oerr == nil { //nolint:gosec // path joined from rc.repo + state-controlled stem
 		_, _ = hooks.Run(ctx, hooks.GlobalPath(rc.repo, "post-iteration"), postEnv, f)
 		_ = f.Close()
 	}
@@ -188,7 +188,7 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 		env := buildHookEnv(rc, hooks.PhaseExit, string(next.State))
 		_, hErr := hooks.Run(ctx, hooks.StatePath(rc.repo, string(prev.State), hooks.PhaseExit), env, nil)
 		if hErr != nil {
-			rc.log.Warn("exit hook error", "state", prev.State, "err", hErr)
+			rc.log.WarnContext(ctx, "exit hook error", "state", prev.State, "err", hErr)
 		}
 	}
 
@@ -204,11 +204,11 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 	// 13. Compose narrative + append summary.jsonl + transitions.jsonl.
 	currentHead, _ := git.HeadSHA(ctx, rc.repo)
 	rec := composeIterRecord(rc, prev, next, sess, mode, gateResult, diff, commits, now, currentHead)
-	if err := rc.sum.Write(rec); err != nil {
-		rc.log.Error("write summary failed", "err", err)
+	if werr := rc.sum.Write(rec); werr != nil {
+		rc.log.ErrorContext(ctx, "write summary failed", "err", werr)
 	}
-	if err := rc.run.AppendTransition(runs.Transition{
-		Ts:           now,
+	if werr := rc.run.AppendTransition(runs.Transition{
+		TS:           now,
 		Iter:         rec.Iter,
 		From:         string(prev.State),
 		To:           string(next.State),
@@ -216,13 +216,13 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 		RunnerMode:   string(mode),
 		GateResult:   gateResult,
 		CostUSDDelta: rec.CostUSD,
-	}); err != nil {
-		rc.log.Error("append transition failed", "err", err)
+	}); werr != nil {
+		rc.log.ErrorContext(ctx, "append transition failed", "err", werr)
 	}
 
 	// 14. Write an incident if this transition triggers one.
-	if err := writeIncidentIfNeeded(rc, prev, next, mode, gateResult, rec.IterID); err != nil {
-		rc.log.Error("incident write failed", "err", err)
+	if werr := writeIncidentIfNeeded(rc, prev, next, mode, gateResult, rec.IterID); werr != nil {
+		rc.log.ErrorContext(ctx, "incident write failed", "err", werr)
 	}
 	rc.lastGateResult = gateResult
 
@@ -304,7 +304,7 @@ func runGate(ctx context.Context, rc *runContext, prev fsm.Outcome, commits int)
 	env.PromptFile = rc.paths.prompt
 	res, err := hooks.Run(gateCtx, hooks.StatePath(rc.repo, string(prev.State), hooks.PhaseGate), env, nil)
 	if err != nil {
-		rc.log.Warn("gate hook error", "state", prev.State, "err", err)
+		rc.log.WarnContext(gateCtx, "gate hook error", "state", prev.State, "err", err)
 		return narrative.GateFailed
 	}
 	if res.NoHook {
@@ -323,7 +323,7 @@ func buildHookEnv(rc *runContext, phase hooks.Phase, nextState string) hooks.Env
 	e := hooks.Env{
 		Repo:       rc.repo,
 		Iter:       rc.fsm.Iter,
-		State:      string(rc.fsm.Outcome.State),
+		State:      string(rc.fsm.State),
 		PromptFile: rc.paths.prompt,
 	}
 	if phase == hooks.PhaseExit {
@@ -490,7 +490,7 @@ func writeIncidentIfNeeded(rc *runContext, prev, next fsm.Outcome, mode runner.M
 func snapshotBD(ctx context.Context, rc *runContext) *bd.Snapshot {
 	snap, err := rc.bdClient.Snapshot(ctx)
 	if err != nil {
-		rc.log.Warn("bd snapshot failed", "err", err)
+		rc.log.WarnContext(ctx, "bd snapshot failed", "err", err)
 		return nil
 	}
 	return snap
@@ -509,7 +509,7 @@ func writeIterJSON(path string, rec IterRecord) error {
 // writeAtomic writes b to path via temp + fsync + rename in same dir.
 func writeAtomic(path string, b []byte) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("loop: mkdir %s: %w", dir, err)
 	}
 	tmp, err := os.CreateTemp(dir, ".iter-*.tmp")

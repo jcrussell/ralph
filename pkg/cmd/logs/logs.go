@@ -15,12 +15,14 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jcrussell/ralph/pkg/cmdutil"
 	"github.com/spf13/cobra"
+
+	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
 
 const summaryRel = ".ralph/state/logs/summary.jsonl"
 
+// Options is the three-part command shape's Options struct.
 type Options struct {
 	F *cmdutil.Factory
 
@@ -32,6 +34,7 @@ type Options struct {
 	pollInterval time.Duration
 }
 
+// NewCmdLogs returns the cobra command for `ralph logs`.
 func NewCmdLogs(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	opts := &Options{F: f, pollInterval: 200 * time.Millisecond}
 	cmd := &cobra.Command{
@@ -74,14 +77,14 @@ func run(ctx context.Context, opts *Options) error {
 }
 
 func scanFile(path string, opts *Options) error {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // path joined from RepoRoot()/.ralph/state/logs/summary.jsonl
 	if errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("logs: no records at %s", path)
 	}
 	if err != nil {
 		return fmt.Errorf("logs: open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return emit(f, opts)
 }
 
@@ -105,7 +108,7 @@ func emitLine(line []byte, opts *Options) error {
 	if err != nil {
 		// Skip unparseable lines but surface to ErrOut so they're not
 		// lost.
-		fmt.Fprintf(opts.F.IOStreams.ErrOut, "logs: skip malformed line: %v\n", err)
+		_, _ = fmt.Fprintf(opts.F.IOStreams.ErrOut, "logs: skip malformed line: %v\n", err)
 		return nil
 	}
 	if opts.Iter > 0 && rec.Iter != opts.Iter {
@@ -113,16 +116,16 @@ func emitLine(line []byte, opts *Options) error {
 	}
 	switch {
 	case opts.JSON:
-		fmt.Fprintf(opts.F.IOStreams.Out, "%s\n", line)
+		_, _ = fmt.Fprintf(opts.F.IOStreams.Out, "%s\n", line)
 	case opts.Iter > 0:
 		// Single-record mode: pretty JSON.
-		pretty, err := json.MarshalIndent(rec.raw, "", "  ")
-		if err != nil {
-			return err
+		pretty, perr := json.MarshalIndent(rec.raw, "", "  ")
+		if perr != nil {
+			return perr
 		}
-		fmt.Fprintf(opts.F.IOStreams.Out, "%s\n", pretty)
+		_, _ = fmt.Fprintf(opts.F.IOStreams.Out, "%s\n", pretty)
 	default:
-		fmt.Fprintln(opts.F.IOStreams.Out, formatNarrative(rec))
+		_, _ = fmt.Fprintln(opts.F.IOStreams.Out, formatNarrative(rec))
 	}
 	return nil
 }
@@ -161,7 +164,7 @@ func formatNarrative(rec record) string {
 // tailFile prints the entire file once, then polls for appends until
 // ctx is canceled. KISS — simple seek+sleep loop, no inotify.
 func tailFile(ctx context.Context, path string, opts *Options) error {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // path joined from RepoRoot()/.ralph/state/logs/summary.jsonl
 	if errors.Is(err, fs.ErrNotExist) {
 		// File may not exist yet; create-and-wait.
 		f, err = waitForFile(ctx, path, opts.pollInterval)
@@ -171,7 +174,7 @@ func tailFile(ctx context.Context, path string, opts *Options) error {
 	} else if err != nil {
 		return fmt.Errorf("logs: open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	rdr := bufio.NewReader(f)
 	for {
@@ -197,7 +200,7 @@ func tailFile(ctx context.Context, path string, opts *Options) error {
 
 func waitForFile(ctx context.Context, path string, every time.Duration) (*os.File, error) {
 	for {
-		f, err := os.Open(path)
+		f, err := os.Open(path) //nolint:gosec // path joined from RepoRoot()/.ralph/state/logs/summary.jsonl
 		if err == nil {
 			return f, nil
 		}

@@ -86,14 +86,14 @@ func (s Scope) OOMKilled() bool {
 // when oom_kill is > 0. A missing file returns false, nil (not an
 // error condition for this caller).
 func OOMKilledFile(path string) (bool, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // path is the cgroup memory.events file derived from Scope.EventsPath
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("isolation: open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	s := bufio.NewScanner(f)
 	for s.Scan() {
 		line := s.Text()
@@ -120,7 +120,7 @@ func OOMKilledFile(path string) (bool, error) {
 // already-dead unit yields a non-nil error from systemctl that the
 // caller may ignore.
 func (s Scope) Kill(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "systemctl", "--user", "kill", s.Unit)
+	cmd := exec.CommandContext(ctx, "systemctl", "--user", "kill", s.Unit) //nolint:gosec // s.Unit derived from package-internal NewScope, byob-input-validation.3
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("isolation: kill %s: %w: %s", s.Unit, err, strings.TrimSpace(string(out)))
 	}
@@ -130,7 +130,7 @@ func (s Scope) Kill(ctx context.Context) error {
 // ResetFailed clears the failed state of the scope unit so it doesn't
 // linger in systemd's status output between iterations.
 func (s Scope) ResetFailed(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "systemctl", "--user", "reset-failed", s.Unit)
+	cmd := exec.CommandContext(ctx, "systemctl", "--user", "reset-failed", s.Unit) //nolint:gosec // s.Unit derived from package-internal NewScope, byob-input-validation.3
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("isolation: reset-failed %s: %w: %s", s.Unit, err, strings.TrimSpace(string(out)))
 	}

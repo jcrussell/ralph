@@ -12,8 +12,8 @@ import (
 	"github.com/jcrussell/ralph/internal/config"
 	"github.com/jcrussell/ralph/internal/fsm"
 	"github.com/jcrussell/ralph/internal/hooks"
-	ralphlog "github.com/jcrussell/ralph/internal/log"
 	"github.com/jcrussell/ralph/internal/lock"
+	ralphlog "github.com/jcrussell/ralph/internal/log"
 	"github.com/jcrussell/ralph/internal/runner"
 	"github.com/jcrussell/ralph/internal/runs"
 	"github.com/jcrussell/ralph/pkg/iostreams"
@@ -129,8 +129,8 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 	// leave the stale terminal state on disk.
 	if opts.Fresh {
 		f = fsm.Fresh()
-		if err := f.Save(opts.Repo); err != nil {
-			return fsm.Outcome{}, fmt.Errorf("loop: reset fsm: %w", err)
+		if serr := f.Save(opts.Repo); serr != nil {
+			return fsm.Outcome{}, fmt.Errorf("loop: reset fsm: %w", serr)
 		}
 	}
 	if opts.ReviewMode {
@@ -140,8 +140,8 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 	}
 	// Refuse to silently no-op against a pre-existing terminal FSM. Done
 	// before runs.Begin so no zombie run dir is created.
-	if f.Outcome.State.Terminal() {
-		fmt.Fprintf(opts.IO.ErrOut,
+	if f.State.Terminal() {
+		_, _ = fmt.Fprintf(opts.IO.ErrOut,
 			"ralph: fsm is in terminal state %s; pass --fresh to reset, or inspect .ralph/state/fsm.json\n",
 			f.Outcome)
 		return fsm.Outcome{}, ErrTerminalState
@@ -183,7 +183,7 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 
 	// Handle the virtual start state inline: route immediately without
 	// running the runner, hooks, or rendering a prompt.
-	if rc.fsm.Outcome.State == fsm.StateStart {
+	if rc.fsm.State == fsm.StateStart {
 		if err := handleStartState(ctx, rc); err != nil {
 			return rc.fsm.Outcome, err
 		}
@@ -192,7 +192,7 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 
 	// Main loop — terminates when the FSM enters a terminal state, ctx
 	// is cancelled, or --once after one non-terminal iteration.
-	for !rc.fsm.Outcome.State.Terminal() {
+	for !rc.fsm.State.Terminal() {
 		if err := ctx.Err(); err != nil {
 			finalOutcome = rc.fsm.Outcome
 			return rc.fsm.Outcome, err
@@ -209,16 +209,16 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 	}
 
 	// Terminal dispatch: failure hook fires on failed{}.
-	if rc.fsm.Outcome.State == fsm.StateFailed {
+	if rc.fsm.State == fsm.StateFailed {
 		env := hooks.Env{
 			Repo:          rc.repo,
 			Iter:          rc.fsm.Iter,
-			State:         string(rc.fsm.Outcome.State),
-			FailureMode:   string(rc.fsm.Outcome.Reason), // best mapping we have post-routing
-			FailureReason: string(rc.fsm.Outcome.Reason),
+			State:         string(rc.fsm.State),
+			FailureMode:   string(rc.fsm.Reason), // best mapping we have post-routing
+			FailureReason: string(rc.fsm.Reason),
 		}
 		if _, hErr := hooks.Run(ctx, hooks.GlobalPath(rc.repo, "failure"), env, nil); hErr != nil {
-			logger.Warn("failure hook error", "err", hErr)
+			logger.WarnContext(ctx, "failure hook error", "err", hErr)
 		}
 	}
 	return rc.fsm.Outcome, nil
@@ -244,13 +244,13 @@ func handleStartState(ctx context.Context, rc *runContext) error {
 	}
 	now := rc.clock.Now().UTC()
 	if err := rc.run.AppendTransition(runs.Transition{
-		Ts:     now,
+		TS:     now,
 		Iter:   rc.fsm.Iter,
 		From:   string(prev.State),
 		To:     string(next.State),
 		Reason: string(next.Reason),
 	}); err != nil {
-		rc.log.Error("start: append transition", "err", err)
+		rc.log.ErrorContext(ctx, "start: append transition", "err", err)
 	}
 	return nil
 }

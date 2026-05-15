@@ -28,6 +28,7 @@ type Config struct {
 	Review  ReviewConfig  `toml:"review"`
 }
 
+// LoopConfig holds the [loop] section.
 type LoopConfig struct {
 	MaxIterations      int    `toml:"max_iterations"`
 	SessionTimeoutSecs int    `toml:"session_timeout_secs"`
@@ -35,18 +36,21 @@ type LoopConfig struct {
 	SleepBetweenSecs   int    `toml:"sleep_between_secs"`
 }
 
+// RunnerConfig holds the [runner] section.
 type RunnerConfig struct {
 	Command string   `toml:"command"`
 	Args    []string `toml:"args"`
 	Model   string   `toml:"model"`
 }
 
+// GateConfig holds the [gate] section.
 type GateConfig struct {
 	TimeoutSecs int    `toml:"timeout_secs"`
 	SoftFail    bool   `toml:"soft_fail"`
 	RunWhen     string `toml:"run_when"`
 }
 
+// BackoffConfig holds the [backoff] section.
 type BackoffConfig struct {
 	UnknownSecs          int `toml:"unknown_secs"`
 	OOMSecs              int `toml:"oom_secs"`
@@ -56,11 +60,13 @@ type BackoffConfig struct {
 	DirtyRevertThreshold int `toml:"dirty_revert_threshold"`
 }
 
+// BudgetConfig holds the [budget] section.
 type BudgetConfig struct {
 	MaxCostUSD       float64 `toml:"max_cost_usd"`
 	MaxWallclockSecs int     `toml:"max_wallclock_secs"`
 }
 
+// ReviewConfig holds the [review] section.
 type ReviewConfig struct {
 	BaseBranch string `toml:"base_branch"`
 }

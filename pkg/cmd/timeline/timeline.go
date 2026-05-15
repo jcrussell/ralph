@@ -16,13 +16,15 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/jcrussell/ralph/internal/runs"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
-	"github.com/spf13/cobra"
 )
 
 const summaryRel = ".ralph/state/logs/summary.jsonl"
 
+// Options is the three-part command shape's Options struct.
 type Options struct {
 	F *cmdutil.Factory
 
@@ -32,6 +34,7 @@ type Options struct {
 	JSON   bool   // emit raw transition JSONL
 }
 
+// NewCmdTimeline returns the cobra command for `ralph timeline`.
 func NewCmdTimeline(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	opts := &Options{F: f}
 	cmd := &cobra.Command{
@@ -68,7 +71,7 @@ func run(_ context.Context, opts *Options) error {
 	r, err := runs.Latest(repo)
 	if err != nil {
 		if errors.Is(err, runs.ErrNoRuns) {
-			fmt.Fprintln(opts.F.IOStreams.ErrOut, "timeline: no runs found")
+			_, _ = fmt.Fprintln(opts.F.IOStreams.ErrOut, "timeline: no runs found")
 			return nil
 		}
 		return fmt.Errorf("timeline: open latest run: %w", err)
@@ -87,7 +90,7 @@ func run(_ context.Context, opts *Options) error {
 	narrByIter, _ := loadNarratives(filepath.Join(repo, summaryRel))
 
 	for _, t := range transitions {
-		if !since.IsZero() && t.Ts.Before(since) {
+		if !since.IsZero() && t.TS.Before(since) {
 			continue
 		}
 		if opts.State != "" && t.From != opts.State && t.To != opts.State {
@@ -97,14 +100,14 @@ func run(_ context.Context, opts *Options) error {
 			continue
 		}
 		if opts.JSON {
-			b, err := json.Marshal(t)
-			if err != nil {
-				return fmt.Errorf("timeline: marshal transition: %w", err)
+			b, jerr := json.Marshal(t)
+			if jerr != nil {
+				return fmt.Errorf("timeline: marshal transition: %w", jerr)
 			}
-			fmt.Fprintln(opts.F.IOStreams.Out, string(b))
+			_, _ = fmt.Fprintln(opts.F.IOStreams.Out, string(b))
 			continue
 		}
-		fmt.Fprintln(opts.F.IOStreams.Out, formatLine(t, narrByIter[t.Iter]))
+		_, _ = fmt.Fprintln(opts.F.IOStreams.Out, formatLine(t, narrByIter[t.Iter]))
 	}
 	return nil
 }
@@ -125,14 +128,14 @@ func parseSince(spec string) (time.Time, error) {
 // missing file returns an empty map and no error — narrative is
 // optional context.
 func loadNarratives(path string) (map[int]string, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // path joined from RepoRoot()
 	if errors.Is(err, fs.ErrNotExist) {
 		return map[int]string{}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("timeline: open summary: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	out := map[int]string{}
 	sc := bufio.NewScanner(f)
@@ -162,7 +165,7 @@ func loadNarratives(path string) (map[int]string, error) {
 //
 // Reason, when set, appears in brackets after the to-state.
 func formatLine(t runs.Transition, narr string) string {
-	head := fmt.Sprintf("%s  iter %04d  %s → %s", t.Ts.UTC().Format(time.RFC3339), t.Iter, t.From, t.To)
+	head := fmt.Sprintf("%s  iter %04d  %s → %s", t.TS.UTC().Format(time.RFC3339), t.Iter, t.From, t.To)
 	if t.Reason != "" {
 		head += " [" + t.Reason + "]"
 	}

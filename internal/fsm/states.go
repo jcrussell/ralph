@@ -14,6 +14,7 @@ import "fmt"
 // failed are terminal and carry a Reason.
 type State string
 
+// FSM state names.
 const (
 	StateStart  State = "start"
 	StateClean  State = "clean"
@@ -29,14 +30,13 @@ const (
 // Non-terminal states carry ReasonNone.
 type Reason string
 
+// Terminal-state reasons. ReasonNone is used by non-terminal states;
+// ReasonQueueEmpty/ReasonIterCap pair with StateDone; ReasonBudget,
+// ReasonAuth, and ReasonRunnerTerminal pair with StateFailed.
 const (
-	ReasonNone Reason = ""
-
-	// done{Reason}
-	ReasonQueueEmpty Reason = "queue_empty"
-	ReasonIterCap    Reason = "iter_cap"
-
-	// failed{Reason}
+	ReasonNone           Reason = ""
+	ReasonQueueEmpty     Reason = "queue_empty"
+	ReasonIterCap        Reason = "iter_cap"
 	ReasonBudget         Reason = "budget"
 	ReasonAuth           Reason = "auth"
 	ReasonRunnerTerminal Reason = "runner_terminal"

@@ -4,6 +4,8 @@
 package root
 
 import (
+	"github.com/spf13/cobra"
+
 	"github.com/jcrussell/ralph/pkg/cmd/doctor"
 	fsmcmd "github.com/jcrussell/ralph/pkg/cmd/fsm"
 	"github.com/jcrussell/ralph/pkg/cmd/hook"
@@ -18,9 +20,9 @@ import (
 	"github.com/jcrussell/ralph/pkg/cmd/trace"
 	"github.com/jcrussell/ralph/pkg/cmd/version"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
-	"github.com/spf13/cobra"
 )
 
+// NewCmdRoot returns the root cobra command for `ralph`.
 func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "ralph",

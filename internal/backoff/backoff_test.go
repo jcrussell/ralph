@@ -185,10 +185,10 @@ func TestExpBackoffCap(t *testing.T) {
 		n    int
 		want time.Duration
 	}{
-		{-3, base},                   // negative clamps to 0
-		{0, base},                    // 2^0
-		{4, base * 16},               // 2^4
-		{99, base * (1 << expCap)},   // clamps to expCap
+		{-3, base},                 // negative clamps to 0
+		{0, base},                  // 2^0
+		{4, base * 16},             // 2^4
+		{99, base * (1 << expCap)}, // clamps to expCap
 	}
 	for _, c := range cases {
 		got := expBackoff(base, c.n)

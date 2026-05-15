@@ -150,7 +150,7 @@ func run(ctx context.Context, repo string, args ...string) ([]byte, error) {
 	if repo == "" {
 		return nil, fmt.Errorf("git: empty repo path")
 	}
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // args are package-internal literals, byob-input-validation.3
 	cmd.Dir = repo
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

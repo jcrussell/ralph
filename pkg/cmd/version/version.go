@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"runtime/debug"
 
-	"github.com/jcrussell/ralph/pkg/cmdutil"
 	"github.com/spf13/cobra"
+
+	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
 
 // Set at build time via -ldflags; empty in `go run` / `go build` without flags.
@@ -15,10 +16,12 @@ var (
 	Date    = ""
 )
 
+// Options is the three-part command shape's Options struct.
 type Options struct {
 	F *cmdutil.Factory
 }
 
+// NewCmdVersion returns the cobra command for `ralph version`.
 func NewCmdVersion(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	opts := &Options{F: f}
 	return &cobra.Command{
@@ -53,13 +56,13 @@ func versionRun(opts *Options) error {
 	if v == "" {
 		v = "dev"
 	}
-	fmt.Fprintf(opts.F.IOStreams.Out, "ralph %s", v)
+	_, _ = fmt.Fprintf(opts.F.IOStreams.Out, "ralph %s", v)
 	if commit != "" {
-		fmt.Fprintf(opts.F.IOStreams.Out, " (%s)", commit)
+		_, _ = fmt.Fprintf(opts.F.IOStreams.Out, " (%s)", commit)
 	}
 	if Date != "" {
-		fmt.Fprintf(opts.F.IOStreams.Out, " built %s", Date)
+		_, _ = fmt.Fprintf(opts.F.IOStreams.Out, " built %s", Date)
 	}
-	fmt.Fprintln(opts.F.IOStreams.Out)
+	_, _ = fmt.Fprintln(opts.F.IOStreams.Out)
 	return nil
 }

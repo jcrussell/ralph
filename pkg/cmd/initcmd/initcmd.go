@@ -14,18 +14,21 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/jcrussell/ralph/pkg/cmdutil"
 	"github.com/spf13/cobra"
+
+	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
 
 //go:embed all:defaults
 var defaultsFS embed.FS
 
+// Options is the three-part command shape's Options struct.
 type Options struct {
 	F     *cmdutil.Factory
 	Force bool
 }
 
+// NewCmdInit returns the cobra command for `ralph init`.
 func NewCmdInit(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	opts := &Options{F: f}
 	cmd := &cobra.Command{
@@ -81,14 +84,14 @@ func scaffold(repo string, opts *Options) error {
 			return err
 		}
 		if written {
-			fmt.Fprintf(io.ErrOut, "created %s\n", fe.dst)
+			_, _ = fmt.Fprintf(io.ErrOut, "created %s\n", fe.dst)
 			s.created++
 		} else {
-			fmt.Fprintf(io.ErrOut, "skipped %s\n", fe.dst)
+			_, _ = fmt.Fprintf(io.ErrOut, "skipped %s\n", fe.dst)
 			s.skipped++
 		}
 	}
-	fmt.Fprintf(io.Out, "%d created, %d skipped\n", s.created, s.skipped)
+	_, _ = fmt.Fprintf(io.Out, "%d created, %d skipped\n", s.created, s.skipped)
 	return nil
 }
 
@@ -167,7 +170,7 @@ func writeOne(dst string, content []byte, exec, force bool) (bool, error) {
 	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return false, err
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
 		return false, fmt.Errorf("init: mkdir %s: %w", filepath.Dir(dst), err)
 	}
 	mode := fs.FileMode(0o644)

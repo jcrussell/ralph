@@ -31,14 +31,14 @@ func Run(args []string) int {
 	case errors.Is(err, cmdutil.ErrSilent):
 		return 1
 	case errors.As(err, new(*cmdutil.FlagError)):
-		fmt.Fprintln(f.IOStreams.ErrOut, err)
+		_, _ = fmt.Fprintln(f.IOStreams.ErrOut, err)
 		return 2
 	default:
 		var exit *cmdutil.ExitCodeError
 		if errors.As(err, &exit) {
 			return exit.Code
 		}
-		fmt.Fprintln(f.IOStreams.ErrOut, "error:", err)
+		_, _ = fmt.Fprintln(f.IOStreams.ErrOut, "error:", err)
 		return 1
 	}
 }

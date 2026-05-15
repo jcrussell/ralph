@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+
 	"github.com/jcrussell/ralph/internal/fsm"
 )
 
@@ -25,8 +26,8 @@ func TestBeginCreatesDirAndManifest(t *testing.T) {
 	if !filepath.IsAbs(r.Dir()) {
 		t.Fatalf("Dir not absolute: %s", r.Dir())
 	}
-	if _, err := os.Stat(filepath.Join(r.Dir(), "manifest.json")); err != nil {
-		t.Fatalf("manifest missing: %v", err)
+	if _, serr := os.Stat(filepath.Join(r.Dir(), "manifest.json")); serr != nil {
+		t.Fatalf("manifest missing: %v", serr)
 	}
 
 	m, err := r.ReadManifest()
@@ -56,13 +57,13 @@ func TestAppendAndReadTransitions(t *testing.T) {
 	t.Cleanup(func() { _ = r.Close() })
 
 	want := []Transition{
-		{Ts: time.Unix(1, 0).UTC(), Iter: 1, From: "start", To: "clean"},
-		{Ts: time.Unix(2, 0).UTC(), Iter: 2, From: "clean", To: "dirty", Reason: ""},
-		{Ts: time.Unix(3, 0).UTC(), Iter: 3, From: "dirty", To: "clean", RunnerMode: "ok", CostUSDDelta: 0.42},
+		{TS: time.Unix(1, 0).UTC(), Iter: 1, From: "start", To: "clean"},
+		{TS: time.Unix(2, 0).UTC(), Iter: 2, From: "clean", To: "dirty", Reason: ""},
+		{TS: time.Unix(3, 0).UTC(), Iter: 3, From: "dirty", To: "clean", RunnerMode: "ok", CostUSDDelta: 0.42},
 	}
 	for _, tr := range want {
-		if err := r.AppendTransition(tr); err != nil {
-			t.Fatalf("Append: %v", err)
+		if aerr := r.AppendTransition(tr); aerr != nil {
+			t.Fatalf("Append: %v", aerr)
 		}
 	}
 	got, err := r.ReadTransitions()

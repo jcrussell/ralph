@@ -10,11 +10,12 @@ import (
 	"context"
 	"errors"
 
+	"github.com/spf13/cobra"
+
 	"github.com/jcrussell/ralph/internal/config"
 	"github.com/jcrussell/ralph/internal/loop"
 	reviewlib "github.com/jcrussell/ralph/internal/review"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
-	"github.com/spf13/cobra"
 )
 
 // Options is the three-part command shape's Options struct.
@@ -100,8 +101,8 @@ func runReview(ctx context.Context, opts *Options) error {
 	}
 
 	if opts.PR != 0 {
-		if err := reviewlib.CheckoutPR(ctx, repo, opts.PR); err != nil {
-			return err
+		if cerr := reviewlib.CheckoutPR(ctx, repo, opts.PR); cerr != nil {
+			return cerr
 		}
 	}
 

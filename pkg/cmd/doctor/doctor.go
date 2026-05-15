@@ -14,9 +14,10 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/jcrussell/ralph/internal/isolation"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
-	"github.com/spf13/cobra"
 )
 
 // Probes are the host-touching primitives every check funnels
@@ -86,7 +87,7 @@ func doctorRun(ctx context.Context, opts *Options) error {
 			mark = "FAIL"
 			failed++
 		}
-		fmt.Fprintf(io.Out, "[%4s] %-14s  %s\n", mark, r.Name, r.Detail)
+		_, _ = fmt.Fprintf(io.Out, "[%4s] %-14s  %s\n", mark, r.Name, r.Detail)
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d check(s) failed", failed)

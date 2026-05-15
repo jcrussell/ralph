@@ -68,7 +68,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, cwd string, extraEnv []
 		return nil, errors.New("runner: empty command")
 	}
 	start := time.Now()
-	cmd := exec.CommandContext(ctx, r.cmd, r.args...)
+	cmd := exec.CommandContext(ctx, r.cmd, r.args...) //nolint:gosec // r.cmd/r.args from operator-controlled config; KISS without /usr/bin/env wrapper
 	cmd.Dir = cwd
 	cmd.Stdin = strings.NewReader(prompt)
 	var stdout, stderr bytes.Buffer
@@ -187,4 +187,3 @@ func tail(s string, n int) string {
 	}
 	return s[len(s)-n:]
 }
-

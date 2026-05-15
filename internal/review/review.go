@@ -71,7 +71,7 @@ func CheckoutPR(ctx context.Context, repo string, pr int) error {
 	if pr <= 0 {
 		return fmt.Errorf("review: invalid PR number %d", pr)
 	}
-	cmd := exec.CommandContext(ctx, "gh", "pr", "checkout", fmt.Sprintf("%d", pr))
+	cmd := exec.CommandContext(ctx, "gh", "pr", "checkout", fmt.Sprintf("%d", pr)) //nolint:gosec // pr validated as positive int above, byob-input-validation.3
 	cmd.Dir = repo
 	out, err := cmd.CombinedOutput()
 	if err != nil {

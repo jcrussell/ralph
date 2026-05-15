@@ -1,0 +1,95 @@
+# Pinned floor for byob-shaped Go CLIs. Schema: golangci-lint v2.
+# Implements byob-release.7. See bead ralph-e95 for the make-lint wiring
+# and bd memories lint-floor-rationale for why specific linters were
+# included or omitted.
+
+version: "2"
+
+linters:
+  default: none
+  enable:
+    # Default-on, listed for clarity.
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    # byob idioms.
+    - errorlint     # byob-errors.1/.5 — errors.Is/As + wrap discipline
+    - forbidigo     # byob-iostreams.1 — no os.Std* outside iostreams
+    - sloglint      # byob-logging.1/.2 — slog hygiene + ctx variants
+    - gosec         # byob-input-validation.1/.3, byob-security.4
+    - depguard      # byob-logging.1, byob-http-client.1/.4 — block competitors
+    - revive        # byob-errors.1 naming + exported-doc shape
+    - contextcheck  # byob-lifecycle.1 — non-inherited ctx
+    - noctx         # byob-lifecycle.1 — http.Get without ctx, etc.
+
+  settings:
+    govet:
+      enable:
+        - nilness   # backstop for byob-errors.5 typed-nil-in-interface
+        - shadow
+    staticcheck:
+      checks:
+        - all
+        - "-ST1000" # package comment not mandated on internal/ pkgs
+    revive:
+      rules:
+        - name: exported
+        - name: var-naming
+        - name: receiver-naming
+        - name: unused-receiver
+        - name: error-naming      # byob-errors.1 — *Error / Err* sentinels
+        - name: error-return      # error must be the last return value
+    forbidigo:
+      forbid:
+        - pattern: '^os\.Std(in|out|err)$'
+          msg: write through *iostreams.IOStreams (byob-iostreams.1)
+    sloglint:
+      no-mixed-args: true
+      context: scope    # require slog.*Context variants — byob-logging.2
+      static-msg: true
+    depguard:
+      rules:
+        loggers:
+          deny:
+            - pkg: github.com/sirupsen/logrus
+              desc: use log/slog (byob-logging.1)
+            - pkg: go.uber.org/zap
+              desc: use log/slog (byob-logging.1)
+            - pkg: github.com/rs/zerolog
+              desc: use log/slog (byob-logging.1)
+        http:
+          deny:
+            - pkg: github.com/hashicorp/go-retryablehttp
+              desc: use net/http with a RoundTripper chain (byob-http-client.1)
+            - pkg: github.com/go-resty/resty
+              desc: use net/http with a RoundTripper chain (byob-http-client.1)
+            - pkg: github.com/h2non/gock
+              desc: test HTTP via httptest.NewServer (byob-http-client.4)
+            - pkg: github.com/jarcoal/httpmock
+              desc: test HTTP via httptest.NewServer (byob-http-client.4)
+    gosec:
+      excludes:
+        - G104    # duplicates errcheck
+        - G115    # int conversion overflow — too noisy on safe widening
+
+  exclusions:
+    rules:
+      # The iostreams package legitimately wraps os.Std*.
+      - path: pkg/iostreams/
+        linters: [forbidigo]
+      # gendocs is a build tool, not a user-facing command.
+      - path: tools/gendocs/
+        linters: [forbidigo]
+      # Test fixtures: relax checks that don't apply to scaffolding.
+      - path: _test\.go
+        linters: [errcheck, gosec, revive, noctx]
+
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/jcrussell/ralph

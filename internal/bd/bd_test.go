@@ -80,8 +80,8 @@ func TestClientCreateAndCloseRoundTrip(t *testing.T) {
 		t.Errorf("labels = %v, want to contain 'test'", issues[0].Labels)
 	}
 
-	if err := c.Close(ctx, id); err != nil {
-		t.Fatalf("Close: %v", err)
+	if cerr := c.Close(ctx, id); cerr != nil {
+		t.Fatalf("Close: %v", cerr)
 	}
 	open, err := c.List(ctx, "open", "")
 	if err != nil {
@@ -146,8 +146,8 @@ func TestSnapshotAndDiff(t *testing.T) {
 	}
 
 	// Mutate: close A, create C.
-	if err := c.Close(ctx, idA); err != nil {
-		t.Fatal(err)
+	if cerr := c.Close(ctx, idA); cerr != nil {
+		t.Fatal(cerr)
 	}
 	idC, err := c.Create(ctx, CreateOpts{Title: "C", Type: "task", Priority: 2})
 	if err != nil {

@@ -10,12 +10,14 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/jcrussell/ralph/internal/fsm"
 	"github.com/jcrussell/ralph/internal/hooks"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
-	"github.com/spf13/cobra"
 )
 
+// Options is the three-part command shape's Options struct.
 type Options struct {
 	F *cmdutil.Factory
 
@@ -26,6 +28,7 @@ type Options struct {
 	ExtraEnv  []string
 }
 
+// NewCmdHook returns the cobra command for `ralph hook`.
 func NewCmdHook(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hook",
@@ -98,15 +101,15 @@ func run(ctx context.Context, opts *Options) error {
 
 	io := opts.F.IOStreams
 	if res.Stdout != "" {
-		fmt.Fprint(io.Out, res.Stdout)
+		_, _ = fmt.Fprint(io.Out, res.Stdout)
 		if !strings.HasSuffix(res.Stdout, "\n") {
-			fmt.Fprintln(io.Out)
+			_, _ = fmt.Fprintln(io.Out)
 		}
 	}
 	if res.Stderr != "" {
-		fmt.Fprint(io.ErrOut, res.Stderr)
+		_, _ = fmt.Fprint(io.ErrOut, res.Stderr)
 		if !strings.HasSuffix(res.Stderr, "\n") {
-			fmt.Fprintln(io.ErrOut)
+			_, _ = fmt.Fprintln(io.ErrOut)
 		}
 	}
 	if res.ExitCode != 0 {
@@ -119,7 +122,7 @@ func run(ctx context.Context, opts *Options) error {
 // or absolute) into an absolute path and verifies containment under
 // <repo>/.ralph/hooks/ (byob-input-validation.1).
 func resolvePath(repo, in string) (string, error) {
-	hooksDir, err := filepath.Abs(hooks.HooksDir(repo))
+	hooksDir, err := filepath.Abs(hooks.Dir(repo))
 	if err != nil {
 		return "", err
 	}

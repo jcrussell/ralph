@@ -26,6 +26,8 @@ type Factory struct {
 	//   Store      func() (store.Store, error)
 }
 
+// NewFactory builds the default Factory: real iostreams, lazy
+// memoized RepoRoot.
 func NewFactory() *Factory {
 	f := &Factory{
 		IOStreams: iostreams.System(),

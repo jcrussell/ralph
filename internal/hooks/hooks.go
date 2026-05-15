@@ -57,27 +57,28 @@ type Env struct {
 // Phase names a per-state phase.
 type Phase string
 
+// Per-state hook phases.
 const (
 	PhaseEnter Phase = "enter"
 	PhaseExit  Phase = "exit"
 	PhaseGate  Phase = "gate"
 )
 
-// HooksDir returns the .ralph/hooks directory under repoRoot.
-func HooksDir(repoRoot string) string {
+// Dir returns the .ralph/hooks directory under repoRoot.
+func Dir(repoRoot string) string {
 	return filepath.Join(repoRoot, ".ralph", "hooks")
 }
 
 // GlobalPath returns the absolute path of a global hook by name
 // (pre-iteration, post-iteration, failure).
 func GlobalPath(repoRoot, name string) string {
-	return filepath.Join(HooksDir(repoRoot), name)
+	return filepath.Join(Dir(repoRoot), name)
 }
 
 // StatePath returns the absolute path of a per-state hook for the
 // given state + phase.
 func StatePath(repoRoot, state string, phase Phase) string {
-	return filepath.Join(HooksDir(repoRoot), "states", state, string(phase))
+	return filepath.Join(Dir(repoRoot), "states", state, string(phase))
 }
 
 // Run executes the hook at path with the documented env. If path

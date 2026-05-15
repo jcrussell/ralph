@@ -11,16 +11,18 @@
 package fsm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
 
+	"github.com/spf13/cobra"
+
 	corefsm "github.com/jcrussell/ralph/internal/fsm"
 	"github.com/jcrussell/ralph/internal/runs"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
-	"github.com/spf13/cobra"
 )
 
 // NewCmdFSM returns the `ralph fsm` command with its two subcommands.
@@ -52,8 +54,8 @@ type Options struct {
 	JSON bool
 
 	// graph
-	Run       string // "latest" (default) | "all" | "<id>"
-	NoCounts  bool
+	Run      string // "latest" (default) | "all" | "<id>"
+	NoCounts bool
 }
 
 func newShow(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
@@ -208,11 +210,10 @@ func tallyOne(r *runs.Run, counts map[edge]int) error {
 // nodes; edges come from counts (or the canonical edge set when
 // counts is empty so the diagram is still informative).
 func writeMermaid(w io.Writer, state *corefsm.FSM, counts map[edge]int, bare bool) error {
-	fmt.Fprintln(w, "```mermaid")
-	fmt.Fprintln(w, "stateDiagram-v2")
-
-	// Pseudo-edges from start (initial) and to terminal states.
-	fmt.Fprintln(w, "  [*] --> start")
+	var buf bytes.Buffer
+	fmt.Fprintln(&buf, "```mermaid")
+	fmt.Fprintln(&buf, "stateDiagram-v2")
+	fmt.Fprintln(&buf, "  [*] --> start")
 
 	// When we have edge counts, emit only what was observed (plus the
 	// terminal arrows). When --no-counts is set or counts is empty,
@@ -220,26 +221,26 @@ func writeMermaid(w io.Writer, state *corefsm.FSM, counts map[edge]int, bare boo
 	edges := sortedEdges(counts)
 	if bare || len(edges) == 0 {
 		for _, e := range canonicalEdges() {
-			fmt.Fprintf(w, "  %s --> %s\n", e.From, e.To)
+			fmt.Fprintf(&buf, "  %s --> %s\n", e.From, e.To)
 		}
 	} else {
 		for _, e := range edges {
-			label := fmt.Sprintf(": %d", counts[e])
-			fmt.Fprintf(w, "  %s --> %s%s\n", e.From, e.To, label)
+			fmt.Fprintf(&buf, "  %s --> %s: %d\n", e.From, e.To, counts[e])
 		}
 	}
 
-	fmt.Fprintln(w, "  done --> [*]")
-	fmt.Fprintln(w, "  failed --> [*]")
+	fmt.Fprintln(&buf, "  done --> [*]")
+	fmt.Fprintln(&buf, "  failed --> [*]")
 
 	// Highlight the current state. classDef + class lines work in
 	// Mermaid 10+ for stateDiagram-v2.
-	fmt.Fprintln(w, "  classDef current fill:#88d,stroke:#225,color:#fff")
+	fmt.Fprintln(&buf, "  classDef current fill:#88d,stroke:#225,color:#fff")
 	if state != nil && state.State != "" {
-		fmt.Fprintf(w, "  class %s current\n", state.State)
+		fmt.Fprintf(&buf, "  class %s current\n", state.State)
 	}
-	fmt.Fprintln(w, "```")
-	return nil
+	fmt.Fprintln(&buf, "```")
+	_, err := w.Write(buf.Bytes())
+	return err
 }
 
 // canonicalEdges is the fixed FSM topology — mirrors

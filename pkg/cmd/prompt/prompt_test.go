@@ -1,6 +1,7 @@
 package prompt
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -63,7 +64,7 @@ func TestShowRunRendersTemplate(t *testing.T) {
 		Iter:       42,
 		GateResult: "passed",
 	}
-	if err := showRun(nil, opts); err != nil {
+	if err := showRun(context.Background(), opts); err != nil {
 		t.Fatalf("showRun: %v", err)
 	}
 	got := strings.TrimSpace(bufs.Out.String())
@@ -91,7 +92,7 @@ func TestShowRunUsesHeaderFooter(t *testing.T) {
 	io, bufs := iostreams.Test()
 	f := &cmdutil.Factory{IOStreams: io, RepoRoot: func() (string, error) { return repo, nil }}
 	opts := &Options{F: f, State: "clean"}
-	if err := showRun(nil, opts); err != nil {
+	if err := showRun(context.Background(), opts); err != nil {
 		t.Fatalf("showRun: %v", err)
 	}
 	got := strings.TrimSpace(bufs.Out.String())

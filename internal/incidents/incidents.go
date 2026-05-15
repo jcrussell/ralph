@@ -22,6 +22,7 @@ var ErrUnknownKind = errors.New("incidents: unknown kind")
 // label) is the lowercase form of the constant value.
 type Kind string
 
+// Incident kinds.
 const (
 	KindRevert          Kind = "revert"
 	KindTerminalFailure Kind = "terminal-failure"
@@ -67,7 +68,7 @@ func Write(repoRoot string, inc Incident) (string, error) {
 	ts = ts.UTC()
 
 	dir := Dir(repoRoot)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", fmt.Errorf("incidents: mkdir %s: %w", dir, err)
 	}
 	path := filepath.Join(dir, fmt.Sprintf("%d-%s.md", ts.UnixNano(), inc.Kind))
@@ -138,4 +139,3 @@ func writeAtomic(path string, fn func(io.Writer) error) error {
 	}
 	return nil
 }
-

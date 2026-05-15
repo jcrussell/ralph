@@ -137,7 +137,7 @@ func includeFile(dir, rel string) (string, error) {
 	if err != nil || strings.HasPrefix(rels, "..") {
 		return "", fmt.Errorf("promptlib: include %q: escapes prompts directory", rel)
 	}
-	b, err := os.ReadFile(full)
+	b, err := os.ReadFile(full) //nolint:gosec // full is contained under dir, verified by filepath.Rel above
 	if err != nil {
 		return "", fmt.Errorf("promptlib: include %s: %w", rel, err)
 	}
@@ -145,7 +145,7 @@ func includeFile(dir, rel string) (string, error) {
 }
 
 func readRequired(path string) (string, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // path joined from PromptsDir(repoRoot) + state literal
 	if err != nil {
 		return "", fmt.Errorf("promptlib: read %s: %w", path, err)
 	}
@@ -153,7 +153,7 @@ func readRequired(path string) (string, error) {
 }
 
 func readOptional(path string) (string, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // path joined from PromptsDir(repoRoot) + header/footer literal
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return "", nil

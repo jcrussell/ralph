@@ -77,7 +77,8 @@ func (c *Client) List(ctx context.Context, status, label string) ([]Issue, error
 	return c.runList(ctx, args)
 }
 
-// Create files a new issue. Returns the new ID.
+// CreateOpts is the input to Create. Fields with zero values fall back
+// to bd's defaults (e.g. Type="" → "task").
 type CreateOpts struct {
 	Title       string
 	Description string
@@ -233,7 +234,7 @@ func isClosed(status string) bool {
 // run executes bd with args and returns stdout. stderr is appended
 // to the error context on non-zero exit.
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, c.bin(), args...)
+	cmd := exec.CommandContext(ctx, c.bin(), args...) //nolint:gosec // args are package-internal literals, byob-input-validation.3
 	if c.dir != "" {
 		cmd.Dir = c.dir
 	}

@@ -38,9 +38,14 @@ func TestSelectNextStateTransitionMatrix(t *testing.T) {
 	rows := []row{
 		// ── 1. Terminal runner failure trumps everything else ──────────
 		{
-			name:          "runner_failure auth wins over budget+caps+dirty+dirty-streak",
-			fsm:           func() *FSM { f := Fresh(); f.CumulativeCostUSD = 99; f.Iter = 999; f.ConsecutiveDirty = 99; return f },
-			cfg:           func() *config.Config { c := config.Defaults(); c.Budget.MaxCostUSD = 1; c.Loop.MaxIterations = 1; return c },
+			name: "runner_failure auth wins over budget+caps+dirty+dirty-streak",
+			fsm:  func() *FSM { f := Fresh(); f.CumulativeCostUSD = 99; f.Iter = 999; f.ConsecutiveDirty = 99; return f },
+			cfg: func() *config.Config {
+				c := config.Defaults()
+				c.Budget.MaxCostUSD = 1
+				c.Loop.MaxIterations = 1
+				return c
+			},
 			repo:          dirtyRepo,
 			bd:            func() *stubBD { return &stubBD{} },
 			runnerFailure: ReasonAuth,
@@ -69,7 +74,12 @@ func TestSelectNextStateTransitionMatrix(t *testing.T) {
 		{
 			name: "budget exhausted beats iter cap",
 			fsm:  func() *FSM { f := Fresh(); f.CumulativeCostUSD = 2; f.Iter = 100; return f },
-			cfg:  func() *config.Config { c := config.Defaults(); c.Budget.MaxCostUSD = 1; c.Loop.MaxIterations = 5; return c },
+			cfg: func() *config.Config {
+				c := config.Defaults()
+				c.Budget.MaxCostUSD = 1
+				c.Loop.MaxIterations = 5
+				return c
+			},
 			repo: cleanRepo,
 			bd:   func() *stubBD { return &stubBD{} },
 			want: Outcome{State: StateFailed, Reason: ReasonBudget},
@@ -147,7 +157,7 @@ func TestSelectNextStateTransitionMatrix(t *testing.T) {
 				f.ConsecutiveDirty = 999
 				return f
 			},
-			cfg: func() *config.Config { return config.Defaults() },
+			cfg:  func() *config.Config { return config.Defaults() },
 			repo: cleanRepo,
 			bd: func() *stubBD {
 				return &stubBD{ready: map[string][]bd.Issue{"review:feat/x": {{ID: "r1"}}}}
@@ -283,14 +293,14 @@ func TestSelectNextStateExhaustivelyCoversTargetStates(t *testing.T) {
 		fail Reason
 	}
 	cases := []tinyCase{
-		{Fresh(), config.Defaults(), cleanRepo(t), &stubBD{}, ReasonNone},                                                 // done{queue_empty}
-		{Fresh(), config.Defaults(), cleanRepo(t), &stubBD{ready: map[string][]bd.Issue{"": {{ID: "a"}}}}, ReasonNone},    // clean
-		{Fresh(), config.Defaults(), dirtyRepo(t), &stubBD{}, ReasonNone},                                                 // dirty
+		{Fresh(), config.Defaults(), cleanRepo(t), &stubBD{}, ReasonNone},                                                                                                             // done{queue_empty}
+		{Fresh(), config.Defaults(), cleanRepo(t), &stubBD{ready: map[string][]bd.Issue{"": {{ID: "a"}}}}, ReasonNone},                                                                // clean
+		{Fresh(), config.Defaults(), dirtyRepo(t), &stubBD{}, ReasonNone},                                                                                                             // dirty
 		{&FSM{Outcome: Outcome{State: StateClean}, ConsecutiveDirty: 3}, &config.Config{Backoff: config.BackoffConfig{DirtyRevertThreshold: 3}}, cleanRepo(t), &stubBD{}, ReasonNone}, // revert
 		{&FSM{Outcome: Outcome{State: StateClean}, ReviewMode: true, ReviewBranch: "x"}, config.Defaults(), cleanRepo(t),
 			&stubBD{ready: map[string][]bd.Issue{"review:x": {{ID: "r"}}}}, ReasonNone}, // review
 		{&FSM{Outcome: Outcome{State: StateClean}, Iter: 5}, &config.Config{Loop: config.LoopConfig{MaxIterations: 5}}, cleanRepo(t), &stubBD{}, ReasonNone}, // done{iter_cap}
-		{Fresh(), config.Defaults(), cleanRepo(t), &stubBD{}, ReasonAuth}, // failed
+		{Fresh(), config.Defaults(), cleanRepo(t), &stubBD{}, ReasonAuth},                                                                                    // failed
 	}
 	for _, c := range cases {
 		out, err := SelectNextState(ctx, RouteInput{

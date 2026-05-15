@@ -9,10 +9,11 @@ import (
 	"context"
 	"errors"
 
+	"github.com/spf13/cobra"
+
 	"github.com/jcrussell/ralph/internal/config"
 	"github.com/jcrussell/ralph/internal/loop"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
-	"github.com/spf13/cobra"
 )
 
 // Options is the three-part command shape's Options struct.

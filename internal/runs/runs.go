@@ -56,7 +56,7 @@ type Manifest struct {
 
 // Transition is one row in transitions.jsonl.
 type Transition struct {
-	Ts           time.Time `json:"ts"`
+	TS           time.Time `json:"ts"`
 	Iter         int       `json:"iter"`
 	From         string    `json:"from"`
 	To           string    `json:"to"`
@@ -105,7 +105,7 @@ func Begin(repoRoot string) (*Run, error) {
 		return nil, err
 	}
 	dir := filepath.Join(runsDir(repoRoot), id)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("runs: mkdir %s: %w", dir, err)
 	}
 	r := &Run{id: id, dir: dir}
@@ -321,8 +321,8 @@ func writeManifest(dir string, m *Manifest) error {
 	}
 	b = append(b, '\n')
 
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("runs: mkdir %s: %w", dir, err)
+	if merr := os.MkdirAll(dir, 0o750); merr != nil {
+		return fmt.Errorf("runs: mkdir %s: %w", dir, merr)
 	}
 
 	tmp, err := os.CreateTemp(dir, "manifest-*.json.tmp")

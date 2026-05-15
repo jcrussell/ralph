@@ -15,12 +15,14 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jcrussell/ralph/pkg/cmdutil"
 	"github.com/spf13/cobra"
+
+	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
 
 const logsRel = ".ralph/state/logs"
 
+// Options is the three-part command shape's Options struct.
 type Options struct {
 	F *cmdutil.Factory
 
@@ -28,6 +30,7 @@ type Options struct {
 	TailLines int
 }
 
+// NewCmdTrace returns the cobra command for `ralph trace`.
 func NewCmdTrace(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	opts := &Options{F: f, TailLines: 50}
 	cmd := &cobra.Command{
@@ -124,28 +127,28 @@ func dumpJSON(rootFS fs.FS, name string, w io.Writer) error {
 	var any any
 	if err := json.Unmarshal(b, &any); err == nil {
 		pretty, _ := json.MarshalIndent(any, "", "  ")
-		fmt.Fprintf(w, "=== ITERATION RECORD (%s) ===\n%s\n\n", name, pretty)
+		_, _ = fmt.Fprintf(w, "=== ITERATION RECORD (%s) ===\n%s\n\n", name, pretty)
 		return nil
 	}
-	fmt.Fprintf(w, "=== ITERATION RECORD (%s) ===\n%s\n\n", name, b)
+	_, _ = fmt.Fprintf(w, "=== ITERATION RECORD (%s) ===\n%s\n\n", name, b)
 	return nil
 }
 
 func dumpSection(rootFS fs.FS, name, header string, tailLines int, w io.Writer) error {
 	b, err := fs.ReadFile(rootFS, name)
 	if errors.Is(err, fs.ErrNotExist) {
-		fmt.Fprintf(w, "=== %s (%s) ===\n(missing)\n\n", header, name)
+		_, _ = fmt.Fprintf(w, "=== %s (%s) ===\n(missing)\n\n", header, name)
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("trace: read %s: %w", name, err)
 	}
 	body := tail(string(b), tailLines)
-	fmt.Fprintf(w, "=== %s (%s) ===\n%s", header, name, body)
+	_, _ = fmt.Fprintf(w, "=== %s (%s) ===\n%s", header, name, body)
 	if !strings.HasSuffix(body, "\n") {
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w)
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 	return nil
 }
 

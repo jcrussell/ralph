@@ -81,8 +81,8 @@ func TestTimeline_FiltersBySince(t *testing.T) {
 	old := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
 	recent := time.Date(2026, 5, 14, 14, 0, 0, 0, time.UTC)
 	repo := scaffoldRunWith(t, []runs.Transition{
-		{Ts: old, Iter: 1, From: "start", To: "clean"},
-		{Ts: recent, Iter: 2, From: "clean", To: "dirty"},
+		{TS: old, Iter: 1, From: "start", To: "clean"},
+		{TS: recent, Iter: 2, From: "clean", To: "dirty"},
 	}, nil)
 
 	since := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
@@ -102,9 +102,9 @@ func TestTimeline_FiltersBySince(t *testing.T) {
 
 func TestTimeline_FiltersByStateAndReason(t *testing.T) {
 	repo := scaffoldRunWith(t, []runs.Transition{
-		{Ts: time.Unix(1, 0).UTC(), Iter: 1, From: "start", To: "clean"},
-		{Ts: time.Unix(2, 0).UTC(), Iter: 2, From: "clean", To: "dirty"},
-		{Ts: time.Unix(3, 0).UTC(), Iter: 3, From: "dirty", To: "done", Reason: "queue_empty"},
+		{TS: time.Unix(1, 0).UTC(), Iter: 1, From: "start", To: "clean"},
+		{TS: time.Unix(2, 0).UTC(), Iter: 2, From: "clean", To: "dirty"},
+		{TS: time.Unix(3, 0).UTC(), Iter: 3, From: "dirty", To: "done", Reason: "queue_empty"},
 	}, nil)
 
 	// --state=dirty matches both rows touching dirty.
@@ -133,8 +133,8 @@ func TestTimeline_FiltersByStateAndReason(t *testing.T) {
 
 func TestTimeline_JoinsNarrative(t *testing.T) {
 	repo := scaffoldRunWith(t, []runs.Transition{
-		{Ts: time.Unix(1, 0).UTC(), Iter: 1, From: "start", To: "clean"},
-		{Ts: time.Unix(2, 0).UTC(), Iter: 2, From: "clean", To: "clean"},
+		{TS: time.Unix(1, 0).UTC(), Iter: 1, From: "start", To: "clean"},
+		{TS: time.Unix(2, 0).UTC(), Iter: 2, From: "clean", To: "clean"},
 	}, map[int]string{
 		2: "clean → clean: claimed x, 1 commit, gate green",
 	})
@@ -168,7 +168,7 @@ func TestTimeline_NoTransitionsFile(t *testing.T) {
 
 func TestTimeline_JSONMode(t *testing.T) {
 	repo := scaffoldRunWith(t, []runs.Transition{
-		{Ts: time.Unix(1, 0).UTC(), Iter: 1, From: "start", To: "clean"},
+		{TS: time.Unix(1, 0).UTC(), Iter: 1, From: "start", To: "clean"},
 	}, nil)
 
 	f, bufs := factoryAt(t, repo)
