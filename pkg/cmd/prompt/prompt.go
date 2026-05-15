@@ -83,6 +83,11 @@ func showRun(_ context.Context, opts *Options) error {
 	if err != nil {
 		return err
 	}
+	root, err := promptlib.Open(repo)
+	if err != nil {
+		return fmt.Errorf("open prompts: %w", err)
+	}
+	defer func() { _ = root.Close() }()
 	vars := promptlib.Vars{
 		Iter:       opts.Iter,
 		State:      opts.State,
@@ -91,7 +96,7 @@ func showRun(_ context.Context, opts *Options) error {
 		RepoRoot:   repo,
 		GateResult: opts.GateResult,
 	}
-	out, err := promptlib.Render(repo, opts.State, vars)
+	out, err := promptlib.Render(root.FS(), opts.State, vars)
 	if err != nil {
 		return err
 	}

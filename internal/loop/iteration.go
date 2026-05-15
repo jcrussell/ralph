@@ -272,7 +272,12 @@ func composePrompt(ctx context.Context, rc *runContext, prev fsm.Outcome, headSH
 			Base:   rc.fsm.ReviewBase,
 		},
 	}
-	out, err := promptlib.Render(rc.repo, string(prev.State), vars)
+	root, err := promptlib.Open(rc.repo)
+	if err != nil {
+		return "", fmt.Errorf("loop: open prompts: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	out, err := promptlib.Render(root.FS(), string(prev.State), vars)
 	if err != nil {
 		return "", fmt.Errorf("loop: render prompt: %w", err)
 	}

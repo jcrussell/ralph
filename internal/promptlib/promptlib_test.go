@@ -5,32 +5,22 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
-func setupRepo(t *testing.T, files map[string]string) string {
-	t.Helper()
-	repo := t.TempDir()
-	dir := PromptsDir(repo)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+func mapFS(files map[string]string) fstest.MapFS {
+	m := fstest.MapFS{}
 	for name, body := range files {
-		path := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		m[name] = &fstest.MapFile{Data: []byte(body)}
 	}
-	return repo
+	return m
 }
 
 func TestRenderVariables(t *testing.T) {
-	repo := setupRepo(t, map[string]string{
+	fsys := mapFS(map[string]string{
 		"clean.md": "iter={{.Iter}} state={{.State}} prev={{.PrevState}} dirty={{.GitDirty}} head={{.GitHead}} root={{.RepoRoot}} gate={{.GateResult}}",
 	})
-	out, err := Render(repo, "clean", Vars{
+	out, err := Render(fsys, "clean", Vars{
 		Iter: 4, State: "clean", PrevState: "dirty",
 		GitDirty: false, GitHead: "abc123", RepoRoot: "/r",
 		GateResult: "passed",
@@ -45,10 +35,10 @@ func TestRenderVariables(t *testing.T) {
 }
 
 func TestRenderReviewVars(t *testing.T) {
-	repo := setupRepo(t, map[string]string{
+	fsys := mapFS(map[string]string{
 		"review.md": "branch={{.Review.Branch}} base={{.Review.Base}} open={{.Review.OpenFindings}}",
 	})
-	out, err := Render(repo, "review", Vars{Review: ReviewVars{Branch: "feat-x", Base: "main", OpenFindings: 3}})
+	out, err := Render(fsys, "review", Vars{Review: ReviewVars{Branch: "feat-x", Base: "main", OpenFindings: 3}})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -58,12 +48,12 @@ func TestRenderReviewVars(t *testing.T) {
 }
 
 func TestRenderHeaderFooterAutoWrap(t *testing.T) {
-	repo := setupRepo(t, map[string]string{
+	fsys := mapFS(map[string]string{
 		"_header.md": "HDR",
 		"_footer.md": "FTR",
 		"clean.md":   "BODY {{.State}}",
 	})
-	out, err := Render(repo, "clean", Vars{State: "clean"})
+	out, err := Render(fsys, "clean", Vars{State: "clean"})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -74,10 +64,10 @@ func TestRenderHeaderFooterAutoWrap(t *testing.T) {
 }
 
 func TestRenderHeaderFooterOptional(t *testing.T) {
-	repo := setupRepo(t, map[string]string{
+	fsys := mapFS(map[string]string{
 		"clean.md": "BODY",
 	})
-	out, err := Render(repo, "clean", Vars{})
+	out, err := Render(fsys, "clean", Vars{})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -87,19 +77,18 @@ func TestRenderHeaderFooterOptional(t *testing.T) {
 }
 
 func TestRenderMissingStateIsError(t *testing.T) {
-	repo := setupRepo(t, nil)
-	_, err := Render(repo, "clean", Vars{})
+	_, err := Render(mapFS(nil), "clean", Vars{})
 	if err == nil {
 		t.Fatal("expected error for missing state template")
 	}
 }
 
 func TestRenderInclude(t *testing.T) {
-	repo := setupRepo(t, map[string]string{
+	fsys := mapFS(map[string]string{
 		"snippets/golden-path.md": "STEP1\nSTEP2",
 		"clean.md":                "before\n{{include \"snippets/golden-path.md\"}}\nafter",
 	})
-	out, err := Render(repo, "clean", Vars{})
+	out, err := Render(fsys, "clean", Vars{})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -110,10 +99,10 @@ func TestRenderInclude(t *testing.T) {
 }
 
 func TestRenderIncludeRejectsEscape(t *testing.T) {
-	repo := setupRepo(t, map[string]string{
+	fsys := mapFS(map[string]string{
 		"clean.md": "{{include \"../../etc/passwd\"}}",
 	})
-	_, err := Render(repo, "clean", Vars{})
+	_, err := Render(fsys, "clean", Vars{})
 	if err == nil {
 		t.Fatal("expected error for path traversal")
 	}
@@ -122,54 +111,68 @@ func TestRenderIncludeRejectsEscape(t *testing.T) {
 	}
 }
 
-func TestRenderIncludeRejectsSymlinkEscape(t *testing.T) {
-	repo := setupRepo(t, map[string]string{
-		"clean.md": `{{include "escape"}}`,
-	})
-	// Target lives outside .ralph/prompts/; the symlink lives inside.
+// Symlink-escape protection is delivered by the FS implementation
+// passed to Render. Open(repoRoot) returns an *os.Root whose FS()
+// uses openat to block symlinks pointing outside the prompts/
+// directory. Tests using fstest.MapFS have no symlinks; this test
+// exercises the production wiring.
+func TestOpenBlocksSymlinkEscape(t *testing.T) {
+	repo := t.TempDir()
+	dir := PromptsDir(repo)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "clean.md"), []byte(`{{include "escape"}}`), 0o644); err != nil {
+		t.Fatalf("write clean: %v", err)
+	}
 	outside := filepath.Join(repo, "secret.txt")
 	if err := os.WriteFile(outside, []byte("SECRET"), 0o644); err != nil {
 		t.Fatalf("write outside: %v", err)
 	}
-	link := filepath.Join(PromptsDir(repo), "escape")
+	link := filepath.Join(dir, "escape")
 	if err := os.Symlink(outside, link); err != nil {
 		t.Skipf("symlink not supported: %v", err)
 	}
-	_, err := Render(repo, "clean", Vars{})
-	if err == nil {
-		t.Fatal("expected error for symlink escape")
+	root, err := Open(repo)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
 	}
-	if !strings.Contains(err.Error(), "escapes prompts directory") {
-		t.Errorf("err = %v, want escape rejection", err)
+	defer func() { _ = root.Close() }()
+	out, err := Render(root.FS(), "clean", Vars{})
+	if err == nil {
+		t.Fatalf("expected error, got %q", out)
+	}
+	if strings.Contains(out, "SECRET") {
+		t.Errorf("leaked outside content: %q", out)
 	}
 }
 
 func TestRenderIncludeRejectsAbsolute(t *testing.T) {
-	repo := setupRepo(t, map[string]string{
+	fsys := mapFS(map[string]string{
 		"clean.md": "{{include \"/etc/passwd\"}}",
 	})
-	_, err := Render(repo, "clean", Vars{})
+	_, err := Render(fsys, "clean", Vars{})
 	if err == nil {
 		t.Fatal("expected error for absolute include")
 	}
 }
 
 func TestRenderMissingFieldIsError(t *testing.T) {
-	repo := setupRepo(t, map[string]string{
+	fsys := mapFS(map[string]string{
 		"clean.md": "{{.NoSuchField}}",
 	})
-	_, err := Render(repo, "clean", Vars{})
+	_, err := Render(fsys, "clean", Vars{})
 	if err == nil {
 		t.Fatal("expected error for missing field")
 	}
 }
 
 func TestRenderStringUsesHeaderFooter(t *testing.T) {
-	repo := setupRepo(t, map[string]string{
+	fsys := mapFS(map[string]string{
 		"_header.md": "HDR",
 		"_footer.md": "FTR",
 	})
-	out, err := RenderString(repo, "BODY {{.State}}", Vars{State: "dirty"})
+	out, err := RenderString(fsys, "BODY {{.State}}", Vars{State: "dirty"})
 	if err != nil {
 		t.Fatalf("RenderString: %v", err)
 	}
