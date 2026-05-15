@@ -33,6 +33,9 @@ func main() {
 
 	r := root.NewCmdRoot(cmdutil.NewFactory())
 	r.DisableAutoGenTag = true
+	// cobra registers --version lazily inside Execute(); call it
+	// explicitly so the flag shows up in the generated markdown.
+	r.InitDefaultVersionFlag()
 
 	if err := doc.GenMarkdownTree(r, out); err != nil {
 		fmt.Fprintln(os.Stderr, "GenMarkdownTree:", err)

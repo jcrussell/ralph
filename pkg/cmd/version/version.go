@@ -3,6 +3,7 @@ package version
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -16,12 +17,15 @@ type Options struct {
 	F *cmdutil.Factory
 }
 
-// NewCmdVersion returns the cobra command for `ralph version`.
+// NewCmdVersion returns the cobra command for `ralph version`. The
+// subcommand prints the richer multi-line block; the root's
+// `--version` flag prints just the short banner. Both routes share
+// build.Info() as the single source of truth so they cannot drift.
 func NewCmdVersion(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
 	opts := &Options{F: f}
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Print ralph version information",
+		Short: "Print ralph version, commit, and build info",
 		RunE: func(c *cobra.Command, args []string) error {
 			if runF != nil {
 				return runF(c.Context(), opts)
@@ -32,22 +36,29 @@ func NewCmdVersion(f *cmdutil.Factory, runF func(context.Context, *Options) erro
 }
 
 func versionRun(_ context.Context, opts *Options) error {
-	_, _ = fmt.Fprintln(opts.F.IOStreams.Out, format(build.Info()))
+	_, _ = fmt.Fprint(opts.F.IOStreams.Out, FormatLong(build.Info()))
 	return nil
 }
 
-// format renders a single-line version banner. Sentinel-valued commit
-// and date are omitted so a bare `go run` shows just "ralph dev".
-// Separated from versionRun because build.Info is cached at process
-// scope (sync.OnceValue) and is not injectable from tests.
-func format(info build.BuildInfo) string {
+// FormatShort renders the one-line banner used by `ralph --version`.
+// Exported so the root command can feed it to cobra's Version template
+// without re-deriving the format string.
+func FormatShort(info build.BuildInfo) string {
+	return "ralph " + info.Version
+}
+
+// FormatLong renders the multi-line block printed by `ralph version`.
+// Always prints all five rows: showing `commit: none` or `built:
+// unknown` is a useful signal that the binary lacks build metadata
+// rather than a defect to hide. runtime.Version / GOOS / GOARCH are
+// resolved here (not in build.Info) because they belong to the running
+// process, not the build artifact.
+func FormatLong(info build.BuildInfo) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "ralph %s", info.Version)
-	if info.Commit != build.CommitNone {
-		fmt.Fprintf(&b, " (%s)", info.Commit)
-	}
-	if info.Date != build.DateUnknown {
-		fmt.Fprintf(&b, " built %s", info.Date)
-	}
+	fmt.Fprintf(&b, "ralph %s\n", info.Version)
+	fmt.Fprintf(&b, "  commit: %s\n", info.Commit)
+	fmt.Fprintf(&b, "  built:  %s\n", info.Date)
+	fmt.Fprintf(&b, "  go:     %s\n", runtime.Version())
+	fmt.Fprintf(&b, "  os:     %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	return b.String()
 }

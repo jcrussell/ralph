@@ -1,6 +1,6 @@
 ## ralph version
 
-Print ralph version information
+Print ralph version, commit, and build info
 
 ```
 ralph version [flags]

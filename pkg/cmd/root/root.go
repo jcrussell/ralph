@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	ralphlog "github.com/jcrussell/ralph/internal/log"
+	"github.com/jcrussell/ralph/internal/ralphcmd/build"
 	"github.com/jcrussell/ralph/pkg/cmd/doctor"
 	fsmcmd "github.com/jcrussell/ralph/pkg/cmd/fsm"
 	"github.com/jcrussell/ralph/pkg/cmd/hook"
@@ -43,6 +44,7 @@ func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 		Use:           "ralph",
 		Short:         "FSM-driven autonomous-loop CLI",
 		Long:          "ralph runs an AI coding agent in a loop, routed by a built-in state machine. See docs/concepts/ralph-fsm.md.",
+		Version:       build.Info().Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		// Application-wide middleware (byob-command-shape.5). Resolves
@@ -97,6 +99,10 @@ func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
+	// Cobra's auto-generated --version flag uses the Version field above
+	// and our short template — keeping the one-liner identical to the
+	// first line of `ralph version` (byob-release.2).
+	root.SetVersionTemplate("ralph {{.Version}}\n")
 	root.PersistentFlags().CountVarP(&verbose, "verbose", "v",
 		"increase log verbosity (-v=info, -vv=debug)")
 	root.PersistentFlags().StringVar(&logLevel, "log-level", "",

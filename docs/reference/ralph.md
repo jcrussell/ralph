@@ -14,6 +14,7 @@ ralph runs an AI coding agent in a loop, routed by a built-in state machine. See
       --log-format string   log record format (text|json); default text
       --log-level string    explicit log level (warn|info|debug); overrides -v
   -v, --verbose count       increase log verbosity (-v=info, -vv=debug)
+      --version             version for ralph
 ```
 
 ### SEE ALSO
@@ -30,5 +31,5 @@ ralph runs an AI coding agent in a loop, routed by a built-in state machine. See
 * [ralph status](ralph_status.md)	 - Show ralph's current FSM state, counters, and recent transitions
 * [ralph timeline](ralph_timeline.md)	 - Chronological state transitions with narrative
 * [ralph trace](ralph_trace.md)	 - Show every captured artifact for a single iteration
-* [ralph version](ralph_version.md)	 - Print ralph version information
+* [ralph version](ralph_version.md)	 - Print ralph version, commit, and build info
 

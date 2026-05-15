@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	ralphlog "github.com/jcrussell/ralph/internal/log"
+	"github.com/jcrussell/ralph/internal/ralphcmd/build"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 	"github.com/jcrussell/ralph/pkg/iostreams"
 )
@@ -320,6 +321,27 @@ func TestRootLogFileUnopenableReturnsError(t *testing.T) {
 	var fe *cmdutil.FlagError
 	if errors.As(err, &fe) {
 		t.Errorf("err = %v (%T); want plain error, got *FlagError", err, err)
+	}
+}
+
+// byob-release.2: `ralph --version` must print the short one-liner —
+// `ralph <version>\n` — to Out, not the multi-line block. The flag and
+// the subcommand share build.Info() but produce different shapes.
+func TestRootVersionFlagPrintsShortBanner(t *testing.T) {
+	ios, bufs := iostreams.Test()
+	f := &cmdutil.Factory{IOStreams: ios}
+	root := NewCmdRoot(f)
+	root.SetArgs([]string{"--version"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute(--version): %v", err)
+	}
+	want := "ralph " + build.Info().Version + "\n"
+	if got := bufs.Out.String(); got != want {
+		t.Errorf("--version Out = %q, want %q", got, want)
+	}
+	if bufs.ErrOut.Len() != 0 {
+		t.Errorf("--version ErrOut = %q, want empty", bufs.ErrOut.String())
 	}
 }
 
