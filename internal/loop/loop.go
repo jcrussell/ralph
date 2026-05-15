@@ -127,7 +127,18 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 	// so it composes with ReviewMode (review --fresh re-enters review
 	// mode from a fresh FSM). Save immediately so an early crash doesn't
 	// leave the stale terminal state on disk.
-	if opts.Fresh {
+	switch {
+	case opts.Fresh:
+		f = fsm.Fresh()
+		if serr := f.Save(opts.Repo); serr != nil {
+			return fsm.Outcome{}, fmt.Errorf("loop: reset fsm: %w", serr)
+		}
+	case f.State == fsm.StateDone:
+		// Graceful done{*} is prior-run history, not in-flight state.
+		// Auto-reset so the next `ralph run` just works; notice on stderr
+		// keeps the transition visible. failed{*} still falls through to
+		// the explicit refusal below.
+		_, _ = fmt.Fprintf(opts.IO.ErrOut, "ralph: prior run ended at %s; resetting fsm.json\n", f.Outcome)
 		f = fsm.Fresh()
 		if serr := f.Save(opts.Repo); serr != nil {
 			return fsm.Outcome{}, fmt.Errorf("loop: reset fsm: %w", serr)
@@ -138,8 +149,9 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 		f.ReviewBranch = opts.ReviewBranch
 		f.ReviewBase = opts.ReviewBase
 	}
-	// Refuse to silently no-op against a pre-existing terminal FSM. Done
-	// before runs.Begin so no zombie run dir is created.
+	// Refuse to silently no-op against a pre-existing failed{*} terminal
+	// FSM (done{*} is auto-reset above). Done before runs.Begin so no
+	// zombie run dir is created.
 	if f.State.Terminal() {
 		_, _ = fmt.Fprintf(opts.IO.ErrOut,
 			"ralph: fsm is in terminal state %s; pass --fresh to reset, or inspect .ralph/state/fsm.json\n",

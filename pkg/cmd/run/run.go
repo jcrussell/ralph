@@ -69,7 +69,7 @@ and exit 1.`,
 	cmd.Flags().BoolVar(&opts.Once, "once", false, "run one iteration then exit")
 	cmd.Flags().BoolVar(&opts.SkipGate, "skip-gate", false, "skip the per-state gate hook")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "render prompts and route states without invoking the runner")
-	cmd.Flags().BoolVar(&opts.Fresh, "fresh", false, "reset fsm.json before starting (use when the prior run reached a terminal state)")
+	cmd.Flags().BoolVar(&opts.Fresh, "fresh", false, "reset fsm.json before starting (required after failed{*}; done{*} auto-resets)")
 	cmd.Flags().StringVar(&opts.Label, "label", "", "iteration label recorded in summary.jsonl")
 	cmd.Flags().IntVar(&opts.MaxIterations, "max-iterations", 0, "override [loop] max_iterations (0 = config)")
 	cmd.Flags().IntVar(&opts.SessionTimeout, "timeout", 0, "override [loop] session_timeout_secs (0 = config)")

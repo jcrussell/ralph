@@ -203,12 +203,13 @@ func TestRun_TerminalFailureFiresFailureHookAndIncident(t *testing.T) {
 	}
 }
 
-// Pre-seeded terminal FSM + no --fresh: Run writes a notice to ErrOut,
-// returns ErrTerminalState, and creates no run dir (so we don't pollute
-// state/runs/ with empty manifests every time the user reruns).
-func TestRun_TerminalFSMWithoutFreshReturnsErrTerminalState(t *testing.T) {
+// Pre-seeded failed{*} terminal FSM + no --fresh: Run writes a notice to
+// ErrOut, returns ErrTerminalState, and creates no run dir (so we don't
+// pollute state/runs/ with empty manifests every time the user reruns).
+// done{*} takes the auto-reset path (covered separately).
+func TestRun_TerminalFailedWithoutFreshReturnsErrTerminalState(t *testing.T) {
 	repo := scaffoldRepo(t)
-	seedTerminalFSM(t, repo, fsm.Outcome{State: fsm.StateDone, Reason: fsm.ReasonQueueEmpty})
+	seedTerminalFSM(t, repo, fsm.Outcome{State: fsm.StateFailed, Reason: fsm.ReasonRunnerTerminal})
 
 	ios, bufs := iostreams.Test()
 	opts := baseOpts(t, repo)
@@ -221,7 +222,7 @@ func TestRun_TerminalFSMWithoutFreshReturnsErrTerminalState(t *testing.T) {
 		t.Fatalf("err = %v, want ErrTerminalState", err)
 	}
 	notice := bufs.ErrOut.String()
-	if !strings.Contains(notice, "done{queue_empty}") {
+	if !strings.Contains(notice, "failed{runner_terminal}") {
 		t.Errorf("ErrOut missing outcome rendering; got %q", notice)
 	}
 	if !strings.Contains(notice, "--fresh") {
@@ -232,6 +233,48 @@ func TestRun_TerminalFSMWithoutFreshReturnsErrTerminalState(t *testing.T) {
 	matches, _ := filepath.Glob(filepath.Join(repo, ".ralph", "state", "runs", "*"))
 	if len(matches) != 0 {
 		t.Errorf("run dir created on terminal-state refusal: %v", matches)
+	}
+}
+
+// Pre-seeded done{*} terminal FSM + no --fresh: Run auto-resets fsm.json,
+// writes a one-line notice to ErrOut, and proceeds. done{*} is prior-run
+// history, not in-flight state — requiring --fresh would be friction.
+func TestRun_TerminalDoneAutoResetsWithoutFresh(t *testing.T) {
+	repo := scaffoldRepo(t)
+	seedTerminalFSM(t, repo, fsm.Outcome{State: fsm.StateDone, Reason: fsm.ReasonIterCap})
+
+	ios, bufs := iostreams.Test()
+	opts := baseOpts(t, repo)
+	opts.IO = ios
+	opts.Runner = &fakeRunner{}
+	opts.Clock = newFakeClock()
+	// Empty queue → start routes virtually to done{queue_empty}; we just
+	// need to confirm we didn't bounce off the seeded done{iter_cap}.
+
+	out, err := Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Run on seeded done{iter_cap} without --fresh: %v", err)
+	}
+	if (out != fsm.Outcome{State: fsm.StateDone, Reason: fsm.ReasonQueueEmpty}) {
+		t.Errorf("outcome = %+v, want done{queue_empty} (fresh empty-queue route)", out)
+	}
+	notice := bufs.ErrOut.String()
+	if !strings.Contains(notice, "prior run ended at done{iter_cap}") {
+		t.Errorf("ErrOut missing auto-reset notice; got %q", notice)
+	}
+	if !strings.Contains(notice, "resetting fsm.json") {
+		t.Errorf("ErrOut missing reset verb; got %q", notice)
+	}
+	// fsm.json on disk should reflect the new run's outcome, not the seeded one.
+	f := fsmAt(t, repo)
+	if f.Reason == fsm.ReasonIterCap {
+		t.Errorf("auto-reset did not happen: persisted reason still %q", f.Reason)
+	}
+	// A run dir should have been created — unlike the failed{*} refusal,
+	// auto-reset proceeds into runs.Begin.
+	matches, _ := filepath.Glob(filepath.Join(repo, ".ralph", "state", "runs", "*"))
+	if len(matches) == 0 {
+		t.Errorf("no run dir created after auto-reset; expected runs.Begin to have fired")
 	}
 }
 
