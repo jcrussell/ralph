@@ -122,7 +122,8 @@ func funcs(dir string) template.FuncMap {
 }
 
 // includeFile reads dir/rel and returns its content. It rejects rel
-// values that resolve outside dir (e.g. "../etc/passwd").
+// values that resolve outside dir, including via symlinks
+// (byob-input-validation.1).
 func includeFile(dir, rel string) (string, error) {
 	if rel == "" {
 		return "", errors.New("promptlib: include: empty path")
@@ -131,17 +132,40 @@ func includeFile(dir, rel string) (string, error) {
 	if filepath.IsAbs(cleaned) {
 		return "", fmt.Errorf("promptlib: include %q: absolute paths are not allowed", rel)
 	}
-	full := filepath.Join(dir, cleaned)
-	// Confirm full is still under dir after symlink-free join.
-	rels, err := filepath.Rel(dir, full)
-	if err != nil || strings.HasPrefix(rels, "..") {
+	// Pre-check: reject literal `../` climbs before touching the
+	// filesystem so missing targets still produce a clear escape error.
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", fmt.Errorf("promptlib: include %s: resolve base: %w", rel, err)
+	}
+	full := filepath.Join(resolvedDir, cleaned)
+	if !contained(resolvedDir, full) {
 		return "", fmt.Errorf("promptlib: include %q: escapes prompts directory", rel)
 	}
-	b, err := os.ReadFile(full) //nolint:gosec // full is contained under dir, verified by filepath.Rel above
+	// Post-check: resolve symlinks and recheck so a symlink inside dir
+	// cannot escape it.
+	resolved, err := filepath.EvalSymlinks(full)
+	if err != nil {
+		return "", fmt.Errorf("promptlib: include %s: %w", rel, err)
+	}
+	if !contained(resolvedDir, resolved) {
+		return "", fmt.Errorf("promptlib: include %q: escapes prompts directory", rel)
+	}
+	b, err := os.ReadFile(resolved) //nolint:gosec // resolved is contained under resolvedDir, verified above
 	if err != nil {
 		return "", fmt.Errorf("promptlib: include %s: %w", rel, err)
 	}
 	return string(b), nil
+}
+
+// contained reports whether path lies inside base. Both arguments
+// must already be cleaned/absolute for the result to be meaningful.
+func contained(base, path string) bool {
+	rel, err := filepath.Rel(base, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func readRequired(path string) (string, error) {

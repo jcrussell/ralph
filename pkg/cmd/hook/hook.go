@@ -120,30 +120,43 @@ func run(ctx context.Context, opts *Options) error {
 
 // resolvePath turns a user-supplied <path> (relative to .ralph/hooks/
 // or absolute) into an absolute path and verifies containment under
-// <repo>/.ralph/hooks/ (byob-input-validation.1).
+// <repo>/.ralph/hooks/, following symlinks so a symlink inside the
+// hooks dir cannot escape it (byob-input-validation.1). Missing
+// targets are allowed through unresolved so callers can report
+// "does not exist" cleanly.
 func resolvePath(repo, in string) (string, error) {
 	hooksDir, err := filepath.Abs(hooks.Dir(repo))
 	if err != nil {
 		return "", err
 	}
+	resolvedDir, err := filepath.EvalSymlinks(hooksDir)
+	if err != nil {
+		// hooks dir may not exist on a fresh repo; fall back to the
+		// abs path so containment checks still work.
+		resolvedDir = hooksDir
+	}
 	var candidate string
 	if filepath.IsAbs(in) {
 		candidate = in
 	} else {
-		candidate = filepath.Join(hooksDir, in)
+		candidate = filepath.Join(resolvedDir, in)
 	}
 	abs, err := filepath.Abs(filepath.Clean(candidate))
 	if err != nil {
 		return "", err
 	}
-	rel, err := filepath.Rel(hooksDir, abs)
+	check := abs
+	if resolved, serr := filepath.EvalSymlinks(abs); serr == nil {
+		check = resolved
+	}
+	rel, err := filepath.Rel(resolvedDir, check)
 	if err != nil {
 		return "", err
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", cmdutil.FlagErrorf("hook path %q escapes %s", in, hooksDir)
+		return "", cmdutil.FlagErrorf("hook path %q escapes %s", in, resolvedDir)
 	}
-	return abs, nil
+	return check, nil
 }
 
 // buildEnv composes the hooks.Env, loading fsm.json for defaults and

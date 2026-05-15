@@ -86,6 +86,29 @@ func TestRunRejectsEscape(t *testing.T) {
 	}
 }
 
+func TestRunRejectsSymlinkEscape(t *testing.T) {
+	repo := newRepo(t)
+	// Target hook lives OUTSIDE the .ralph/hooks/ tree.
+	outside := filepath.Join(repo, "rogue.sh")
+	if err := os.WriteFile(outside, []byte("#!/bin/sh\necho pwned\n"), 0o755); err != nil {
+		t.Fatalf("write outside: %v", err)
+	}
+	link := filepath.Join(repo, ".ralph", "hooks", "states", "clean", "enter")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+	f, _ := newFactory(repo)
+	opts := &Options{F: f, Path: "states/clean/enter"}
+	err := run(context.Background(), opts)
+	if err == nil {
+		t.Fatal("expected symlink escape to be rejected")
+	}
+	var fe *cmdutil.FlagError
+	if !errors.As(err, &fe) {
+		t.Errorf("err = %v (%T), want *FlagError", err, err)
+	}
+}
+
 func TestRunMissingHook(t *testing.T) {
 	repo := newRepo(t)
 	f, _ := newFactory(repo)

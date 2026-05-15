@@ -122,6 +122,28 @@ func TestRenderIncludeRejectsEscape(t *testing.T) {
 	}
 }
 
+func TestRenderIncludeRejectsSymlinkEscape(t *testing.T) {
+	repo := setupRepo(t, map[string]string{
+		"clean.md": `{{include "escape"}}`,
+	})
+	// Target lives outside .ralph/prompts/; the symlink lives inside.
+	outside := filepath.Join(repo, "secret.txt")
+	if err := os.WriteFile(outside, []byte("SECRET"), 0o644); err != nil {
+		t.Fatalf("write outside: %v", err)
+	}
+	link := filepath.Join(PromptsDir(repo), "escape")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+	_, err := Render(repo, "clean", Vars{})
+	if err == nil {
+		t.Fatal("expected error for symlink escape")
+	}
+	if !strings.Contains(err.Error(), "escapes prompts directory") {
+		t.Errorf("err = %v, want escape rejection", err)
+	}
+}
+
 func TestRenderIncludeRejectsAbsolute(t *testing.T) {
 	repo := setupRepo(t, map[string]string{
 		"clean.md": "{{include \"/etc/passwd\"}}",
