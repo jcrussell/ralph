@@ -230,7 +230,7 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 	if !next.State.Terminal() {
 		d := composeBackoff(rc, mode, sess)
 		if d > 0 {
-			rc.clock.Sleep(d)
+			rc.clock.Sleep(ctx, d)
 		}
 	}
 

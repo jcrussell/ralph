@@ -33,12 +33,28 @@ type BDClient interface {
 
 // Clock is the loop's time source. Production passes defaultClock{};
 // tests inject a stub so backoff sleeps don't make tests slow.
+//
+// Sleep takes a context so a Ctrl-C / SIGTERM during a long backoff
+// returns immediately instead of stranding the loop for minutes
+// (byob-lifecycle.2). The loop's top-level ctx.Err() check picks up
+// the cancellation on the next iteration.
 type Clock interface {
 	Now() time.Time
-	Sleep(d time.Duration)
+	Sleep(ctx context.Context, d time.Duration)
 }
 
 type defaultClock struct{}
 
-func (defaultClock) Now() time.Time        { return time.Now() }
-func (defaultClock) Sleep(d time.Duration) { time.Sleep(d) }
+func (defaultClock) Now() time.Time { return time.Now() }
+
+func (defaultClock) Sleep(ctx context.Context, d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-ctx.Done():
+	}
+}

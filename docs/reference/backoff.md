@@ -58,7 +58,7 @@ Two loop-level counters drive promotions that aren't visible from `Classify` or 
 
 ## Per-iteration sleep
 
-Backoff sleeps happen at the end of each non-terminal iteration. The loop uses an injected `Clock` so tests can drive iterations without waiting; production code uses `time.Sleep`. Terminal outcomes skip the sleep — the loop exits.
+Backoff sleeps happen at the end of each non-terminal iteration. The loop uses an injected `Clock` so tests can drive iterations without waiting; production code sleeps on a `time.Timer` raced against `ctx.Done()` so a Ctrl-C during a long backoff returns immediately. Terminal outcomes skip the sleep — the loop exits.
 
 The `[loop] sleep_between_secs` knob is NOT used by `backoff.Compute`. It's reserved as a baseline pause that could be folded into ralph's design later if the OK path needs to be slower than `OKBackoff`. Today, the OK path is fixed at 10 seconds for parity with the upstream Python loop.
 

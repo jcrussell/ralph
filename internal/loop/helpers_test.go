@@ -104,7 +104,7 @@ func (c *fakeClock) Now() time.Time {
 	return t
 }
 
-func (c *fakeClock) Sleep(d time.Duration) {
+func (c *fakeClock) Sleep(_ context.Context, d time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.Sleeps = append(c.Sleeps, d)
