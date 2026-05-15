@@ -139,7 +139,7 @@ func TestReviewQueueEmpty(t *testing.T) {
 	}
 }
 
-func TestGitCleanAndDirty(t *testing.T) {
+func TestGitClean(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
@@ -155,10 +155,6 @@ func TestGitCleanAndDirty(t *testing.T) {
 	clean, err := GitClean(ctx, repo)
 	if err != nil || !clean {
 		t.Fatalf("fresh: clean=%v err=%v", clean, err)
-	}
-	dirty, _ := GitDirty(ctx, repo)
-	if dirty {
-		t.Errorf("fresh: dirty=true, want false")
 	}
 
 	// Untracked file: still clean per --untracked-files=no.
@@ -183,10 +179,6 @@ func TestGitCleanAndDirty(t *testing.T) {
 	clean, _ = GitClean(ctx, repo)
 	if clean {
 		t.Errorf("modified tracked: clean=true, want false")
-	}
-	dirty, _ = GitDirty(ctx, repo)
-	if !dirty {
-		t.Errorf("modified tracked: dirty=false, want true")
 	}
 }
 

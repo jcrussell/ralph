@@ -23,15 +23,6 @@ func GitClean(ctx context.Context, repo string) (bool, error) {
 	return git.Clean(ctx, repo)
 }
 
-// GitDirty is !GitClean.
-func GitDirty(ctx context.Context, repo string) (bool, error) {
-	clean, err := GitClean(ctx, repo)
-	if err != nil {
-		return false, err
-	}
-	return !clean, nil
-}
-
 // BDReadyCount returns len(bd ready [-l label]).
 func BDReadyCount(ctx context.Context, b BDLister, label string) (int, error) {
 	issues, err := b.Ready(ctx, label)
