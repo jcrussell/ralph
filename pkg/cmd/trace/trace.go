@@ -30,6 +30,19 @@ type Options struct {
 	TailLines int
 }
 
+// Validate enforces flag-value invariants before any side effects.
+// Errors are FlagErrors so the runner maps them to exit code 2.
+// Iter is set from args[0] in RunE before Validate runs.
+func (o *Options) Validate() error {
+	if o.Iter < 0 {
+		return cmdutil.FlagErrorf("<iter> must be a non-negative integer, got %d", o.Iter)
+	}
+	if o.TailLines < 0 {
+		return cmdutil.FlagErrorf("--tail-lines must be non-negative")
+	}
+	return nil
+}
+
 // NewCmdTrace returns the cobra command for `ralph trace`.
 func NewCmdTrace(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	opts := &Options{F: f, TailLines: 50}
@@ -39,13 +52,13 @@ func NewCmdTrace(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			n, err := strconv.Atoi(args[0])
-			if err != nil || n < 0 {
+			if err != nil {
 				return cmdutil.FlagErrorf("<iter> must be a non-negative integer, got %q", args[0])
 			}
-			if opts.TailLines < 0 {
-				return cmdutil.FlagErrorf("--tail-lines must be non-negative")
-			}
 			opts.Iter = n
+			if err := opts.Validate(); err != nil {
+				return err
+			}
 			if runF != nil {
 				return runF(opts)
 			}

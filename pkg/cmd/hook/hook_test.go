@@ -119,11 +119,13 @@ func TestRunMissingHook(t *testing.T) {
 	}
 }
 
-func TestValidateEnvPairs(t *testing.T) {
-	if err := validateEnvPairs([]string{"A=1", "B=2"}); err != nil {
+func TestValidateRejectsBadEnv(t *testing.T) {
+	opts := &Options{ExtraEnv: []string{"A=1", "B=2"}}
+	if err := opts.Validate(); err != nil {
 		t.Errorf("valid pairs rejected: %v", err)
 	}
-	err := validateEnvPairs([]string{"BAD"})
+	opts = &Options{ExtraEnv: []string{"BAD"}}
+	err := opts.Validate()
 	var fe *cmdutil.FlagError
 	if !errors.As(err, &fe) {
 		t.Errorf("invalid pair: err = %v, want FlagError", err)

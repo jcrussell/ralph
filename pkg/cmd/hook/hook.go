@@ -28,6 +28,20 @@ type Options struct {
 	ExtraEnv  []string
 }
 
+// Validate enforces flag-value invariants before any side effects.
+// Errors are FlagErrors so the runner maps them to exit code 2.
+func (o *Options) Validate() error {
+	if o.State != "" && !fsm.State(o.State).Valid() {
+		return cmdutil.FlagErrorf("unknown --state %q", o.State)
+	}
+	for _, kv := range o.ExtraEnv {
+		if !strings.Contains(kv, "=") {
+			return cmdutil.FlagErrorf("--env value %q is not KEY=VALUE", kv)
+		}
+	}
+	return nil
+}
+
 // NewCmdHook returns the cobra command for `ralph hook`.
 func NewCmdHook(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	cmd := &cobra.Command{
@@ -49,10 +63,7 @@ to ralph's exit code; stdout and stderr are passed through.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.Path = args[0]
-			if opts.State != "" && !fsm.State(opts.State).Valid() {
-				return cmdutil.FlagErrorf("unknown --state %q", opts.State)
-			}
-			if err := validateEnvPairs(opts.ExtraEnv); err != nil {
+			if err := opts.Validate(); err != nil {
 				return err
 			}
 			if runF != nil {
@@ -66,15 +77,6 @@ to ralph's exit code; stdout and stderr are passed through.`,
 	cmd.Flags().StringVar(&opts.NextState, "next-state", "", "value for RALPH_NEXT_STATE")
 	cmd.Flags().StringSliceVar(&opts.ExtraEnv, "env", nil, "extra KEY=VALUE pairs (repeatable)")
 	return cmd
-}
-
-func validateEnvPairs(env []string) error {
-	for _, kv := range env {
-		if !strings.Contains(kv, "=") {
-			return cmdutil.FlagErrorf("--env value %q is not KEY=VALUE", kv)
-		}
-	}
-	return nil
 }
 
 func run(ctx context.Context, opts *Options) error {

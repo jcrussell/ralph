@@ -31,6 +31,21 @@ type Options struct {
 	MemoryLimit    string // "" = use config
 }
 
+// Validate enforces flag-value invariants before any side effects.
+// Errors are FlagErrors so the runner maps them to exit code 2.
+func (o *Options) Validate() error {
+	if o.MaxIterations < 0 {
+		return cmdutil.FlagErrorf("--max-iterations must be >= 0, got %d", o.MaxIterations)
+	}
+	if o.SessionTimeout < 0 {
+		return cmdutil.FlagErrorf("--timeout must be >= 0, got %d", o.SessionTimeout)
+	}
+	if _, err := config.ParseBytes(o.MemoryLimit); err != nil {
+		return cmdutil.FlagErrorf("--memory: %v", err)
+	}
+	return nil
+}
+
 // NewCmdRun returns the cobra command for `ralph run`.
 func NewCmdRun(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	opts := &Options{F: f}
@@ -60,6 +75,9 @@ and exit 1.`,
   # cap iterations at 5 for this invocation without editing config.toml
   ralph run --max-iterations=5`,
 		RunE: func(c *cobra.Command, args []string) error {
+			if err := opts.Validate(); err != nil {
+				return err
+			}
 			if runF != nil {
 				return runF(opts)
 			}

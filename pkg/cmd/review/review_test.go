@@ -1,11 +1,39 @@
 package review
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/jcrussell/ralph/internal/config"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
+
+func TestOptionsValidate(t *testing.T) {
+	cases := []struct {
+		name string
+		opts Options
+		ok   bool
+	}{
+		{"zero values ok", Options{}, true},
+		{"positive overrides ok", Options{PR: 123, MaxRounds: 10}, true},
+		{"negative pr", Options{PR: -1}, false},
+		{"negative max-rounds", Options{MaxRounds: -1}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := c.opts.Validate()
+			if c.ok && err != nil {
+				t.Errorf("Validate() = %v, want nil", err)
+			}
+			if !c.ok {
+				var fe *cmdutil.FlagError
+				if !errors.As(err, &fe) {
+					t.Errorf("Validate() = %v, want *FlagError", err)
+				}
+			}
+		})
+	}
+}
 
 func TestNewCmdReviewMetadata(t *testing.T) {
 	c := NewCmdReview(&cmdutil.Factory{}, func(*Options) error { return nil })

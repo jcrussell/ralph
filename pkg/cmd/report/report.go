@@ -35,6 +35,15 @@ type Options struct {
 	Since string
 }
 
+// Validate enforces flag-value invariants before any side effects.
+// Errors are FlagErrors so the runner maps them to exit code 2.
+func (o *Options) Validate() error {
+	if _, err := parseSince(o.Since); err != nil {
+		return cmdutil.FlagErrorf("--since: %v", err)
+	}
+	return nil
+}
+
 // NewCmdReport returns the cobra command for `ralph report`.
 func NewCmdReport(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	opts := &Options{F: f, Since: "24h"}
@@ -42,8 +51,8 @@ func NewCmdReport(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command 
 		Use:   "report",
 		Short: "Markdown summary of orchestrator activity",
 		RunE: func(c *cobra.Command, args []string) error {
-			if _, err := parseSince(opts.Since); err != nil {
-				return cmdutil.FlagErrorf("--since: %v", err)
+			if err := opts.Validate(); err != nil {
+				return err
 			}
 			if runF != nil {
 				return runF(opts)

@@ -27,6 +27,15 @@ type Options struct {
 	Tail int
 }
 
+// Validate enforces flag-value invariants before any side effects.
+// Errors are FlagErrors so the runner maps them to exit code 2.
+func (o *Options) Validate() error {
+	if o.Tail < 0 {
+		return cmdutil.FlagErrorf("--tail must be >= 0, got %d", o.Tail)
+	}
+	return nil
+}
+
 // NewCmdStatus returns the cobra command for `ralph status`.
 func NewCmdStatus(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	opts := &Options{F: f, Tail: 5}
@@ -55,6 +64,9 @@ informational.`,
   # last 20 transitions
   ralph status --tail=20`,
 		RunE: func(c *cobra.Command, args []string) error {
+			if err := opts.Validate(); err != nil {
+				return err
+			}
 			if runF != nil {
 				return runF(opts)
 			}

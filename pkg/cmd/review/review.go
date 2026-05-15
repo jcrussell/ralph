@@ -35,6 +35,18 @@ type Options struct {
 	Label    string
 }
 
+// Validate enforces flag-value invariants before any side effects.
+// Errors are FlagErrors so the runner maps them to exit code 2.
+func (o *Options) Validate() error {
+	if o.PR < 0 {
+		return cmdutil.FlagErrorf("--pr must be >= 0, got %d", o.PR)
+	}
+	if o.MaxRounds < 0 {
+		return cmdutil.FlagErrorf("--max-rounds must be >= 0, got %d", o.MaxRounds)
+	}
+	return nil
+}
+
 // NewCmdReview returns the cobra command for `ralph review`.
 func NewCmdReview(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	opts := &Options{F: f}
@@ -68,6 +80,9 @@ not a hard dependency of ralph itself.`,
   # cap iterations at 10 for this run
   ralph review --max-rounds=10`,
 		RunE: func(c *cobra.Command, args []string) error {
+			if err := opts.Validate(); err != nil {
+				return err
+			}
 			if runF != nil {
 				return runF(opts)
 			}

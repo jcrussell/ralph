@@ -25,6 +25,22 @@ type Options struct {
 	GateResult string
 }
 
+// Validate enforces flag-value invariants before any side effects.
+// Errors are FlagErrors so the runner maps them to exit code 2.
+// State is set from args[0] in RunE before Validate runs; start/done/
+// failed are rejected because they have no prompt template.
+func (o *Options) Validate() error {
+	s := fsm.State(o.State)
+	if !s.Valid() {
+		return cmdutil.FlagErrorf("unknown state %q; valid: clean, dirty, revert, review", o.State)
+	}
+	switch s {
+	case fsm.StateClean, fsm.StateDirty, fsm.StateRevert, fsm.StateReview:
+		return nil
+	}
+	return cmdutil.FlagErrorf("state %q has no prompt; valid: clean, dirty, revert, review", o.State)
+}
+
 // NewCmdPrompt returns the `ralph prompt` command tree.
 func NewCmdPrompt(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	cmd := &cobra.Command{
@@ -46,7 +62,7 @@ wrapped with prompts/_header.md and prompts/_footer.md when present.
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.State = args[0]
-			if err := validateState(opts.State); err != nil {
+			if err := opts.Validate(); err != nil {
 				return err
 			}
 			if runF != nil {
@@ -60,20 +76,6 @@ wrapped with prompts/_header.md and prompts/_footer.md when present.
 	cmd.Flags().BoolVar(&opts.GitDirty, "git-dirty", false, "value for .GitDirty")
 	cmd.Flags().StringVar(&opts.GateResult, "gate-result", "not-run", "value for .GateResult (passed|failed|not-run)")
 	return cmd
-}
-
-// validateState rejects start/done/failed (no prompts for those) and
-// anything not in fsm.AllStates().
-func validateState(state string) error {
-	s := fsm.State(state)
-	if !s.Valid() {
-		return cmdutil.FlagErrorf("unknown state %q; valid: clean, dirty, revert, review", state)
-	}
-	switch s {
-	case fsm.StateClean, fsm.StateDirty, fsm.StateRevert, fsm.StateReview:
-		return nil
-	}
-	return cmdutil.FlagErrorf("state %q has no prompt; valid: clean, dirty, revert, review", state)
 }
 
 func showRun(_ context.Context, opts *Options) error {

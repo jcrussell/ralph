@@ -35,6 +35,18 @@ type Options struct {
 	pollInterval time.Duration
 }
 
+// Validate enforces flag-value invariants before any side effects.
+// Errors are FlagErrors so the runner maps them to exit code 2.
+func (o *Options) Validate() error {
+	if o.Iter < 0 {
+		return cmdutil.FlagErrorf("--iter must be non-negative")
+	}
+	if o.Iter > 0 && o.Tail {
+		return cmdutil.FlagErrorf("--iter and --tail are mutually exclusive")
+	}
+	return nil
+}
+
 // NewCmdLogs returns the cobra command for `ralph logs`.
 func NewCmdLogs(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	opts := &Options{F: f, pollInterval: 200 * time.Millisecond}
@@ -47,11 +59,8 @@ Default: one narrative line per iteration.
 --tail follows appends until interrupted.
 --json emits raw JSONL.`,
 		RunE: func(c *cobra.Command, args []string) error {
-			if opts.Iter < 0 {
-				return cmdutil.FlagErrorf("--iter must be non-negative")
-			}
-			if opts.Iter > 0 && opts.Tail {
-				return cmdutil.FlagErrorf("--iter and --tail are mutually exclusive")
+			if err := opts.Validate(); err != nil {
+				return err
 			}
 			if runF != nil {
 				return runF(opts)

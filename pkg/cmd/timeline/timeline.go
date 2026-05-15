@@ -34,6 +34,17 @@ type Options struct {
 	JSON   bool   // emit raw transition JSONL
 }
 
+// Validate enforces flag-value invariants before any side effects.
+// Errors are FlagErrors so the runner maps them to exit code 2.
+func (o *Options) Validate() error {
+	if o.Since != "" {
+		if _, err := parseSince(o.Since); err != nil {
+			return cmdutil.FlagErrorf("--since: %v", err)
+		}
+	}
+	return nil
+}
+
 // NewCmdTimeline returns the cobra command for `ralph timeline`.
 func NewCmdTimeline(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	opts := &Options{F: f}
@@ -44,10 +55,8 @@ func NewCmdTimeline(f *cmdutil.Factory, runF func(*Options) error) *cobra.Comman
 line per FSM transition, joined with the narrative from summary.jsonl
 on iter number.`,
 		RunE: func(c *cobra.Command, args []string) error {
-			if opts.Since != "" {
-				if _, err := parseSince(opts.Since); err != nil {
-					return cmdutil.FlagErrorf("--since: %v", err)
-				}
+			if err := opts.Validate(); err != nil {
+				return err
 			}
 			if runF != nil {
 				return runF(opts)

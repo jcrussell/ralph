@@ -3,6 +3,7 @@ package status
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,20 @@ import (
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 	"github.com/jcrussell/ralph/pkg/iostreams"
 )
+
+func TestOptionsValidate(t *testing.T) {
+	if err := (&Options{Tail: 5}).Validate(); err != nil {
+		t.Errorf("positive tail rejected: %v", err)
+	}
+	if err := (&Options{Tail: 0}).Validate(); err != nil {
+		t.Errorf("zero tail rejected: %v", err)
+	}
+	err := (&Options{Tail: -1}).Validate()
+	var fe *cmdutil.FlagError
+	if !errors.As(err, &fe) {
+		t.Errorf("negative tail: err = %v, want *FlagError", err)
+	}
+}
 
 // scaffold sets up a fake repo with .ralph/state/fsm.json and (when
 // run!=nil) a runs/<id>/ directory containing a manifest + some

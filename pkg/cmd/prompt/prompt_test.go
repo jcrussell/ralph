@@ -12,7 +12,7 @@ import (
 	"github.com/jcrussell/ralph/pkg/iostreams"
 )
 
-func TestValidateState(t *testing.T) {
+func TestOptionsValidate(t *testing.T) {
 	cases := []struct {
 		state string
 		ok    bool
@@ -27,17 +27,17 @@ func TestValidateState(t *testing.T) {
 		{"bogus", false},
 	}
 	for _, c := range cases {
-		err := validateState(c.state)
+		err := (&Options{State: c.state}).Validate()
 		if c.ok && err != nil {
-			t.Errorf("validateState(%q) = %v, want nil", c.state, err)
+			t.Errorf("Validate(%q) = %v, want nil", c.state, err)
 		}
 		if !c.ok && err == nil {
-			t.Errorf("validateState(%q) = nil, want error", c.state)
+			t.Errorf("Validate(%q) = nil, want error", c.state)
 		}
 		if !c.ok && err != nil {
 			var fe *cmdutil.FlagError
 			if !errors.As(err, &fe) {
-				t.Errorf("validateState(%q) returned non-FlagError: %v", c.state, err)
+				t.Errorf("Validate(%q) returned non-FlagError: %v", c.state, err)
 			}
 		}
 	}
