@@ -7,6 +7,13 @@ import (
 	"testing"
 )
 
+func TestNewFactoryHasLogger(t *testing.T) {
+	f := NewFactory()
+	if f.Logger == nil {
+		t.Fatal("NewFactory().Logger = nil; want a default *slog.Logger")
+	}
+}
+
 func TestRepoRootFindsRalph(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".ralph"), 0o755); err != nil {

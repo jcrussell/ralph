@@ -4,8 +4,11 @@
 package root
 
 import (
+	"log/slog"
+
 	"github.com/spf13/cobra"
 
+	ralphlog "github.com/jcrussell/ralph/internal/log"
 	"github.com/jcrussell/ralph/pkg/cmd/doctor"
 	fsmcmd "github.com/jcrussell/ralph/pkg/cmd/fsm"
 	"github.com/jcrussell/ralph/pkg/cmd/hook"
@@ -30,6 +33,17 @@ func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 		Long:          "ralph runs an AI coding agent in a loop, routed by a built-in state machine. See docs/concepts/ralph-fsm.md.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// Application-wide middleware (byob-command-shape.5). Attaches a
+		// per-invocation slog.Logger to cmd.Context() so leaf commands
+		// reach it via log.From(ctx) (byob-logging.2).
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			logger := f.Logger
+			if logger == nil {
+				logger = slog.Default()
+			}
+			cmd.SetContext(ralphlog.WithLogger(cmd.Context(), logger.With("cmd", cmd.CommandPath())))
+			return nil
+		},
 	}
 	// Route cobra's own help/usage/error output through IOStreams (per
 	// byob-iostreams.1). Cascades to subcommands via cobra's writer lookup.
