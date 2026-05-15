@@ -79,6 +79,61 @@ func TestMapErrGeneric(t *testing.T) {
 	}
 }
 
+func TestMapErrPrintsHintAfterGenericError(t *testing.T) {
+	var buf bytes.Buffer
+	err := cmdutil.WithHint(fmt.Errorf("boom"), "run `ralph doctor`")
+	code := mapErr(err, &buf)
+	if code != 1 {
+		t.Errorf("code = %d, want 1", code)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "error: boom") {
+		t.Errorf("errOut = %q, want 'error: boom' line", got)
+	}
+	if !strings.Contains(got, "hint: run `ralph doctor`") {
+		t.Errorf("errOut = %q, want 'hint: ...' line", got)
+	}
+	if strings.Index(got, "error:") > strings.Index(got, "hint:") {
+		t.Errorf("hint must follow error, got %q", got)
+	}
+}
+
+func TestMapErrPrintsHintAfterFlagError(t *testing.T) {
+	var buf bytes.Buffer
+	err := cmdutil.WithHint(cmdutil.FlagErrorf("bad --foo"), "see `ralph foo --help`")
+	code := mapErr(err, &buf)
+	if code != 2 {
+		t.Errorf("code = %d, want 2", code)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "bad --foo") {
+		t.Errorf("errOut = %q, want flag error text", got)
+	}
+	if !strings.Contains(got, "hint: see `ralph foo --help`") {
+		t.Errorf("errOut = %q, want hint", got)
+	}
+}
+
+func TestMapErrEmptyHintDoesNotPrint(t *testing.T) {
+	var buf bytes.Buffer
+	err := &cmdutil.ErrHint{Err: fmt.Errorf("boom"), Hint: ""}
+	_ = mapErr(err, &buf)
+	if strings.Contains(buf.String(), "hint:") {
+		t.Errorf("empty hint must not print, got %q", buf.String())
+	}
+}
+
+func TestMapErrSilentSuppressesHint(t *testing.T) {
+	var buf bytes.Buffer
+	err := cmdutil.WithHint(cmdutil.ErrSilent, "should not print")
+	if code := mapErr(err, &buf); code != 1 {
+		t.Errorf("code = %d, want 1", code)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("ErrSilent must suppress output (including hint), got %q", buf.String())
+	}
+}
+
 func TestClassifyUnknownCommandWrapsUnknownCommand(t *testing.T) {
 	got := classifyUnknownCommand(errors.New(`unknown command "foo" for "ralph"`))
 	var fe *cmdutil.FlagError

@@ -40,6 +40,7 @@ func mapErr(err error, errOut io.Writer) int {
 		return 1
 	case errors.As(err, new(*cmdutil.FlagError)):
 		_, _ = fmt.Fprintln(errOut, err)
+		printHint(err, errOut)
 		return 2
 	}
 	var exit *cmdutil.ExitCodeError
@@ -47,7 +48,16 @@ func mapErr(err error, errOut io.Writer) int {
 		return exit.Code
 	}
 	_, _ = fmt.Fprintln(errOut, "error:", err)
+	printHint(err, errOut)
 	return 1
+}
+
+// printHint emits any *ErrHint remediation on a new line.
+func printHint(err error, errOut io.Writer) {
+	var h *cmdutil.ErrHint
+	if errors.As(err, &h) && h.Hint != "" {
+		_, _ = fmt.Fprintln(errOut, "hint:", h.Hint)
+	}
 }
 
 // classifyUnknownCommand wraps cobra's untyped "unknown command" error

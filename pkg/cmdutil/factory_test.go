@@ -54,6 +54,10 @@ func TestRepoRootMissing(t *testing.T) {
 	if !errors.Is(err, ErrNoRepoRoot) {
 		t.Errorf("err = %v, want errors.Is(_, ErrNoRepoRoot)", err)
 	}
+	var h *ErrHint
+	if !errors.As(err, &h) || h.Hint == "" {
+		t.Errorf("err = %v, want *ErrHint with a non-empty hint", err)
+	}
 }
 
 func chdir(t *testing.T, dir string) {
