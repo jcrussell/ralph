@@ -179,6 +179,101 @@ func TestParseBytes(t *testing.T) {
 	}
 }
 
+func TestValidateDefaults(t *testing.T) {
+	if err := Defaults().Validate(); err != nil {
+		t.Fatalf("Defaults().Validate(): %v", err)
+	}
+}
+
+func TestValidateRejectsBadValues(t *testing.T) {
+	cases := []struct {
+		name string
+		mut  func(*Config)
+		want string
+	}{
+		{"loop max_iterations negative", func(c *Config) { c.Loop.MaxIterations = -1 }, "max_iterations"},
+		{"loop session_timeout_secs zero", func(c *Config) { c.Loop.SessionTimeoutSecs = 0 }, "session_timeout_secs"},
+		{"loop sleep_between_secs negative", func(c *Config) { c.Loop.SleepBetweenSecs = -1 }, "sleep_between_secs"},
+		{"loop memory_limit_bytes garbage", func(c *Config) { c.Loop.MemoryLimit = "abc" }, "memory_limit_bytes"},
+		{"runner command empty", func(c *Config) { c.Runner.Command = "" }, "command is required"},
+		{"gate timeout_secs negative", func(c *Config) { c.Gate.TimeoutSecs = -1 }, "timeout_secs"},
+		{"gate run_when typo", func(c *Config) { c.Gate.RunWhen = "commits_only" }, "run_when"},
+		{"backoff unknown_secs negative", func(c *Config) { c.Backoff.UnknownSecs = -1 }, "unknown_secs"},
+		{"backoff dead_session_threshold zero", func(c *Config) { c.Backoff.DeadSessionThreshold = 0 }, "dead_session_threshold"},
+		{"backoff dirty_revert_threshold zero", func(c *Config) { c.Backoff.DirtyRevertThreshold = 0 }, "dirty_revert_threshold"},
+		{"budget max_cost_usd negative", func(c *Config) { c.Budget.MaxCostUSD = -0.01 }, "max_cost_usd"},
+		{"budget max_wallclock_secs negative", func(c *Config) { c.Budget.MaxWallclockSecs = -1 }, "max_wallclock_secs"},
+		{"review base_branch empty", func(c *Config) { c.Review.BaseBranch = "" }, "base_branch is required"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := Defaults()
+			c.mut(cfg)
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatalf("Validate() = nil, want error containing %q", c.want)
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Errorf("Validate() = %q, want substring %q", err, c.want)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsUnknownKey(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	repo := t.TempDir()
+
+	ralphDir := filepath.Join(repo, ".ralph")
+	if err := os.MkdirAll(ralphDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// max_iteratiunz is a typo — must fail loudly.
+	bad := `[loop]
+max_iteratiunz = 10
+`
+	if err := os.WriteFile(filepath.Join(ralphDir, "config.toml"), []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(repo)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "unknown keys") {
+		t.Errorf("error %q lacks 'unknown keys' marker", err)
+	}
+	if !strings.Contains(err.Error(), "loop.max_iteratiunz") {
+		t.Errorf("error %q does not name the bad key", err)
+	}
+}
+
+func TestLoadFailsOnInvalidMergedValue(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	repo := t.TempDir()
+
+	ralphDir := filepath.Join(repo, ".ralph")
+	if err := os.MkdirAll(ralphDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bad := `[gate]
+run_when = "commits_only"
+`
+	if err := os.WriteFile(filepath.Join(ralphDir, "config.toml"), []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(repo)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "run_when") {
+		t.Errorf("error %q does not mention run_when", err)
+	}
+}
+
 func TestConfigMemoryLimitBytes(t *testing.T) {
 	c := Defaults()
 	got, err := c.MemoryLimitBytes()
