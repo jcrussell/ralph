@@ -97,7 +97,7 @@ func TestRenderHappyPath(t *testing.T) {
 
 	var buf bytes.Buffer
 	since := time.Now().Add(-24 * time.Hour)
-	if err := Render(context.Background(), repo, since, "24h", &buf); err != nil {
+	if err := Render(context.Background(), repo, since, &buf); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	out := buf.String()
@@ -131,7 +131,7 @@ func TestRenderEmpty(t *testing.T) {
 	repo := t.TempDir()
 	var buf bytes.Buffer
 	since := time.Now().Add(-1 * time.Hour)
-	if err := Render(context.Background(), repo, since, "1h", &buf); err != nil {
+	if err := Render(context.Background(), repo, since, &buf); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	out := buf.String()

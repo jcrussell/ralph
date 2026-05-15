@@ -4,7 +4,7 @@
 //	.ralph/state/logs/summary.jsonl   for narrative + bd_diff
 //	.ralph/state/runs/<id>/manifest.json  for state distribution + cost
 //	.ralph/state/incidents/*.md       for incident headlines
-//	git log --since=<spec>            for commits
+//	internal/git.Log                  for commits in window
 package report
 
 import (
@@ -17,7 +17,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -25,6 +24,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jcrussell/ralph/internal/git"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
 
@@ -73,19 +73,18 @@ func run(ctx context.Context, opts *Options) error {
 	if err != nil {
 		return err
 	}
-	return Render(ctx, repo, since, opts.Since, opts.F.IOStreams.Out)
+	return Render(ctx, repo, since, opts.F.IOStreams.Out)
 }
 
 // Render writes a markdown report for activity at repo since the
-// given time. spec is the original --since string (used only for the
-// "Commits" git invocation, which accepts duration strings natively).
-func Render(ctx context.Context, repo string, since time.Time, spec string, w io.Writer) error {
+// given time.
+func Render(ctx context.Context, repo string, since time.Time, w io.Writer) error {
 	_, _ = fmt.Fprintf(w, "# ralph report (since %s)\n\n", since.Format(time.RFC3339))
 
 	if err := writeWorkDone(repo, since, w); err != nil {
 		return err
 	}
-	if err := writeCommits(ctx, repo, spec, since, w); err != nil {
+	if err := writeCommits(ctx, repo, since, w); err != nil {
 		return err
 	}
 	if err := writeIncidents(repo, since, w); err != nil {
@@ -219,32 +218,21 @@ func sortedKeys(s map[string]struct{}) []string {
 
 // ----- Commits (git log) ---------------------------------------------
 
-func writeCommits(ctx context.Context, repo, spec string, since time.Time, w io.Writer) error {
+func writeCommits(ctx context.Context, repo string, since time.Time, w io.Writer) error {
 	_, _ = fmt.Fprintln(w, "## Commits")
-	sinceArg := spec
-	if _, err := time.ParseDuration(spec); err != nil {
-		// Not a duration; pass RFC3339.
-		sinceArg = since.Format(time.RFC3339)
-	}
-	cmd := exec.CommandContext(ctx, "git", "log", //nolint:gosec // sinceArg validated by parseSince upstream; argv literal otherwise
-		"--since="+sinceArg,
-		"--pretty=format:- %h  %s",
-		"--no-merges")
-	cmd.Dir = repo
-	var out, errBuf bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errBuf
-	if err := cmd.Run(); err != nil {
-		// Not a git repo or no commits — degrade gracefully.
+	entries, err := git.Log(ctx, repo, since)
+	if err != nil {
+		// Not a git repo or worktree issue — degrade gracefully.
 		_, _ = fmt.Fprintln(w, "_(git log unavailable)_")
 		_, _ = fmt.Fprintln(w)
 		return nil
 	}
-	body := strings.TrimSpace(out.String())
-	if body == "" {
+	if len(entries) == 0 {
 		_, _ = fmt.Fprintln(w, "_(no commits in window)_")
 	} else {
-		_, _ = fmt.Fprintln(w, body)
+		for _, e := range entries {
+			_, _ = fmt.Fprintf(w, "- %s  %s\n", e.ShortHash, e.Subject)
+		}
 	}
 	_, _ = fmt.Fprintln(w)
 	return nil
