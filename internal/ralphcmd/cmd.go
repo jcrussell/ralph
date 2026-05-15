@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/jcrussell/ralph/pkg/cmd/root"
@@ -22,23 +24,42 @@ func Run(args []string) int {
 	cmd := root.NewCmdRoot(f)
 	cmd.SetArgs(args)
 
-	err := cmd.ExecuteContext(ctx)
-	switch {
-	case err == nil:
+	return mapErr(cmd.ExecuteContext(ctx), f.IOStreams.ErrOut)
+}
+
+// mapErr classifies err and writes any user-facing diagnostic to errOut.
+func mapErr(err error, errOut io.Writer) int {
+	if err == nil {
 		return 0
+	}
+	err = classifyUnknownCommand(err)
+	switch {
 	case errors.Is(err, cmdutil.ErrCancel):
 		return 2
 	case errors.Is(err, cmdutil.ErrSilent):
 		return 1
 	case errors.As(err, new(*cmdutil.FlagError)):
-		_, _ = fmt.Fprintln(f.IOStreams.ErrOut, err)
+		_, _ = fmt.Fprintln(errOut, err)
 		return 2
-	default:
-		var exit *cmdutil.ExitCodeError
-		if errors.As(err, &exit) {
-			return exit.Code
-		}
-		_, _ = fmt.Fprintln(f.IOStreams.ErrOut, "error:", err)
-		return 1
 	}
+	var exit *cmdutil.ExitCodeError
+	if errors.As(err, &exit) {
+		return exit.Code
+	}
+	_, _ = fmt.Fprintln(errOut, "error:", err)
+	return 1
+}
+
+// classifyUnknownCommand wraps cobra's untyped "unknown command" error
+// as *FlagError so the runner maps it to exit 2. Cobra has no public
+// sentinel for that path.
+func classifyUnknownCommand(err error) error {
+	var fe *cmdutil.FlagError
+	if errors.As(err, &fe) {
+		return err
+	}
+	if strings.HasPrefix(err.Error(), "unknown command ") {
+		return &cmdutil.FlagError{Err: err}
+	}
+	return err
 }

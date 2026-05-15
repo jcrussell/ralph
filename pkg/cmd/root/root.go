@@ -31,6 +31,12 @@ func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	// Wrap pflag's flag-parse errors as *FlagError so the top-level
+	// runner maps them to exit 2. Cascades to subcommands via cobra's
+	// FlagErrorFunc lookup.
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return &cmdutil.FlagError{Err: err}
+	})
 
 	root.AddGroup(
 		&cobra.Group{ID: "core", Title: "Core commands:"},
