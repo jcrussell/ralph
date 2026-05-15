@@ -74,14 +74,6 @@ func (s Scope) EventsPath() string {
 	)
 }
 
-// OOMKilled reports whether the kernel killed anything in this scope
-// for OOM. Reads memory.events; absent file or unparsable line is
-// "no OOM", matching the Python heuristic.
-func (s Scope) OOMKilled() bool {
-	killed, _ := OOMKilledFile(s.EventsPath())
-	return killed
-}
-
 // OOMKilledFile parses a cgroup memory.events file and returns true
 // when oom_kill is > 0. A missing file returns false, nil (not an
 // error condition for this caller).
@@ -113,28 +105,6 @@ func OOMKilledFile(path string) (bool, error) {
 		}
 	}
 	return false, s.Err()
-}
-
-// Kill terminates the scope unit via `systemctl --user kill <unit>`.
-// A non-zero exit from systemctl is returned to the caller; an
-// already-dead unit yields a non-nil error from systemctl that the
-// caller may ignore.
-func (s Scope) Kill(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "systemctl", "--user", "kill", s.Unit) //nolint:gosec // s.Unit derived from package-internal NewScope, byob-input-validation.3
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("isolation: kill %s: %w: %s", s.Unit, err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
-// ResetFailed clears the failed state of the scope unit so it doesn't
-// linger in systemd's status output between iterations.
-func (s Scope) ResetFailed(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "systemctl", "--user", "reset-failed", s.Unit) //nolint:gosec // s.Unit derived from package-internal NewScope, byob-input-validation.3
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("isolation: reset-failed %s: %w: %s", s.Unit, err, strings.TrimSpace(string(out)))
-	}
-	return nil
 }
 
 // Available probes that `systemd-run --user --scope` actually works

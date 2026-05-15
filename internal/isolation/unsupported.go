@@ -25,10 +25,7 @@ func (s Scope) UnitBase() string { return s.Unit }
 func (s Scope) Argv(command string, args []string) []string {
 	return append([]string{command}, args...)
 }
-func (s Scope) EventsPath() string                    { return "" }
-func (s Scope) OOMKilled() bool                       { return false }
-func (s Scope) Kill(ctx context.Context) error        { return ErrUnsupported }
-func (s Scope) ResetFailed(ctx context.Context) error { return ErrUnsupported }
+func (s Scope) EventsPath() string { return "" }
 
 func OOMKilledFile(path string) (bool, error) { return false, ErrUnsupported }
 

@@ -44,9 +44,7 @@ sequenceDiagram
   Note over Loop: Classify → ModeOOM,<br/>back off oom_secs
 ```
 
-`Scope.OOMKilled()` reads `/sys/fs/cgroup/user.slice/user-<uid>.slice/user@<uid>.service/<unit>/memory.events` and returns true when `oom_kill` is > 0. Missing or unparsable file = no OOM (matches the Python reference behavior — fail open rather than false-positive on systemd quirks).
-
-The classifier in `internal/runner/classify.go` checks `s.ExitCode == 137` as a backup signal — `systemd-run` propagates SIGKILL as exit 137, so even when `memory.events` is unavailable the iteration ends up in `ModeOOM`.
+The classifier in `internal/runner/classify.go` checks `s.ExitCode == 137` as the OOM signal — `systemd-run` propagates SIGKILL as exit 137, so an iteration killed for exceeding `MemoryMax` ends up in `ModeOOM`. `isolation.OOMKilledFile(path)` parses `memory.events` directly (true when `oom_kill > 0`); the loop does not call it today, but it's available for a future cgroup-events read path if the exit-code heuristic ever proves insufficient.
 
 ## Probing at startup
 
