@@ -57,9 +57,6 @@ func (j *JSONL) Close() error {
 	return j.f.Close()
 }
 
-// Path returns the file path JSONL was opened with. Useful for tests.
-func (j *JSONL) Path() string { return j.f.Name() }
-
 // NewSlog returns a slog.Logger writing JSON records to path at the
 // given level. Closer flushes and closes the underlying file. Parent
 // directories are created if absent.
