@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jcrussell/ralph/internal/git"
+	"github.com/jcrussell/ralph/internal/loop"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
 
@@ -101,25 +102,10 @@ func Render(ctx context.Context, repo string, since time.Time, w io.Writer) erro
 
 // ----- Work done (bd_diff aggregation from summary.jsonl) ----------
 
-type iterRecord struct {
-	Iter      int             `json:"iter"`
-	State     string          `json:"state"`
-	Timestamp string          `json:"timestamp,omitempty"`
-	BDDiff    json.RawMessage `json:"bd_diff,omitempty"`
-	Cost      float64         `json:"cost_usd,omitempty"`
-}
-
-type bdDiff struct {
-	Created    []string `json:"created,omitempty"`
-	Closed     []string `json:"closed,omitempty"`
-	Opened     []string `json:"opened,omitempty"`
-	Deferred   []string `json:"deferred,omitempty"`
-	InProgress []string `json:"in_progress,omitempty"`
-}
-
 // readSummary parses summary.jsonl, filtering to records at-or-after
 // since. A missing file is not an error; returns an empty slice.
-func readSummary(repo string, since time.Time) ([]iterRecord, error) {
+// Lines that fail to decode against loop.IterRecord are skipped.
+func readSummary(repo string, since time.Time) ([]loop.IterRecord, error) {
 	path := filepath.Join(repo, ".ralph", "state", "logs", "summary.jsonl")
 	f, err := os.Open(path) //nolint:gosec // path joined from repo root
 	if errors.Is(err, fs.ErrNotExist) {
@@ -129,7 +115,7 @@ func readSummary(repo string, since time.Time) ([]iterRecord, error) {
 		return nil, fmt.Errorf("report: open %s: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
-	var out []iterRecord
+	var out []loop.IterRecord
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for sc.Scan() {
@@ -137,7 +123,7 @@ func readSummary(repo string, since time.Time) ([]iterRecord, error) {
 		if len(line) == 0 {
 			continue
 		}
-		var rec iterRecord
+		var rec loop.IterRecord
 		if err := json.Unmarshal(line, &rec); err != nil {
 			continue // tolerate stray lines
 		}
@@ -162,23 +148,19 @@ func writeWorkDone(repo string, since time.Time, w io.Writer) error {
 	opened := map[string]struct{}{}
 	deferred := map[string]struct{}{}
 	for _, r := range records {
-		if len(r.BDDiff) == 0 {
+		if r.BDDiff == nil {
 			continue
 		}
-		var d bdDiff
-		if err := json.Unmarshal(r.BDDiff, &d); err != nil {
-			continue
-		}
-		for _, id := range d.Created {
+		for _, id := range r.BDDiff.Created {
 			created[id] = struct{}{}
 		}
-		for _, id := range d.Closed {
+		for _, id := range r.BDDiff.Closed {
 			closed[id] = struct{}{}
 		}
-		for _, id := range d.Opened {
+		for _, id := range r.BDDiff.Opened {
 			opened[id] = struct{}{}
 		}
-		for _, id := range d.Deferred {
+		for _, id := range r.BDDiff.Deferred {
 			deferred[id] = struct{}{}
 		}
 	}

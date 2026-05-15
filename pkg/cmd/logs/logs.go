@@ -17,6 +17,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jcrussell/ralph/internal/loop"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
 
@@ -104,7 +105,7 @@ func emit(r io.Reader, opts *Options) error {
 }
 
 func emitLine(line []byte, opts *Options) error {
-	rec, err := decode(line)
+	rec, raw, err := decode(line)
 	if err != nil {
 		// Skip unparseable lines but surface to ErrOut so they're not
 		// lost.
@@ -118,8 +119,9 @@ func emitLine(line []byte, opts *Options) error {
 	case opts.JSON:
 		_, _ = fmt.Fprintf(opts.F.IOStreams.Out, "%s\n", line)
 	case opts.Iter > 0:
-		// Single-record mode: pretty JSON.
-		pretty, perr := json.MarshalIndent(rec.raw, "", "  ")
+		// Single-record mode: pretty JSON from the raw map so unknown
+		// fields survive forward-compat.
+		pretty, perr := json.MarshalIndent(raw, "", "  ")
 		if perr != nil {
 			return perr
 		}
@@ -130,31 +132,21 @@ func emitLine(line []byte, opts *Options) error {
 	return nil
 }
 
-// record is the slice of summary.jsonl we read. Unknown fields are
-// preserved in raw.
-type record struct {
-	Iter      int    `json:"iter"`
-	State     string `json:"state"`
-	PrevState string `json:"prev_state,omitempty"`
-	Narrative string `json:"narrative,omitempty"`
-
-	raw map[string]any
-}
-
-func decode(line []byte) (record, error) {
+// decode parses one summary.jsonl line into the canonical loop.IterRecord
+// and (in parallel) a raw map so unknown fields survive pretty-printing.
+func decode(line []byte) (loop.IterRecord, map[string]any, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(line, &raw); err != nil {
-		return record{}, err
+		return loop.IterRecord{}, nil, err
 	}
-	var rec record
+	var rec loop.IterRecord
 	if err := json.Unmarshal(line, &rec); err != nil {
-		return record{}, err
+		return loop.IterRecord{}, nil, err
 	}
-	rec.raw = raw
-	return rec, nil
+	return rec, raw, nil
 }
 
-func formatNarrative(rec record) string {
+func formatNarrative(rec loop.IterRecord) string {
 	if rec.Narrative != "" {
 		return fmt.Sprintf("iter %04d  %s", rec.Iter, rec.Narrative)
 	}
