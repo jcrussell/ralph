@@ -22,6 +22,13 @@ ralph fsm [flags]
   -h, --help   help for fsm
 ```
 
+### Options inherited from parent commands
+
+```
+      --log-level string   explicit log level (warn|info|debug); overrides -v
+  -v, --verbose count      increase log verbosity (-v=info, -vv=debug)
+```
+
 ### SEE ALSO
 
 * [ralph](ralph.md)	 - FSM-driven autonomous-loop CLI

@@ -40,7 +40,7 @@ ralph run [flags]
 
 ```
       --dry-run              render prompts and route states without invoking the runner
-      --fresh                reset fsm.json before starting (use when the prior run reached a terminal state)
+      --fresh                reset fsm.json before starting (required after failed{*}; done{*} auto-resets)
   -h, --help                 help for run
       --label string         iteration label recorded in summary.jsonl
       --max-iterations int   override [loop] max_iterations (0 = config)
@@ -48,6 +48,13 @@ ralph run [flags]
       --once                 run one iteration then exit
       --skip-gate            skip the per-state gate hook
       --timeout int          override [loop] session_timeout_secs (0 = config)
+```
+
+### Options inherited from parent commands
+
+```
+      --log-level string   explicit log level (warn|info|debug); overrides -v
+  -v, --verbose count      increase log verbosity (-v=info, -vv=debug)
 ```
 
 ### SEE ALSO

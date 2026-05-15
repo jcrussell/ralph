@@ -2,6 +2,7 @@ package cmdutil
 
 import (
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,6 +12,19 @@ func TestNewFactoryHasLogger(t *testing.T) {
 	f := NewFactory()
 	if f.Logger == nil {
 		t.Fatal("NewFactory().Logger = nil; want a default *slog.Logger")
+	}
+}
+
+// byob-logging.3: the binary must be quiet by default. The LevelVar is
+// what the root command flips when -v/--log-level/$RALPH_LOG fires; its
+// starting value is the user-visible default.
+func TestNewFactoryDefaultLevelIsWarn(t *testing.T) {
+	f := NewFactory()
+	if f.LogLevel == nil {
+		t.Fatal("NewFactory().LogLevel = nil; want a *slog.LevelVar")
+	}
+	if got := f.LogLevel.Level(); got != slog.LevelWarn {
+		t.Errorf("LogLevel = %v; want Warn", got)
 	}
 }
 

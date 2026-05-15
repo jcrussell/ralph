@@ -42,6 +42,13 @@ ralph fsm graph [flags]
       --run string   source run for edge counts: latest|all|<id> (default "latest")
 ```
 
+### Options inherited from parent commands
+
+```
+      --log-level string   explicit log level (warn|info|debug); overrides -v
+  -v, --verbose count      increase log verbosity (-v=info, -vv=debug)
+```
+
 ### SEE ALSO
 
 * [ralph fsm](ralph_fsm.md)	 - Inspect the orchestrator state machine

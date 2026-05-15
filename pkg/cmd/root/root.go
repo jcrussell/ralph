@@ -5,6 +5,7 @@ package root
 
 import (
 	"log/slog"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -25,18 +26,53 @@ import (
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
 
+// envLogLevel is consulted as the lowest-priority verbosity input
+// (byob-logging.3). Loses to both --log-level and -v/-vv.
+const envLogLevel = "RALPH_LOG"
+
 // NewCmdRoot returns the root cobra command for `ralph`.
 func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
+	var verbose int
+	var logLevel string
+
 	root := &cobra.Command{
 		Use:           "ralph",
 		Short:         "FSM-driven autonomous-loop CLI",
 		Long:          "ralph runs an AI coding agent in a loop, routed by a built-in state machine. See docs/concepts/ralph-fsm.md.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		// Application-wide middleware (byob-command-shape.5). Attaches a
-		// per-invocation slog.Logger to cmd.Context() so leaf commands
-		// reach it via log.From(ctx) (byob-logging.2).
+		// Application-wide middleware (byob-command-shape.5). Resolves
+		// the per-invocation log level (byob-logging.3) and attaches a
+		// decorated slog.Logger to cmd.Context() so leaf commands reach
+		// it via log.From(ctx) (byob-logging.2).
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			// Precedence: --log-level > -v/-vv > $RALPH_LOG > Warn.
+			// Flags beat env deliberately — a -vv on the command line
+			// must not be silenced by a stale RALPH_LOG=warn.
+			lvl := slog.LevelWarn
+			switch {
+			case logLevel != "":
+				parsed, err := ralphlog.ParseLevel(logLevel)
+				if err != nil {
+					return &cmdutil.FlagError{Err: err}
+				}
+				lvl = parsed
+			case verbose >= 2:
+				lvl = slog.LevelDebug
+			case verbose == 1:
+				lvl = slog.LevelInfo
+			case os.Getenv(envLogLevel) != "":
+				// Invalid env value silently falls through to Warn —
+				// env is the implicit channel; only flags are loud
+				// about errors.
+				if parsed, err := ralphlog.ParseLevel(os.Getenv(envLogLevel)); err == nil {
+					lvl = parsed
+				}
+			}
+			if f.LogLevel != nil {
+				f.LogLevel.Set(lvl)
+			}
+
 			logger := f.Logger
 			if logger == nil {
 				logger = slog.Default()
@@ -45,6 +81,10 @@ func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 	}
+	root.PersistentFlags().CountVarP(&verbose, "verbose", "v",
+		"increase log verbosity (-v=info, -vv=debug)")
+	root.PersistentFlags().StringVar(&logLevel, "log-level", "",
+		"explicit log level (warn|info|debug); overrides -v")
 	// Route cobra's own help/usage/error output through IOStreams (per
 	// byob-iostreams.1). Cascades to subcommands via cobra's writer lookup.
 	root.SetIn(f.IOStreams.In)

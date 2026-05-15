@@ -22,6 +22,13 @@ ralph hook run <path> [flags]
       --state string        value for RALPH_STATE (default: from fsm.json)
 ```
 
+### Options inherited from parent commands
+
+```
+      --log-level string   explicit log level (warn|info|debug); overrides -v
+  -v, --verbose count      increase log verbosity (-v=info, -vv=debug)
+```
+
 ### SEE ALSO
 
 * [ralph hook](ralph_hook.md)	 - Inspect and run ralph hooks

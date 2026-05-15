@@ -20,6 +20,13 @@ ralph fsm show [flags]
       --json   emit raw fsm.json
 ```
 
+### Options inherited from parent commands
+
+```
+      --log-level string   explicit log level (warn|info|debug); overrides -v
+  -v, --verbose count      increase log verbosity (-v=info, -vv=debug)
+```
+
 ### SEE ALSO
 
 * [ralph fsm](ralph_fsm.md)	 - Inspect the orchestrator state machine

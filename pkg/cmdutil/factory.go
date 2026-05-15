@@ -23,6 +23,12 @@ type Factory struct {
 	// log.From(ctx) instead of accepting a logger parameter.
 	Logger *slog.Logger
 
+	// LogLevel is the LevelVar wired into Logger's handler. The root
+	// command's PersistentPreRunE flips it based on -v/-vv/--log-level/
+	// $RALPH_LOG (byob-logging.3). Tests that construct a bare Factory
+	// may leave this nil; the verbosity wiring no-ops when so.
+	LogLevel *slog.LevelVar
+
 	// RepoRoot returns the absolute path to the nearest ancestor of
 	// the current working directory containing a .ralph or .git
 	// directory. Memoized after the first successful call.
@@ -34,12 +40,17 @@ type Factory struct {
 }
 
 // NewFactory builds the default Factory: real iostreams, an eager
-// slog.Logger over ErrOut, and a lazy memoized RepoRoot.
+// slog.Logger over ErrOut at Warn, and a lazy memoized RepoRoot. The
+// Warn default keeps the binary quiet unless the user opts in via
+// -v/--log-level/$RALPH_LOG (byob-logging.3).
 func NewFactory() *Factory {
 	ios := iostreams.System()
+	lvl := new(slog.LevelVar)
+	lvl.Set(slog.LevelWarn)
 	f := &Factory{
 		IOStreams: ios,
-		Logger:    slog.New(slog.NewTextHandler(ios.ErrOut, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		LogLevel:  lvl,
+		Logger:    slog.New(slog.NewTextHandler(ios.ErrOut, &slog.HandlerOptions{Level: lvl})),
 	}
 	f.RepoRoot = sync.OnceValues(findRepoRoot)
 	return f

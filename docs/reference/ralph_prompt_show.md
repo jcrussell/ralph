@@ -22,6 +22,13 @@ ralph prompt show <state> [flags]
       --iter int             value for .Iter
 ```
 
+### Options inherited from parent commands
+
+```
+      --log-level string   explicit log level (warn|info|debug); overrides -v
+  -v, --verbose count      increase log verbosity (-v=info, -vv=debug)
+```
+
 ### SEE ALSO
 
 * [ralph prompt](ralph_prompt.md)	 - Inspect ralph prompts
