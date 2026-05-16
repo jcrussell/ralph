@@ -1,44 +1,39 @@
 # ralph
 
-An FSM-driven autonomous-loop CLI for running an AI coding agent on a task queue, hour after hour, without losing the plot.
+An FSM-driven autonomous-loop CLI for running an AI coding agent on a task queue, hour after hour, without losing the plot. Linux-only; requires [`bd`](https://github.com/jcrussell/beads) and the `claude` CLI on `$PATH`.
 
-```
-ralph init                          # scaffold .ralph/ in any repo
-ralph run                           # drain the bd queue, FSM-routed
-ralph review --branch feature-x     # iterate review findings until clean
-ralph status                        # current state, recent transitions, cost
-ralph timeline --since=8h           # narrative of what happened overnight
+## Install
+
+```sh
+go install github.com/jcrussell/ralph/cmd/ralph@latest
 ```
 
-## What it is
+Binaries and checksums: [releases page](https://github.com/jcrussell/ralph/releases).
 
-The loop pattern (Geoffrey Huntley's "ralph engineering") works, but the interesting part isn't the loop — it's the **state machine** the orchestrator runs around the agent: `clean ↔ dirty ↔ revert`, with `review` as a separate mode for branch review. `ralph` extracts that machine into a typed Go FSM and the per-repo configuration into a `.ralph/` directory analogous to `.git/`.
+## Quickstart
 
-Prompts and hooks customize behavior *within* states. The state topology is fixed in the binary; only the prompts and the work pulled from `bd` change between repos.
+From inside a git repo with a populated `bd` queue:
 
-## Concepts
+```sh
+$ ralph init
+created .ralph/config.toml
+created .ralph/prompts/clean.md
+...
+23 created, 0 skipped
 
-- **[ralph fsm](docs/concepts/ralph-fsm.md)** — the methodology and why an FSM matters.
-- **[state machine](docs/concepts/state-machine.md)** — the FSM topology, predicates, routing.
-- **[hooks](docs/concepts/hooks.md)** — git-style executable scripts that slot into state lifecycle events.
-- **[prompts](docs/concepts/prompts.md)** — templated markdown per state, with optional `_header.md` and `_footer.md`.
-- **[bd integration](docs/concepts/bd-integration.md)** — why `bd` is first-class and how the orchestrator uses it.
-- **Design decisions** — inherited from [byob-go-cli](https://github.com/jcrussell/byob-go-cli); browse with `bd list --type=decision`.
+$ ralph run --once --dry-run    # routes, renders, exits — claude never invoked
 
-## Reference
+$ ralph status
+state:             clean
+iter:              1 / 30
+review:            off
+cost:              $0.00 / unlimited
+```
 
-- **[CLI](docs/reference/cli.md)** — every subcommand and flag.
-- **[Config](docs/reference/config.md)** — `.ralph/config.toml` fields.
-- **[Isolation](docs/reference/isolation.md)** — `systemd-run --user --scope` and OOM detection (Linux-only).
-- **[Backoff](docs/reference/backoff.md)** — failure-mode classification and the wait math.
+The rendered prompt is at `.ralph/state/logs/iter-0001-*-prompt.txt`. Drop `--dry-run` for a real iteration; drop `--once` for an autonomous session that terminates on `done{queue_empty}`, `done{iter_cap}`, or `failed{*}`.
 
-## Guides
+## Where to look next
 
-- **[Getting started](docs/guides/getting-started.md)** — install → init → first run → reading logs.
-- **[Review mode](docs/guides/review-mode.md)** — end-to-end branch review.
-
-## Constraints
-
-- **Linux-only.** Isolation uses `systemd-run --user --scope` for memory caps and OOM detection. `ralph run` errors out on other OSes.
-- **Requires `bd`.** Tasks, decisions, and memories live in [Beads](https://github.com/jcrussell/beads). No SQLite, no second store.
-- **Requires `claude`.** v1 shells out to the Claude Code CLI. Other runners are deferred until the abstraction earns its keep.
+- `ralph --help` (and `ralph <cmd> --help`) — every subcommand and flag.
+- [docs/](docs/) — concepts (FSM, prompts, hooks, bd integration) and generated CLI reference, regenerated each release.
+- [Design decisions](https://github.com/jcrussell/byob-go-cli) — inherited from byob-go-cli; browse with `bd list --type=decision`.
