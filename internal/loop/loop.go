@@ -159,11 +159,13 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 		return fsm.Outcome{}, ErrTerminalState
 	}
 
-	// Begin a new run; Finalize is deferred so a panic or early error
-	// still stamps end_time + exit_outcome.
-	r, err := runs.Begin(opts.Repo)
+	// Open the latest open run when resuming a mid-loop FSM, otherwise
+	// begin a new one. Keeps one FSM journey within one runs/<id>/ dir
+	// across --once / crash restarts. Finalize is deferred so a panic or
+	// early error still stamps end_time + exit_outcome.
+	r, err := openOrBeginRun(opts.Repo, f, logger)
 	if err != nil {
-		return fsm.Outcome{}, fmt.Errorf("loop: begin run: %w", err)
+		return fsm.Outcome{}, err
 	}
 	finalOutcome := f.Outcome
 	defer func() {
@@ -272,6 +274,35 @@ func handleStartState(ctx context.Context, rc *runContext) error {
 		rc.log.ErrorContext(ctx, "start: append transition", "err", err)
 	}
 	return nil
+}
+
+// openOrBeginRun returns the runs.Run the loop will write to. When the
+// FSM is mid-loop (non-terminal and not at the virtual start state) and
+// the latest run on disk has no ExitOutcome stamped, that run is reused
+// so an FSM journey spanning a --once exit or a crashed orchestrator
+// stays in a single runs/<id>/ directory. Otherwise a new run begins.
+func openOrBeginRun(repo string, f *fsm.FSM, logger *slog.Logger) (*runs.Run, error) {
+	if f.State != fsm.StateStart && !f.State.Terminal() {
+		latest, err := runs.Latest(repo)
+		switch {
+		case err == nil:
+			m, merr := latest.ReadManifest()
+			if merr == nil && m.ExitOutcome == nil {
+				logger.Info("runs: reusing latest open run for mid-loop FSM",
+					"id", latest.ID(), "fsm_state", f.State)
+				return latest, nil
+			}
+		case errors.Is(err, runs.ErrNoRuns):
+			// Mid-loop FSM but no prior run dir — fall through to Begin.
+		default:
+			return nil, fmt.Errorf("loop: latest run: %w", err)
+		}
+	}
+	r, err := runs.Begin(repo)
+	if err != nil {
+		return nil, fmt.Errorf("loop: begin run: %w", err)
+	}
+	return r, nil
 }
 
 // validateOptions enforces the byob-input-validation.5 contract:

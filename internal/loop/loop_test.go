@@ -13,6 +13,7 @@ import (
 	"github.com/jcrussell/ralph/internal/fsm"
 	"github.com/jcrussell/ralph/internal/lock"
 	"github.com/jcrussell/ralph/internal/runner"
+	"github.com/jcrussell/ralph/internal/runs"
 	"github.com/jcrussell/ralph/pkg/iostreams"
 )
 
@@ -304,6 +305,140 @@ func TestRun_TerminalFSMWithFreshResetsAndIterates(t *testing.T) {
 	f := fsmAt(t, repo)
 	if f.Reason == fsm.ReasonRunnerTerminal {
 		t.Errorf("--fresh did not reset: persisted reason still %q", f.Reason)
+	}
+}
+
+// Mid-loop FSM (non-terminal, non-start) + a prior open run dir: Run
+// reuses the same run dir instead of starting a new one. Prior
+// transitions stay alongside the new ones — one FSM journey, one run.
+func TestRun_ReusesLatestOpenRunWhenResumingMidLoop(t *testing.T) {
+	repo := scaffoldRepo(t)
+
+	// Seed a prior --once-style run: one transition written, manifest
+	// finalized with EndTime but nil ExitOutcome.
+	prior, err := runs.Begin(repo)
+	if err != nil {
+		t.Fatalf("seed Begin: %v", err)
+	}
+	if aerr := prior.AppendTransition(runs.Transition{Iter: 1, From: "start", To: "clean"}); aerr != nil {
+		t.Fatalf("seed AppendTransition: %v", aerr)
+	}
+	if ferr := prior.Finalize(runs.FinalizeInput{TotalIters: 1}); ferr != nil {
+		t.Fatalf("seed Finalize: %v", ferr)
+	}
+
+	// Seed fsm.json mid-loop at clean (matches the prior run's exit).
+	f := fsm.Fresh()
+	f.Outcome = fsm.Outcome{State: fsm.StateClean}
+	f.Iter = 1
+	if serr := f.Save(repo); serr != nil {
+		t.Fatalf("seed fsm.Save: %v", serr)
+	}
+
+	// Run with an empty queue → routes to done{queue_empty} after one
+	// transition. We just need to observe whether the run dir is reused.
+	opts := baseOpts(t, repo)
+	opts.Runner = &fakeRunner{}
+	opts.Clock = newFakeClock()
+	if _, rerr := Run(context.Background(), opts); rerr != nil {
+		t.Fatalf("Run: %v", rerr)
+	}
+
+	// Only one run dir should exist on disk.
+	metas, err := runs.List(repo)
+	if err != nil {
+		t.Fatalf("runs.List: %v", err)
+	}
+	if len(metas) != 1 {
+		t.Errorf("got %d run dirs, want 1 (reuse should not Begin a new run)", len(metas))
+	}
+	if len(metas) > 0 && metas[0].ID != prior.ID() {
+		t.Errorf("run id = %s, want %s (the prior open run)", metas[0].ID, prior.ID())
+	}
+
+	// The prior transition must still be on disk alongside the new one(s).
+	reopened, err := runs.Open(repo, prior.ID())
+	if err != nil {
+		t.Fatalf("runs.Open: %v", err)
+	}
+	trs, err := reopened.ReadTransitions()
+	if err != nil {
+		t.Fatalf("ReadTransitions: %v", err)
+	}
+	if len(trs) < 2 {
+		t.Fatalf("got %d transitions, want >= 2 (1 seed + 1 from this Run)", len(trs))
+	}
+	if trs[0].From != "start" || trs[0].To != "clean" {
+		t.Errorf("seed transition lost: got %+v", trs[0])
+	}
+}
+
+// Mid-loop FSM but the latest run already has an ExitOutcome stamped
+// (an inconsistency that shouldn't normally arise, but if it does we
+// don't pollute history — Begin a new run instead of mixing journeys).
+func TestRun_BeginsNewRunWhenLatestHasExitOutcome(t *testing.T) {
+	repo := scaffoldRepo(t)
+
+	// Seed a fully finalized prior run with a terminal ExitOutcome.
+	prior, err := runs.Begin(repo)
+	if err != nil {
+		t.Fatalf("seed Begin: %v", err)
+	}
+	out := fsm.Outcome{State: fsm.StateDone, Reason: fsm.ReasonQueueEmpty}
+	if ferr := prior.Finalize(runs.FinalizeInput{Outcome: &out, TotalIters: 1}); ferr != nil {
+		t.Fatalf("seed Finalize: %v", ferr)
+	}
+
+	// Mid-loop FSM (inconsistent with the prior terminal run, but the
+	// loop should still cope).
+	f := fsm.Fresh()
+	f.Outcome = fsm.Outcome{State: fsm.StateClean}
+	if serr := f.Save(repo); serr != nil {
+		t.Fatalf("seed fsm.Save: %v", serr)
+	}
+
+	opts := baseOpts(t, repo)
+	opts.Runner = &fakeRunner{}
+	opts.Clock = newFakeClock()
+	if _, rerr := Run(context.Background(), opts); rerr != nil {
+		t.Fatalf("Run: %v", rerr)
+	}
+
+	metas, err := runs.List(repo)
+	if err != nil {
+		t.Fatalf("runs.List: %v", err)
+	}
+	if len(metas) != 2 {
+		t.Errorf("got %d run dirs, want 2 (Begin should not reuse a terminal run)", len(metas))
+	}
+}
+
+// FSM at Start always begins a new run, even when a prior open run
+// exists — Start means "fresh journey", and the prior run is closed
+// implicitly by being supplanted.
+func TestRun_BeginsNewRunFromStartStateEvenIfPriorOpenRun(t *testing.T) {
+	repo := scaffoldRepo(t)
+	prior, err := runs.Begin(repo)
+	if err != nil {
+		t.Fatalf("seed Begin: %v", err)
+	}
+	if ferr := prior.Finalize(runs.FinalizeInput{}); ferr != nil {
+		t.Fatalf("seed Finalize: %v", ferr)
+	}
+
+	opts := baseOpts(t, repo) // empty BD → start routes to done{queue_empty}
+	opts.Runner = &fakeRunner{}
+	opts.Clock = newFakeClock()
+	if _, rerr := Run(context.Background(), opts); rerr != nil {
+		t.Fatalf("Run: %v", rerr)
+	}
+
+	metas, err := runs.List(repo)
+	if err != nil {
+		t.Fatalf("runs.List: %v", err)
+	}
+	if len(metas) != 2 {
+		t.Errorf("got %d run dirs, want 2 (Start should always Begin a new run)", len(metas))
 	}
 }
 
