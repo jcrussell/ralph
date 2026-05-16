@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -78,18 +77,11 @@ func (r *Runner) Run(ctx context.Context, prompt string, cwd string, extraEnv []
 		cmd.Env = append(cmd.Environ(), extraEnv...)
 	}
 
-	// Put the child (and any descendants it forks) in its own
-	// process group so context cancel can kill the whole tree.
-	// Without this, killing a shell wrapper leaves orphan grandchildren
-	// holding stdout open, and cmd.Run() blocks until they exit.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		// Negative pid → signal the group.
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
+	// Platform-specific: Unix puts the child in its own process group
+	// so context cancel kills the whole tree (claude_unix.go); Windows
+	// is a no-op since `ralph run` errors out on non-Linux before this
+	// path runs (claude_windows.go).
+	setupProcessGroup(cmd)
 	// Bound how long Wait() blocks after Cancel fires before pipes get
 	// force-closed; otherwise a slow grandchild can hold us up.
 	cmd.WaitDelay = 5 * time.Second
