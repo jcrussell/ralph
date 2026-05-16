@@ -7,10 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestScopeArgvShape(t *testing.T) {
@@ -24,8 +25,8 @@ func TestScopeArgvShape(t *testing.T) {
 		"--",
 		"claude", "-p", "hello", "--output-format=json",
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Argv =\n  %v\nwant\n  %v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("Argv mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -38,8 +39,8 @@ func TestScopeArgvNoMemoryLimit(t *testing.T) {
 		"--",
 		"/bin/true",
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Argv = %v, want %v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("Argv mismatch (-want +got):\n%s", diff)
 	}
 }
 

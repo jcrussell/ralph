@@ -5,10 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 // requireBD finds bd on PATH and skips the test if it's not present.
@@ -163,11 +164,11 @@ func TestSnapshotAndDiff(t *testing.T) {
 	sort.Strings(d.Created)
 	sort.Strings(d.Closed)
 
-	if !reflect.DeepEqual(d.Created, []string{idC}) {
-		t.Errorf("Created = %v, want [%s]", d.Created, idC)
+	if diff := cmp.Diff([]string{idC}, d.Created); diff != "" {
+		t.Errorf("Created mismatch (-want +got):\n%s", diff)
 	}
-	if !reflect.DeepEqual(d.Closed, []string{idA}) {
-		t.Errorf("Closed = %v, want [%s]", d.Closed, idA)
+	if diff := cmp.Diff([]string{idA}, d.Closed); diff != "" {
+		t.Errorf("Closed mismatch (-want +got):\n%s", diff)
 	}
 	if len(d.Opened) != 0 {
 		t.Errorf("Opened = %v, want empty", d.Opened)
