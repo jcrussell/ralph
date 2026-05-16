@@ -35,6 +35,10 @@ vet:
 lint:
 	golangci-lint run ./...
 
+.PHONY: vuln
+vuln:
+	go run golang.org/x/vuln/cmd/govulncheck@v1.3.0 ./...
+
 .PHONY: tidy
 tidy:
 	go mod tidy
