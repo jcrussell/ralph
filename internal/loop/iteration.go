@@ -452,43 +452,31 @@ func writeIncidentIfNeeded(rc *runContext, prev, next fsm.Outcome, mode runner.M
 	_ = prev // explicit: not all triggers consult prev today
 	switch {
 	case next.State == fsm.StateFailed:
-		_, err := incidents.Write(rc.repo, incidents.Incident{
-			Kind:      incidents.KindTerminalFailure,
-			Iter:      rc.fsm.Iter,
-			Summary:   fmt.Sprintf("terminal failure: %s", next.Reason),
-			IterIDs:   []string{iterID},
-			Timestamp: rc.clock.Now(),
-		})
-		return err
+		return writeIncident(rc, incidents.KindTerminalFailure, iterID,
+			fmt.Sprintf("terminal failure: %s", next.Reason))
 	case next.State == fsm.StateRevert:
-		_, err := incidents.Write(rc.repo, incidents.Incident{
-			Kind:      incidents.KindRevert,
-			Iter:      rc.fsm.Iter,
-			Summary:   fmt.Sprintf("auto-revert after %d consecutive dirty iterations", rc.fsm.ConsecutiveDirty),
-			IterIDs:   []string{iterID},
-			Timestamp: rc.clock.Now(),
-		})
-		return err
+		return writeIncident(rc, incidents.KindRevert, iterID,
+			fmt.Sprintf("auto-revert after %d consecutive dirty iterations", rc.fsm.ConsecutiveDirty))
 	case rc.lastGateResult == narrative.GatePassed && gateResult == narrative.GateFailed:
-		_, err := incidents.Write(rc.repo, incidents.Incident{
-			Kind:      incidents.KindGateRegression,
-			Iter:      rc.fsm.Iter,
-			Summary:   fmt.Sprintf("gate regressed from passed to failed at iter %d", rc.fsm.Iter),
-			IterIDs:   []string{iterID},
-			Timestamp: rc.clock.Now(),
-		})
-		return err
+		return writeIncident(rc, incidents.KindGateRegression, iterID,
+			fmt.Sprintf("gate regressed from passed to failed at iter %d", rc.fsm.Iter))
 	case mode == runner.ModeDeadSession && rc.cfg.Backoff.DeadSessionThreshold > 0 && rc.deadStreak == rc.cfg.Backoff.DeadSessionThreshold:
-		_, err := incidents.Write(rc.repo, incidents.Incident{
-			Kind:      incidents.KindDeadStreak,
-			Iter:      rc.fsm.Iter,
-			Summary:   fmt.Sprintf("dead session #%d hit threshold %d", rc.deadStreak, rc.cfg.Backoff.DeadSessionThreshold),
-			IterIDs:   []string{iterID},
-			Timestamp: rc.clock.Now(),
-		})
-		return err
+		return writeIncident(rc, incidents.KindDeadStreak, iterID,
+			fmt.Sprintf("dead session #%d hit threshold %d", rc.deadStreak, rc.cfg.Backoff.DeadSessionThreshold))
 	}
 	return nil
+}
+
+// writeIncident persists a single incident at the current iteration.
+func writeIncident(rc *runContext, kind incidents.Kind, iterID, summary string) error {
+	_, err := incidents.Write(rc.repo, incidents.Incident{
+		Kind:      kind,
+		Iter:      rc.fsm.Iter,
+		Summary:   summary,
+		IterIDs:   []string{iterID},
+		Timestamp: rc.clock.Now(),
+	})
+	return err
 }
 
 // snapshotBD is a best-effort Snapshot — errors are logged but the
