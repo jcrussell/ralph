@@ -187,6 +187,30 @@ exit 1
 	}
 }
 
+// TestRunPreStartDeadline pins behavior when the context's deadline
+// has already passed before cmd.Run reaches Start: exec returns
+// context.DeadlineExceeded before forking and ProcessState stays nil.
+// The runner must report KilledByTimeout=true and ExitCode=-1
+// (relying on os.ProcessState.ExitCode()'s nil-receiver fallback).
+func TestRunPreStartDeadline(t *testing.T) {
+	bin := writeScript(t, `#!/bin/sh
+echo '{}'
+`)
+	r := New(bin, nil, "")
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	s, err := r.Run(ctx, "", t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !s.KilledByTimeout {
+		t.Errorf("KilledByTimeout = false, want true")
+	}
+	if s.ExitCode != -1 {
+		t.Errorf("ExitCode = %d, want -1 (no process started)", s.ExitCode)
+	}
+}
+
 func TestRunMissingBinary(t *testing.T) {
 	r := New("/no/such/binary-12345", nil, "")
 	_, err := r.Run(context.Background(), "", t.TempDir(), nil)
