@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jcrussell/ralph/internal/atomicfile"
 	"github.com/jcrussell/ralph/internal/fsm"
 	"github.com/jcrussell/ralph/internal/log"
 )
@@ -350,8 +351,8 @@ func readManifest(dir string) (*Manifest, error) {
 	return &m, nil
 }
 
-// writeManifest writes the manifest atomically: temp-in-same-dir +
-// fsync + rename. Mirrors fsm.Save (byob-runtime-directories.3).
+// writeManifest writes the manifest atomically via internal/atomicfile
+// (byob-runtime-directories.3).
 func writeManifest(dir string, m *Manifest) error {
 	if m.Version == 0 {
 		m.Version = SchemaVersion
@@ -366,29 +367,8 @@ func writeManifest(dir string, m *Manifest) error {
 		return fmt.Errorf("runs: mkdir %s: %w", dir, merr)
 	}
 
-	tmp, err := os.CreateTemp(dir, "manifest-*.json.tmp")
-	if err != nil {
-		return fmt.Errorf("runs: tempfile: %w", err)
-	}
-	tmpPath := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpPath) }
-	if _, err := tmp.Write(b); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return fmt.Errorf("runs: write %s: %w", tmpPath, err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return fmt.Errorf("runs: fsync %s: %w", tmpPath, err)
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return fmt.Errorf("runs: close %s: %w", tmpPath, err)
-	}
-	if err := os.Rename(tmpPath, filepath.Join(dir, "manifest.json")); err != nil {
-		cleanup()
-		return fmt.Errorf("runs: rename: %w", err)
+	if err := atomicfile.WriteFile(filepath.Join(dir, "manifest.json"), b, 0o600); err != nil {
+		return fmt.Errorf("runs: %w", err)
 	}
 	return nil
 }

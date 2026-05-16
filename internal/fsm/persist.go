@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/jcrussell/ralph/internal/atomicfile"
 )
 
 // SchemaVersion is the on-disk schema version for FSM. Bump only when a
@@ -76,8 +78,8 @@ func Load(repoRoot string) (*FSM, error) {
 	return &f, nil
 }
 
-// Save writes fsm.json atomically: temp file in the same directory,
-// fsync, rename. Parent directories are created if absent.
+// Save writes fsm.json atomically via internal/atomicfile (byob-runtime-
+// directories.3). Parent directories are created if absent.
 func (f *FSM) Save(repoRoot string) error {
 	if f.Version == 0 {
 		f.Version = SchemaVersion
@@ -98,30 +100,8 @@ func (f *FSM) Save(repoRoot string) error {
 	}
 	b = append(b, '\n')
 
-	tmp, err := os.CreateTemp(dir, "fsm-*.json.tmp")
-	if err != nil {
-		return fmt.Errorf("fsm: tempfile: %w", err)
-	}
-	tmpPath := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpPath) }
-
-	if _, err := tmp.Write(b); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return fmt.Errorf("fsm: write %s: %w", tmpPath, err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return fmt.Errorf("fsm: fsync %s: %w", tmpPath, err)
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return fmt.Errorf("fsm: close %s: %w", tmpPath, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		cleanup()
-		return fmt.Errorf("fsm: rename %s -> %s: %w", tmpPath, path, err)
+	if err := atomicfile.WriteFile(path, b, 0o600); err != nil {
+		return fmt.Errorf("fsm: %w", err)
 	}
 	return nil
 }

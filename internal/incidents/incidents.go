@@ -5,6 +5,7 @@
 package incidents
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/jcrussell/ralph/internal/atomicfile"
 )
 
 // ErrUnknownKind is returned by Write when Kind isn't a defined
@@ -72,10 +75,12 @@ func Write(repoRoot string, inc Incident) (string, error) {
 		return "", fmt.Errorf("incidents: mkdir %s: %w", dir, err)
 	}
 	path := filepath.Join(dir, fmt.Sprintf("%d-%s.md", ts.UnixNano(), inc.Kind))
-	if err := writeAtomic(path, func(w io.Writer) error {
-		return format(w, inc, ts)
-	}); err != nil {
-		return "", err
+	var buf bytes.Buffer
+	if err := format(&buf, inc, ts); err != nil {
+		return "", fmt.Errorf("incidents: format: %w", err)
+	}
+	if err := atomicfile.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+		return "", fmt.Errorf("incidents: %w", err)
 	}
 	return path, nil
 }
@@ -105,37 +110,6 @@ func format(w io.Writer, inc Incident, ts time.Time) error {
 		if _, err := fmt.Fprintf(w, "\n%s\n", strings.TrimRight(inc.Body, "\n")); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-// writeAtomic writes via a temp file in the same dir + fsync + rename.
-func writeAtomic(path string, fn func(io.Writer) error) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".incident-*.tmp")
-	if err != nil {
-		return fmt.Errorf("incidents: tempfile: %w", err)
-	}
-	tmpPath := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpPath) }
-
-	if err := fn(tmp); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return fmt.Errorf("incidents: write %s: %w", tmpPath, err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return fmt.Errorf("incidents: fsync %s: %w", tmpPath, err)
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return fmt.Errorf("incidents: close %s: %w", tmpPath, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		cleanup()
-		return fmt.Errorf("incidents: rename %s -> %s: %w", tmpPath, path, err)
 	}
 	return nil
 }

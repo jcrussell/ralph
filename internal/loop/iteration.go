@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/jcrussell/ralph/internal/atomicfile"
 	"github.com/jcrussell/ralph/internal/backoff"
 	"github.com/jcrussell/ralph/internal/bd"
 	"github.com/jcrussell/ralph/internal/fsm"
@@ -511,35 +512,15 @@ func writeIterJSON(path string, rec IterRecord) error {
 	return writeAtomic(path, b)
 }
 
-// writeAtomic writes b to path via temp + fsync + rename in same dir.
+// writeAtomic writes b to path via internal/atomicfile, creating the parent
+// directory if absent (callers in this package may target a fresh logs dir).
 func writeAtomic(path string, b []byte) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("loop: mkdir %s: %w", dir, err)
 	}
-	tmp, err := os.CreateTemp(dir, ".iter-*.tmp")
-	if err != nil {
-		return fmt.Errorf("loop: tempfile: %w", err)
-	}
-	tmpPath := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpPath) }
-	if _, err := tmp.Write(b); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return fmt.Errorf("loop: write %s: %w", tmpPath, err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return fmt.Errorf("loop: fsync %s: %w", tmpPath, err)
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return fmt.Errorf("loop: close %s: %w", tmpPath, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		cleanup()
-		return fmt.Errorf("loop: rename: %w", err)
+	if err := atomicfile.WriteFile(path, b, 0o600); err != nil {
+		return fmt.Errorf("loop: %w", err)
 	}
 	return nil
 }
