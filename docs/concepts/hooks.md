@@ -47,7 +47,7 @@ flowchart TD
 | `failure`                       | env: `RALPH_FAILURE_MODE`, `RALPH_FAILURE_REASON` | Exit ignored. React to OOM / rate-limit / terminal.   |
 | `states/<state>/enter`          | env only           | Non-zero → log warning, continue.                                                       |
 | `states/<state>/exit`           | env: `RALPH_NEXT_STATE` | Non-zero → log warning, continue.                                                  |
-| `states/<state>/gate`           | env only           | Exit 0 = pass, non-zero = fail. Result surfaces in `{{.GateResult}}` for next prompt. With `[gate] soft_fail=true` (default) the FSM stays out of `failed` on regression. |
+| `states/<state>/gate`           | env only           | Exit 0 = pass, non-zero = fail. Result surfaces in `{{.GateResult}}` for next prompt. Whether failure routes to `failed` depends on `[gate] soft_fail` — see [config reference](../reference/config.md). |
 
 Missing hooks are fine — every slot has a no-op default.
 
