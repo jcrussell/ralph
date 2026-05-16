@@ -196,3 +196,25 @@ func TestParseSince(t *testing.T) {
 		t.Errorf("RFC3339: %v", err)
 	}
 }
+
+func TestTimelineStateFlagComplete(t *testing.T) {
+	f := &cmdutil.Factory{IOStreams: iostreams.System()}
+	cmd := NewCmdTimeline(f, nil)
+	fn, ok := cmd.GetFlagCompletionFunc("state")
+	if !ok {
+		t.Fatal("no completion func for --state")
+	}
+	got, _ := fn(cmd, nil, "")
+	for _, want := range []string{"clean", "dirty", "review", "done", "failed"} {
+		found := false
+		for _, g := range got {
+			if g == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("--state missing %q (got %v)", want, got)
+		}
+	}
+}

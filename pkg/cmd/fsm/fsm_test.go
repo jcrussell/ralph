@@ -227,3 +227,49 @@ func TestNewCmdFSMSubcommands(t *testing.T) {
 		}
 	}
 }
+
+func TestGraphRunFlagCompletesLatestAllAndIDs(t *testing.T) {
+	repo := scaffold(t, corefsm.Fresh(), true, nil)
+	f, _ := newFactory(repo)
+	cmd := NewCmdFSM(f, nil, nil)
+	graph, _, err := cmd.Find([]string{"graph"})
+	if err != nil {
+		t.Fatalf("find graph: %v", err)
+	}
+	fn, ok := graph.GetFlagCompletionFunc("run")
+	if !ok {
+		t.Fatal("no completion func for --run")
+	}
+	got, _ := fn(graph, nil, "")
+	hasLatest, hasAll, hasID := false, false, false
+	for _, v := range got {
+		switch {
+		case v == "latest":
+			hasLatest = true
+		case v == "all":
+			hasAll = true
+		case strings.Contains(v, "Z"): // run ids are 20060102T150405Z
+			hasID = true
+		}
+	}
+	if !hasLatest || !hasAll {
+		t.Errorf("--run missing latest/all sentinels (got %v)", got)
+	}
+	if !hasID {
+		t.Errorf("--run missing a run id from scaffolded run (got %v)", got)
+	}
+}
+
+func TestGraphRunFlagCompletesWithoutRepo(t *testing.T) {
+	f := &cmdutil.Factory{
+		IOStreams: iostreams.System(),
+		RepoRoot:  func() (string, error) { return "", os.ErrNotExist },
+	}
+	cmd := NewCmdFSM(f, nil, nil)
+	graph, _, _ := cmd.Find([]string{"graph"})
+	fn, _ := graph.GetFlagCompletionFunc("run")
+	got, _ := fn(graph, nil, "")
+	if len(got) != 2 || got[0] != "latest" || got[1] != "all" {
+		t.Errorf("got %v, want [latest all] when repo lookup fails", got)
+	}
+}

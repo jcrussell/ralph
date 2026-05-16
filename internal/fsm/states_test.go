@@ -41,6 +41,19 @@ func TestAllStatesCount(t *testing.T) {
 	}
 }
 
+func TestAllStateNames(t *testing.T) {
+	names := AllStateNames()
+	states := AllStates()
+	if len(names) != len(states) {
+		t.Fatalf("len mismatch: names=%d states=%d", len(names), len(states))
+	}
+	for i, s := range states {
+		if names[i] != string(s) {
+			t.Errorf("names[%d] = %q, want %q", i, names[i], s)
+		}
+	}
+}
+
 func TestStateValidReasons(t *testing.T) {
 	cases := []struct {
 		s       State

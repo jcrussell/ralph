@@ -161,3 +161,54 @@ func TestNewCmdHookRejectsBadState(t *testing.T) {
 		t.Errorf("err = %v, want FlagError", err)
 	}
 }
+
+func TestHookRunStateFlagsComplete(t *testing.T) {
+	f := &cmdutil.Factory{IOStreams: iostreams.System()}
+	cmd := NewCmdHook(f, func(context.Context, *Options) error { return nil })
+	runCmd, _, err := cmd.Find([]string{"run"})
+	if err != nil {
+		t.Fatalf("find run subcommand: %v", err)
+	}
+	for _, flag := range []string{"state", "prev-state", "next-state"} {
+		fn, ok := runCmd.GetFlagCompletionFunc(flag)
+		if !ok {
+			t.Errorf("no completion for --%s", flag)
+			continue
+		}
+		got, _ := fn(runCmd, nil, "")
+		wantContains := []string{"clean", "dirty", "failed", "done"}
+		for _, w := range wantContains {
+			if !contains(got, w) {
+				t.Errorf("--%s missing %q (got %v)", flag, w, got)
+			}
+		}
+	}
+}
+
+func TestHookRunPathCompletionListsHooks(t *testing.T) {
+	repo := newRepo(t)
+	writeHook(t, repo, "pre-iteration", "#!/bin/sh\n")
+	writeHook(t, repo, "states/clean/enter", "#!/bin/sh\n")
+	f, _ := newFactory(repo)
+	cmd := NewCmdHook(f, func(context.Context, *Options) error { return nil })
+	runCmd, _, _ := cmd.Find([]string{"run"})
+	if runCmd.ValidArgsFunction == nil {
+		t.Fatal("ValidArgsFunction not set on hook run")
+	}
+	got, _ := runCmd.ValidArgsFunction(runCmd, nil, "")
+	if !contains(got, "pre-iteration") {
+		t.Errorf("missing pre-iteration in completions: %v", got)
+	}
+	if !contains(got, filepath.Join("states", "clean", "enter")) {
+		t.Errorf("missing states/clean/enter in completions: %v", got)
+	}
+}
+
+func contains(s []string, want string) bool {
+	for _, v := range s {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}

@@ -75,7 +75,8 @@ prompt looks under realistic loop conditions.`,
 
   # diff a prompt edit against the live render
   ralph prompt show clean | diff -u .ralph/prompts/clean.md -`,
-		Args: cobra.ExactArgs(1),
+		Args:      cobra.ExactArgs(1),
+		ValidArgs: []string{"clean", "dirty", "revert", "review"},
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.State = args[0]
 			if err := opts.Validate(); err != nil {
@@ -91,6 +92,8 @@ prompt looks under realistic loop conditions.`,
 	cmd.Flags().StringVar(&opts.GitHead, "git-head", "", "value for .GitHead")
 	cmd.Flags().BoolVar(&opts.GitDirty, "git-dirty", false, "value for .GitDirty")
 	cmd.Flags().StringVar(&opts.GateResult, "gate-result", "not-run", "value for .GateResult (passed|failed|not-run)")
+	cmdutil.MustRegisterFlagCompletion(cmd, "gate-result",
+		cobra.FixedCompletions([]string{"passed", "failed", "not-run"}, cobra.ShellCompDirectiveNoFileComp))
 	return cmd
 }
 

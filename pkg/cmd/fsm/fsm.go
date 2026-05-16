@@ -121,7 +121,29 @@ Use --no-counts to render bare topology.`,
 	}
 	cmd.Flags().StringVar(&opts.Run, "run", "latest", "source run for edge counts: latest|all|<id>")
 	cmd.Flags().BoolVar(&opts.NoCounts, "no-counts", false, "omit edge counts")
+	cmdutil.MustRegisterFlagCompletion(cmd, "run", completeRunSpec(f))
 	return cmd
+}
+
+// completeRunSpec offers "latest", "all", and every run id under
+// .ralph/state/runs/. A missing or unreadable runs dir falls back to the
+// two static spec keywords.
+func completeRunSpec(f *cmdutil.Factory) cobra.CompletionFunc {
+	return func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+		out := []string{"latest", "all"}
+		repo, err := f.RepoRoot()
+		if err != nil {
+			return out, cobra.ShellCompDirectiveNoFileComp
+		}
+		metas, err := runs.List(repo)
+		if err != nil {
+			return out, cobra.ShellCompDirectiveNoFileComp
+		}
+		for _, m := range metas {
+			out = append(out, m.ID)
+		}
+		return out, cobra.ShellCompDirectiveNoFileComp
+	}
 }
 
 // runShow prints fsm.json or, with --json, the raw bytes.

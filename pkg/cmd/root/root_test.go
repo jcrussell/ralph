@@ -403,3 +403,33 @@ func TestRootSurvivesNilLogger(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 }
+
+func TestRootRegistersEnumFlagCompletions(t *testing.T) {
+	ios, _ := iostreams.Test()
+	f := &cmdutil.Factory{IOStreams: ios}
+	root := NewCmdRoot(f)
+	cases := map[string][]string{
+		"log-level":  {"warn", "info", "debug"},
+		"log-format": {"text", "json"},
+	}
+	for flag, want := range cases {
+		fn, ok := root.GetFlagCompletionFunc(flag)
+		if !ok {
+			t.Errorf("no completion func for --%s", flag)
+			continue
+		}
+		got, dir := fn(root, nil, "")
+		if dir != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("--%s directive = %v, want NoFileComp", flag, dir)
+		}
+		if len(got) != len(want) {
+			t.Errorf("--%s got %v, want %v", flag, got, want)
+			continue
+		}
+		for i, v := range want {
+			if got[i] != v {
+				t.Errorf("--%s [%d] = %q, want %q", flag, i, got[i], v)
+			}
+		}
+	}
+}

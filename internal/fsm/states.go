@@ -51,6 +51,17 @@ func AllStates() []State {
 	}
 }
 
+// AllStateNames returns AllStates as a []string for callers (e.g. shell
+// completion) that don't otherwise need the typed form.
+func AllStateNames() []string {
+	s := AllStates()
+	out := make([]string, len(s))
+	for i, st := range s {
+		out[i] = string(st)
+	}
+	return out
+}
+
 // Terminal reports whether s is a terminal state (done or failed).
 func (s State) Terminal() bool {
 	return s == StateDone || s == StateFailed

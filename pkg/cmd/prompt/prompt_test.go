@@ -134,3 +134,36 @@ func TestNewCmdPromptRejectsBadState(t *testing.T) {
 		t.Errorf("err = %T %v, want *FlagError", err, err)
 	}
 }
+
+func TestPromptShowCompletionRegistered(t *testing.T) {
+	f := &cmdutil.Factory{IOStreams: iostreams.System()}
+	cmd := NewCmdPrompt(f, nil)
+	show, _, err := cmd.Find([]string{"show"})
+	if err != nil {
+		t.Fatalf("find show: %v", err)
+	}
+	wantStates := map[string]bool{"clean": true, "dirty": true, "revert": true, "review": true}
+	gotStates := map[string]bool{}
+	for _, a := range show.ValidArgs {
+		gotStates[a] = true
+	}
+	for s := range wantStates {
+		if !gotStates[s] {
+			t.Errorf("ValidArgs missing %q (got %v)", s, show.ValidArgs)
+		}
+	}
+	fn, ok := show.GetFlagCompletionFunc("gate-result")
+	if !ok {
+		t.Fatal("no completion func for --gate-result")
+	}
+	got, _ := fn(show, nil, "")
+	want := []string{"passed", "failed", "not-run"}
+	if len(got) != len(want) {
+		t.Fatalf("--gate-result got %v, want %v", got, want)
+	}
+	for i, v := range want {
+		if got[i] != v {
+			t.Errorf("--gate-result [%d] = %q, want %q", i, got[i], v)
+		}
+	}
+}

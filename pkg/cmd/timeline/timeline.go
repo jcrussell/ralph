@@ -18,6 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jcrussell/ralph/internal/fsm"
 	"github.com/jcrussell/ralph/internal/runs"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
@@ -84,6 +85,8 @@ status' for the single-screen dashboard. --since takes a Go duration
 	cmd.Flags().StringVar(&opts.State, "state", "", "filter rows whose from or to matches this state")
 	cmd.Flags().StringVar(&opts.Reason, "reason", "", "filter rows whose reason matches this string")
 	cmd.Flags().BoolVar(&opts.JSON, "json", false, "emit raw transition JSONL")
+	cmdutil.MustRegisterFlagCompletion(cmd, "state",
+		cobra.FixedCompletions(fsm.AllStateNames(), cobra.ShellCompDirectiveNoFileComp))
 	return cmd
 }
 

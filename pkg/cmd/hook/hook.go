@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -93,7 +94,52 @@ or --env KEY=VALUE to reproduce a specific iteration's environment.`,
 	cmd.Flags().StringVar(&opts.PrevState, "prev-state", "", "value for RALPH_PREV_STATE")
 	cmd.Flags().StringVar(&opts.NextState, "next-state", "", "value for RALPH_NEXT_STATE")
 	cmd.Flags().StringSliceVar(&opts.ExtraEnv, "env", nil, "extra KEY=VALUE pairs (repeatable)")
+	stateCompletions := cobra.FixedCompletions(fsm.AllStateNames(), cobra.ShellCompDirectiveNoFileComp)
+	cmdutil.MustRegisterFlagCompletion(cmd, "state", stateCompletions)
+	cmdutil.MustRegisterFlagCompletion(cmd, "prev-state", stateCompletions)
+	cmdutil.MustRegisterFlagCompletion(cmd, "next-state", stateCompletions)
+	cmd.ValidArgsFunction = func(_ *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) > 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return completeHookPaths(f, toComplete)
+	}
 	return cmd
+}
+
+// completeHookPaths offers relative paths under .ralph/hooks/ that begin
+// with toComplete. Missing or unreadable hooks dir falls through to file
+// completion so the shell stays usable.
+func completeHookPaths(f *cmdutil.Factory, toComplete string) ([]string, cobra.ShellCompDirective) {
+	repo, err := f.RepoRoot()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveDefault
+	}
+	root := hooks.Dir(repo)
+	var out []string
+	werr := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if path == root {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, rerr := filepath.Rel(root, path)
+		if rerr != nil {
+			return nil
+		}
+		if toComplete == "" || strings.HasPrefix(rel, toComplete) {
+			out = append(out, rel)
+		}
+		return nil
+	})
+	if werr != nil {
+		return nil, cobra.ShellCompDirectiveDefault
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
 }
 
 func run(ctx context.Context, opts *Options) error {

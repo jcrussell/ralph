@@ -128,6 +128,10 @@ docs/concepts/configuration.md for the .ralph/config.toml schema.`,
 		"log record format (text|json); default text")
 	root.PersistentFlags().StringVar(&logFile, "log-file", "",
 		"append log records to this file instead of stderr")
+	cmdutil.MustRegisterFlagCompletion(root, "log-level",
+		cobra.FixedCompletions([]string{"warn", "info", "debug"}, cobra.ShellCompDirectiveNoFileComp))
+	cmdutil.MustRegisterFlagCompletion(root, "log-format",
+		cobra.FixedCompletions([]string{"text", "json"}, cobra.ShellCompDirectiveNoFileComp))
 	// Route cobra's own help/usage/error output through IOStreams (per
 	// byob-iostreams.1). Cascades to subcommands via cobra's writer lookup.
 	root.SetIn(f.IOStreams.In)
