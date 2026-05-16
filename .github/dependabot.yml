@@ -1,0 +1,13 @@
+# byob-security.1: Dependabot keeps Go modules and GitHub Actions on
+# pinned-but-fresh versions. Upgrades land via PR; nobody types `go get
+# example.com/pkg@latest` on a laptop.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
