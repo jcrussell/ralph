@@ -26,6 +26,7 @@ import (
 
 	"github.com/jcrussell/ralph/internal/git"
 	"github.com/jcrussell/ralph/internal/loop"
+	"github.com/jcrussell/ralph/internal/runs"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
 
@@ -306,16 +307,7 @@ func firstHeader(path string) string {
 
 // ----- State distribution + cost (from manifests) -------------------
 
-type manifest struct {
-	Start             string         `json:"start,omitempty"`
-	End               string         `json:"end,omitempty"`
-	Iters             int            `json:"iters,omitempty"`
-	StateDistribution map[string]int `json:"state_distribution,omitempty"`
-	CostUSD           float64        `json:"cost_usd,omitempty"`
-	WallclockSecs     int            `json:"wallclock_secs,omitempty"`
-}
-
-func readManifests(repo string, since time.Time) ([]manifest, error) {
+func readManifests(repo string, since time.Time) ([]runs.Manifest, error) {
 	dir := filepath.Join(repo, ".ralph", "state", "runs")
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -324,7 +316,7 @@ func readManifests(repo string, since time.Time) ([]manifest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("report: read runs: %w", err)
 	}
-	var out []manifest
+	var out []runs.Manifest
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -337,14 +329,12 @@ func readManifests(repo string, since time.Time) ([]manifest, error) {
 		if err != nil {
 			return nil, fmt.Errorf("report: read %s: %w", path, err)
 		}
-		var m manifest
+		var m runs.Manifest
 		if err := json.Unmarshal(b, &m); err != nil {
 			continue
 		}
-		if m.End != "" {
-			if t, err := time.Parse(time.RFC3339, m.End); err == nil && t.Before(since) {
-				continue
-			}
+		if m.EndTime != nil && m.EndTime.Before(since) {
+			continue
 		}
 		out = append(out, m)
 	}
@@ -359,7 +349,7 @@ func writeStateDistribution(repo string, since time.Time, w io.Writer) error {
 	_, _ = fmt.Fprintln(w, "## State distribution")
 	total := map[string]int{}
 	for _, m := range manifests {
-		for k, v := range m.StateDistribution {
+		for k, v := range m.StateCounts {
 			total[k] += v
 		}
 	}
@@ -397,9 +387,9 @@ func writeCost(repo string, since time.Time, w io.Writer) error {
 	var wall int
 	var iters int
 	for _, m := range manifests {
-		cost += m.CostUSD
-		wall += m.WallclockSecs
-		iters += m.Iters
+		cost += m.CumulativeCostUSD
+		wall += m.CumulativeWallclockSecs
+		iters += m.TotalIters
 	}
 	_, _ = fmt.Fprintf(w, "- iters: %d\n", iters)
 	_, _ = fmt.Fprintf(w, "- wallclock: %s\n", time.Duration(wall)*time.Second)

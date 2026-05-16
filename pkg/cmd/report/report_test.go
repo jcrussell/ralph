@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jcrussell/ralph/internal/runs"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 	"github.com/jcrussell/ralph/pkg/iostreams"
 )
@@ -74,13 +75,14 @@ func TestRenderHappyPath(t *testing.T) {
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manifest, _ := json.Marshal(map[string]any{
-		"start":              time.Now().Add(-60 * time.Minute).UTC().Format(time.RFC3339),
-		"end":                time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339),
-		"iters":              5,
-		"state_distribution": map[string]int{"clean": 3, "dirty": 2},
-		"cost_usd":           0.42,
-		"wallclock_secs":     3000,
+	end := time.Now().Add(-10 * time.Minute).UTC()
+	manifest, _ := json.Marshal(runs.Manifest{
+		StartTime:               time.Now().Add(-60 * time.Minute).UTC(),
+		EndTime:                 &end,
+		TotalIters:              5,
+		StateCounts:             map[string]int{"clean": 3, "dirty": 2},
+		CumulativeCostUSD:       0.42,
+		CumulativeWallclockSecs: 3000,
 	})
 	if err := os.WriteFile(filepath.Join(runDir, "manifest.json"), manifest, 0o644); err != nil {
 		t.Fatal(err)
