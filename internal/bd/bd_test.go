@@ -225,6 +225,29 @@ func TestClientUsesDirNotCWD(t *testing.T) {
 	_ = filepath.Join(tmpHome, "ignored")
 }
 
+// TestCreateRejectsEmptyID points a Client at a fake "bd" binary that
+// returns valid JSON with an empty id field. The Create call must
+// surface an error instead of returning ("", nil).
+func TestCreateRejectsEmptyID(t *testing.T) {
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "bd")
+	script := "#!/bin/sh\nprintf '%s\\n' '{\"id\": \"\", \"title\": \"x\"}'\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := New(fake, dir)
+	id, err := c.Create(context.Background(), CreateOpts{Title: "x", Priority: 3})
+	if err == nil {
+		t.Fatalf("Create with empty-id stdout: got id=%q err=nil, want error", id)
+	}
+	if id != "" {
+		t.Errorf("id on error = %q, want empty", id)
+	}
+	if !strings.Contains(err.Error(), "empty id") {
+		t.Errorf("err = %v, want to mention empty id", err)
+	}
+}
+
 func contains(s []string, want string) bool {
 	for _, v := range s {
 		if v == want {

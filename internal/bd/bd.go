@@ -85,9 +85,8 @@ type CreateOpts struct {
 	Labels      []string
 }
 
-// Create files a new issue via `bd q` (quiet capture, returns ID on
-// stdout). Falls back to `bd create` semantics if extra fields are
-// needed beyond what `q` accepts.
+// Create files a new issue via `bd create --json` and returns the new
+// issue ID parsed from stdout.
 func (c *Client) Create(ctx context.Context, opts CreateOpts) (string, error) {
 	if opts.Title == "" {
 		return "", errors.New("bd: Create requires Title")
@@ -112,13 +111,10 @@ func (c *Client) Create(ctx context.Context, opts CreateOpts) (string, error) {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(out, &created); err != nil {
-		// Fallback: bd create may print a one-line "Created issue:
-		// <id>" without JSON depending on version.
-		line := strings.TrimSpace(string(out))
-		if line != "" {
-			return line, nil
-		}
 		return "", fmt.Errorf("bd: parse create output: %w", err)
+	}
+	if created.ID == "" {
+		return "", fmt.Errorf("bd: create returned empty id (output: %s)", strings.TrimSpace(string(out)))
 	}
 	return created.ID, nil
 }
