@@ -22,7 +22,7 @@ type Options struct {
 	Iter       int
 	GitHead    string
 	GitDirty   bool
-	GateResult string
+	GateResult GateResultFlag
 }
 
 // Validate enforces flag-value invariants before any side effects.
@@ -56,7 +56,7 @@ prompt authoring without burning tokens.`,
 }
 
 func newCmdShow(f *cmdutil.Factory, runF func(context.Context, *Options) error) *cobra.Command {
-	opts := &Options{F: f}
+	opts := &Options{F: f, GateResult: GateResultNotRun}
 	cmd := &cobra.Command{
 		Use:   "show <state>",
 		Short: "Render the prompt for <state> without running anything",
@@ -91,7 +91,7 @@ prompt looks under realistic loop conditions.`,
 	cmd.Flags().IntVar(&opts.Iter, "iter", 0, "value for .Iter")
 	cmd.Flags().StringVar(&opts.GitHead, "git-head", "", "value for .GitHead")
 	cmd.Flags().BoolVar(&opts.GitDirty, "git-dirty", false, "value for .GitDirty")
-	cmd.Flags().StringVar(&opts.GateResult, "gate-result", "not-run", "value for .GateResult (passed|failed|not-run)")
+	cmd.Flags().Var(&opts.GateResult, "gate-result", "value for .GateResult (passed|failed|not-run)")
 	cmdutil.MustRegisterFlagCompletion(cmd, "gate-result",
 		cobra.FixedCompletions([]string{"passed", "failed", "not-run"}, cobra.ShellCompDirectiveNoFileComp))
 	return cmd
@@ -113,7 +113,7 @@ func showRun(_ context.Context, opts *Options) error {
 		GitHead:    opts.GitHead,
 		GitDirty:   opts.GitDirty,
 		RepoRoot:   repo,
-		GateResult: opts.GateResult,
+		GateResult: string(opts.GateResult),
 	}
 	out, err := promptlib.Render(root.FS(), opts.State, vars)
 	if err != nil {

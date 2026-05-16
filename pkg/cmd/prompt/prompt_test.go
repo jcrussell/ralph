@@ -62,7 +62,7 @@ func TestShowRunRendersTemplate(t *testing.T) {
 		F:          f,
 		State:      "clean",
 		Iter:       42,
-		GateResult: "passed",
+		GateResult: GateResultPassed,
 	}
 	if err := showRun(context.Background(), opts); err != nil {
 		t.Fatalf("showRun: %v", err)

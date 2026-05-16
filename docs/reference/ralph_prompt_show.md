@@ -32,11 +32,11 @@ ralph prompt show <state> [flags]
 ### Options
 
 ```
-      --gate-result string   value for .GateResult (passed|failed|not-run) (default "not-run")
-      --git-dirty            value for .GitDirty
-      --git-head string      value for .GitHead
-  -h, --help                 help for show
-      --iter int             value for .Iter
+      --gate-result gate-result   value for .GateResult (passed|failed|not-run) (default not-run)
+      --git-dirty                 value for .GitDirty
+      --git-head string           value for .GitHead
+  -h, --help                      help for show
+      --iter int                  value for .Iter
 ```
 
 ### Options inherited from parent commands
