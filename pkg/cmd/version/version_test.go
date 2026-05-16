@@ -101,3 +101,23 @@ func TestVersionRun_IncludesGoAndOSLines(t *testing.T) {
 		t.Errorf("Out missing os/arch line: %q", out)
 	}
 }
+
+func TestNewCmdVersion_RunFInjection(t *testing.T) {
+	called := false
+	io, _ := iostreams.Test()
+	f := &cmdutil.Factory{IOStreams: io}
+	cmd := NewCmdVersion(f, func(_ context.Context, opts *Options) error {
+		called = true
+		if opts.F != f {
+			t.Errorf("opts.F not propagated")
+		}
+		return nil
+	})
+	cmd.SetArgs([]string{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !called {
+		t.Errorf("runF was not called")
+	}
+}
