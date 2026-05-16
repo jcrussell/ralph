@@ -90,6 +90,51 @@ func TestReadTransitionsMissingIsEmpty(t *testing.T) {
 	}
 }
 
+// A crash mid-AppendTransition can leave the final line without its
+// terminating newline. Recovery must tolerate that one torn line so
+// the run's timeline and Finalize keep working.
+func TestReadTransitionsToleratesTornLastLine(t *testing.T) {
+	repo := t.TempDir()
+	r, err := Begin(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Committed first line + torn second line (no trailing newline,
+	// invalid JSON tail).
+	good := `{"ts":"2026-05-16T00:00:00Z","iter":1,"from":"start","to":"clean"}` + "\n"
+	torn := `{"ts":"2026-05-16T00:00:01Z","iter":2,"from":"clean","to":"di`
+	path := filepath.Join(r.Dir(), "transitions.jsonl")
+	if werr := os.WriteFile(path, []byte(good+torn), 0o600); werr != nil {
+		t.Fatal(werr)
+	}
+	got, err := r.ReadTransitions()
+	if err != nil {
+		t.Fatalf("ReadTransitions: %v", err)
+	}
+	if len(got) != 1 || got[0].To != "clean" {
+		t.Errorf("got %+v, want one committed transition to clean", got)
+	}
+}
+
+// Earlier-line corruption is a real bug — masking it would hide
+// schema drift or programmer error. Only the torn last line is benign.
+func TestReadTransitionsRejectsCorruptEarlierLine(t *testing.T) {
+	repo := t.TempDir()
+	r, err := Begin(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := "not-json\n"
+	good := `{"ts":"2026-05-16T00:00:00Z","iter":1,"from":"start","to":"clean"}` + "\n"
+	path := filepath.Join(r.Dir(), "transitions.jsonl")
+	if werr := os.WriteFile(path, []byte(bad+good), 0o600); werr != nil {
+		t.Fatal(werr)
+	}
+	if _, err := r.ReadTransitions(); err == nil {
+		t.Fatal("ReadTransitions: nil err on corrupt earlier line, want failure")
+	}
+}
+
 func TestUpdateManifestAtomic(t *testing.T) {
 	repo := t.TempDir()
 	r, err := Begin(repo)

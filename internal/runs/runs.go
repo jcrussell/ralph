@@ -189,8 +189,10 @@ func (r *Run) AppendTransition(t Transition) error {
 }
 
 // ReadTransitions parses transitions.jsonl. Missing file is empty
-// slice. Lines that fail to parse are surfaced as errors so callers
-// notice torn writes.
+// slice. A torn final line (file does not end in '\n') is silently
+// dropped — a crash mid-AppendTransition is the only producer of that
+// shape. Earlier-line corruption is surfaced as error so real bugs
+// aren't masked.
 func (r *Run) ReadTransitions() ([]Transition, error) {
 	b, err := os.ReadFile(filepath.Join(r.dir, "transitions.jsonl"))
 	if err != nil {
@@ -199,13 +201,21 @@ func (r *Run) ReadTransitions() ([]Transition, error) {
 		}
 		return nil, fmt.Errorf("runs: read transitions: %w", err)
 	}
+	if len(b) == 0 {
+		return nil, nil
+	}
+	lastTorn := b[len(b)-1] != '\n'
+	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
 	var out []Transition
-	for i, line := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
+	for i, line := range lines {
 		if line == "" {
 			continue
 		}
 		var t Transition
 		if err := json.Unmarshal([]byte(line), &t); err != nil {
+			if lastTorn && i == len(lines)-1 {
+				continue
+			}
 			return nil, fmt.Errorf("runs: transitions line %d: %w", i+1, err)
 		}
 		out = append(out, t)
