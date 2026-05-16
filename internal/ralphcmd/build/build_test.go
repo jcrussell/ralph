@@ -19,7 +19,7 @@ func TestSentinels(t *testing.T) {
 
 func TestDefaultsAreSentinels(t *testing.T) {
 	// Package vars must start at the sentinel values so unset paths
-	// (go run, plain go build) hit the BuildInfo fallback.
+	// (go run, plain go build) hit the debug.BuildInfo fallback.
 	if Version != VersionDev {
 		t.Errorf("Version default = %q, want %q", Version, VersionDev)
 	}
@@ -43,7 +43,7 @@ func fakeBuildInfo(ok bool, settings ...debug.BuildSetting) func() (*debug.Build
 }
 
 func TestResolveInfo_LdflagsWin(t *testing.T) {
-	// When ldflags injected a real version, BuildInfo must be ignored
+	// When ldflags injected a real version, debug.BuildInfo must be ignored
 	// completely — the explicit value is authoritative.
 	got := resolveInfo("v1.2.3", "abc123", "2026-05-15",
 		fakeBuildInfo(true,
@@ -51,7 +51,7 @@ func TestResolveInfo_LdflagsWin(t *testing.T) {
 			debug.BuildSetting{Key: "vcs.time", Value: "should-be-ignored"},
 			debug.BuildSetting{Key: "vcs.modified", Value: "true"},
 		))
-	want := BuildInfo{Version: "v1.2.3", Commit: "abc123", Date: "2026-05-15"}
+	want := Triple{Version: "v1.2.3", Commit: "abc123", Date: "2026-05-15"}
 	if got != want {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
@@ -63,7 +63,7 @@ func TestResolveInfo_FallsBackToBuildInfo(t *testing.T) {
 			debug.BuildSetting{Key: "vcs.revision", Value: "deadbeef"},
 			debug.BuildSetting{Key: "vcs.time", Value: "2026-05-15T12:00:00Z"},
 		))
-	want := BuildInfo{Version: VersionDev, Commit: "deadbeef", Date: "2026-05-15T12:00:00Z"}
+	want := Triple{Version: VersionDev, Commit: "deadbeef", Date: "2026-05-15T12:00:00Z"}
 	if got != want {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
@@ -105,14 +105,14 @@ func TestResolveInfo_ModifiedFalseLeavesCommit(t *testing.T) {
 func TestResolveInfo_NoBuildInfo(t *testing.T) {
 	got := resolveInfo(VersionDev, CommitNone, DateUnknown,
 		fakeBuildInfo(false))
-	want := BuildInfo{Version: VersionDev, Commit: CommitNone, Date: DateUnknown}
+	want := Triple{Version: VersionDev, Commit: CommitNone, Date: DateUnknown}
 	if got != want {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
 }
 
 func TestResolveInfo_LdflagsPartialNoFallback(t *testing.T) {
-	// If Version is non-sentinel, BuildInfo lookup is skipped entirely
+	// If Version is non-sentinel, debug.BuildInfo lookup is skipped entirely
 	// even when Commit/Date are still at sentinels — ldflags is
 	// authoritative as a set, not per-field.
 	got := resolveInfo("v1.0.0", CommitNone, DateUnknown,

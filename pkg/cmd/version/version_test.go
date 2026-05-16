@@ -12,21 +12,21 @@ import (
 )
 
 func TestFormatShort(t *testing.T) {
-	got := FormatShort(build.BuildInfo{Version: "v1.2.3", Commit: "abc123", Date: "2026-05-15"})
+	got := FormatShort(build.Triple{Version: "v1.2.3", Commit: "abc123", Date: "2026-05-15"})
 	if got != "ralph v1.2.3" {
 		t.Errorf("FormatShort = %q, want %q", got, "ralph v1.2.3")
 	}
 }
 
 func TestFormatShort_DevSentinel(t *testing.T) {
-	got := FormatShort(build.BuildInfo{Version: build.VersionDev, Commit: build.CommitNone, Date: build.DateUnknown})
+	got := FormatShort(build.Triple{Version: build.VersionDev, Commit: build.CommitNone, Date: build.DateUnknown})
 	if got != "ralph dev" {
 		t.Errorf("FormatShort = %q, want %q", got, "ralph dev")
 	}
 }
 
 func TestFormatLong_FullTriple(t *testing.T) {
-	got := FormatLong(build.BuildInfo{Version: "v1.2.3", Commit: "deadbeef", Date: "2026-05-15T12:00:00Z"})
+	got := FormatLong(build.Triple{Version: "v1.2.3", Commit: "deadbeef", Date: "2026-05-15T12:00:00Z"})
 	for _, want := range []string{
 		"ralph v1.2.3\n",
 		"  commit: deadbeef\n",
@@ -44,7 +44,7 @@ func TestFormatLong_SentinelsRenderVerbatim(t *testing.T) {
 	// A `go run` with no ldflags resolves to the sentinels. They must
 	// appear verbatim — surfacing "unknown" tells the user the build
 	// dropped metadata.
-	got := FormatLong(build.BuildInfo{Version: build.VersionDev, Commit: build.CommitNone, Date: build.DateUnknown})
+	got := FormatLong(build.Triple{Version: build.VersionDev, Commit: build.CommitNone, Date: build.DateUnknown})
 	if !strings.Contains(got, "  commit: none\n") {
 		t.Errorf("FormatLong should preserve commit sentinel; got %q", got)
 	}
@@ -54,7 +54,7 @@ func TestFormatLong_SentinelsRenderVerbatim(t *testing.T) {
 }
 
 func TestFormatLong_StartsWithRalphLine(t *testing.T) {
-	got := FormatLong(build.BuildInfo{Version: "v0.0.0", Commit: build.CommitNone, Date: build.DateUnknown})
+	got := FormatLong(build.Triple{Version: "v0.0.0", Commit: build.CommitNone, Date: build.DateUnknown})
 	if !strings.HasPrefix(got, "ralph v0.0.0\n") {
 		t.Errorf("FormatLong should start with 'ralph <version>\\n'; got %q", got)
 	}

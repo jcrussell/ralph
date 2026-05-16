@@ -43,7 +43,7 @@ func versionRun(_ context.Context, opts *Options) error {
 // FormatShort renders the one-line banner used by `ralph --version`.
 // Exported so the root command can feed it to cobra's Version template
 // without re-deriving the format string.
-func FormatShort(info build.BuildInfo) string {
+func FormatShort(info build.Triple) string {
 	return "ralph " + info.Version
 }
 
@@ -53,7 +53,7 @@ func FormatShort(info build.BuildInfo) string {
 // rather than a defect to hide. runtime.Version / GOOS / GOARCH are
 // resolved here (not in build.Info) because they belong to the running
 // process, not the build artifact.
-func FormatLong(info build.BuildInfo) string {
+func FormatLong(info build.Triple) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ralph %s\n", info.Version)
 	fmt.Fprintf(&b, "  commit: %s\n", info.Commit)

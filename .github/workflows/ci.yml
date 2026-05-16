@@ -1,19 +1,14 @@
 # bead ralph-yjz: every push to main and every PR runs the same quality
 # gates that land code locally — `go mod tidy` with a diff check (so a
-# hand-edited go.mod is rejected), `go vet`, and race tests.
-#
-# `make lint` is intentionally NOT wired here yet: there are pre-existing
-# golangci-lint findings (one G302 perm, one revive stutter on
-# build.BuildInfo, one staticcheck ST1023). Once those land, add the
-# step using golangci/golangci-lint-action pinned by SHA.
+# hand-edited go.mod is rejected), `go vet`, race tests, and lint.
 #
 # byob-security.5: third-party actions are pinned by commit SHA (not
 # tag) so a moved tag can't silently swap the action's code;
 # workflow-level permissions default to none, jobs opt into the minimum
 # they need.
 #
-# byob-security.1: tool versions (Go toolchain) are exact — never
-# `latest` or a floating ref. Dependabot bumps them.
+# byob-security.1: tool versions (Go toolchain, golangci-lint) are
+# exact — never `latest` or a floating ref. Dependabot bumps them.
 name: ci
 
 on:
@@ -43,5 +38,9 @@ jobs:
           git diff --exit-code go.mod go.sum
       - name: vet
         run: make vet
+      - name: lint
+        uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
+        with:
+          version: v2.11.4
       - name: test
         run: make test

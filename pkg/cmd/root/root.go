@@ -5,7 +5,6 @@ package root
 
 import (
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 
@@ -159,9 +158,10 @@ func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 // deliberately lives for the process lifetime — a short-lived CLI
 // exits and the OS reclaims it.
 func buildLogger(f *cmdutil.Factory, logFile, logFormat string, lvl slog.Level) (*slog.Logger, error) {
-	var w io.Writer = f.IOStreams.ErrOut
+	w := f.IOStreams.ErrOut
 	if logFile != "" {
-		fh, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		// #nosec G304 -- --log-file is a user-supplied destination by design.
+		fh, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err != nil {
 			return nil, fmt.Errorf("open --log-file: %w", err)
 		}

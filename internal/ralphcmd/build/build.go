@@ -26,8 +26,8 @@ var (
 	Date    = DateUnknown
 )
 
-// BuildInfo is the resolved triple returned by Info().
-type BuildInfo struct {
+// Triple is the resolved version/commit/date triple returned by Info().
+type Triple struct {
 	Version, Commit, Date string
 }
 
@@ -35,16 +35,16 @@ type BuildInfo struct {
 // is ldflags; on a default build the function consults
 // debug.ReadBuildInfo() for VCS revision and dirty flag so a plain
 // `go install` still yields a meaningful answer. Wrapped in
-// sync.OnceValue so the BuildInfo scan runs at most once per process
+// sync.OnceValue so the scan runs at most once per process
 // and concurrent callers do not race.
-var Info = sync.OnceValue(func() BuildInfo {
+var Info = sync.OnceValue(func() Triple {
 	return resolveInfo(Version, Commit, Date, debug.ReadBuildInfo)
 })
 
 // resolveInfo is the testable seam — pure function over its inputs,
 // no package-var reads, no mutation. The decision (byob-release.1)
 // requires Info() not to mutate the package vars from its read path.
-func resolveInfo(v, c, d string, readBuild func() (*debug.BuildInfo, bool)) BuildInfo {
+func resolveInfo(v, c, d string, readBuild func() (*debug.BuildInfo, bool)) Triple {
 	if v == VersionDev {
 		if info, ok := readBuild(); ok {
 			for _, s := range info.Settings {
@@ -65,5 +65,5 @@ func resolveInfo(v, c, d string, readBuild func() (*debug.BuildInfo, bool)) Buil
 			}
 		}
 	}
-	return BuildInfo{Version: v, Commit: c, Date: d}
+	return Triple{Version: v, Commit: c, Date: d}
 }
