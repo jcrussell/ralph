@@ -1,0 +1,45 @@
+# goreleaser config — release cross-compile matrix.
+# byob-release.4 + byob-release.6: -trimpath always, -s -w on release only.
+# Dev builds (make build) keep symbols; release strips them here.
+#
+# windows is intentionally excluded — internal/runner/claude.go uses
+# syscall.SysProcAttr.Setpgid/syscall.Kill without build tags (ralph-gbu).
+# ralph is Linux-only at runtime per isolation, but darwin compiles and
+# version/docs subcommands work cross-platform.
+version: 2
+
+project_name: ralph
+
+builds:
+  - id: ralph
+    main: ./cmd/ralph
+    binary: ralph
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/jcrussell/ralph/internal/ralphcmd/build.Version={{.Version}}
+      - -X github.com/jcrussell/ralph/internal/ralphcmd/build.Commit={{.FullCommit}}
+      - -X github.com/jcrussell/ralph/internal/ralphcmd/build.Date={{.Date}}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: SHA256SUMS
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot+{{ .ShortCommit }}"
+
+changelog:
+  disable: true

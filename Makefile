@@ -43,6 +43,14 @@ tidy:
 docs:
 	go generate ./pkg/cmd/root/
 
+.PHONY: snapshot
+snapshot:
+	goreleaser build --snapshot --clean
+
+.PHONY: release
+release:
+	goreleaser release --clean
+
 .PHONY: clean
 clean:
-	rm -rf bin/
+	rm -rf bin/ dist/
