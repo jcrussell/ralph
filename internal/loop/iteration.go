@@ -87,7 +87,7 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 	beforeHead, _ := git.HeadSHA(ctx, rc.repo)
 
 	// 1. Global pre-iteration hook. Non-zero → skip the runner this tick.
-	preEnv := buildHookEnv(rc, hooks.PhaseEnter, "")
+	preEnv := buildHookEnv(rc, hooks.PhaseNone, "")
 	preEnv.PromptFile = "" // not rendered yet
 	preRes, err := hooks.Run(ctx, hooks.GlobalPath(rc.repo, "pre-iteration"), preEnv, nil)
 	if err != nil {
@@ -156,7 +156,7 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 	}
 
 	// 7. Global post-iteration hook (stdin = iter json).
-	postEnv := buildHookEnv(rc, hooks.PhaseEnter, "")
+	postEnv := buildHookEnv(rc, hooks.PhaseNone, "")
 	postEnv.IterJSON = rc.paths.json
 	postEnv.PromptFile = rc.paths.prompt
 	if f, oerr := os.Open(rc.paths.json); oerr == nil { //nolint:gosec // path joined from rc.repo + state-controlled stem

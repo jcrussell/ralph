@@ -137,6 +137,19 @@ exit 7
 	}
 }
 
+// PhaseNone is the zero value loop uses when building env for a global
+// hook. Lock in the value + distinctness so a rename of either phase
+// doesn't silently collapse them.
+func TestPhaseNoneZeroValue(t *testing.T) {
+	var zero Phase
+	if zero != PhaseNone {
+		t.Errorf("zero Phase = %q, want PhaseNone (%q)", zero, PhaseNone)
+	}
+	if PhaseNone == PhaseEnter || PhaseNone == PhaseExit || PhaseNone == PhaseGate {
+		t.Errorf("PhaseNone collides with a per-state phase: %q", PhaseNone)
+	}
+}
+
 func TestPathHelpers(t *testing.T) {
 	got := StatePath("/r", "clean", PhaseEnter)
 	want := filepath.Join("/r", ".ralph", "hooks", "states", "clean", "enter")

@@ -57,8 +57,10 @@ type Env struct {
 // Phase names a per-state phase.
 type Phase string
 
-// Per-state hook phases.
+// Per-state hook phases. PhaseNone is the zero value, passed by callers
+// that build env for a global hook (pre-iteration, post-iteration, failure).
 const (
+	PhaseNone  Phase = ""
 	PhaseEnter Phase = "enter"
 	PhaseExit  Phase = "exit"
 	PhaseGate  Phase = "gate"
