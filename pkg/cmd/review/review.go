@@ -12,7 +12,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jcrussell/ralph/internal/config"
 	"github.com/jcrussell/ralph/internal/loop"
 	reviewlib "github.com/jcrussell/ralph/internal/review"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
@@ -107,7 +106,7 @@ func runReview(ctx context.Context, opts *Options) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(repo)
+	cfg, err := opts.F.Config()
 	if err != nil {
 		return err
 	}

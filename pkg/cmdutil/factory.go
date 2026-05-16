@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/jcrussell/ralph/internal/config"
 	"github.com/jcrussell/ralph/pkg/iostreams"
 )
 
@@ -34,8 +35,14 @@ type Factory struct {
 	// directory. Memoized after the first successful call.
 	RepoRoot func() (string, error)
 
+	// Config returns the merged, validated configuration (defaults <
+	// user file < repo file). Memoized via sync.OnceValues — commands
+	// that never dereference it (e.g. --help, --version, completions)
+	// pay no filesystem cost, and a malformed config file can't break
+	// commands that don't need it (byob-config.3).
+	Config func() (*config.Config, error)
+
 	// Lazy fields added as subsystems land:
-	//   Config     func() (*config.Config, error)
 	//   Store      func() (store.Store, error)
 }
 
@@ -53,7 +60,22 @@ func NewFactory() *Factory {
 		Logger:    slog.New(slog.NewTextHandler(ios.ErrOut, &slog.HandlerOptions{Level: lvl})),
 	}
 	f.RepoRoot = sync.OnceValues(findRepoRoot)
+	f.Config = LazyConfig(f.RepoRoot)
 	return f
+}
+
+// LazyConfig returns a sync.OnceValues closure that resolves a config
+// relative to the supplied RepoRoot. Tests that construct a bare
+// Factory can wire `Config: LazyConfig(rootFn)` to mirror NewFactory's
+// behavior without depending on os.Getwd.
+func LazyConfig(repoRoot func() (string, error)) func() (*config.Config, error) {
+	return sync.OnceValues(func() (*config.Config, error) {
+		repo, err := repoRoot()
+		if err != nil {
+			return nil, err
+		}
+		return config.Load(repo)
+	})
 }
 
 // ErrNoRepoRoot is returned when no .ralph or .git ancestor exists.

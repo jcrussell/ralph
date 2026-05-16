@@ -104,7 +104,7 @@ func runStatus(_ context.Context, opts *Options) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(repo)
+	cfg, err := opts.F.Config()
 	if err != nil {
 		return err
 	}

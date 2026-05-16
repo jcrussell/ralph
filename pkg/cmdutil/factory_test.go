@@ -29,6 +29,61 @@ func TestNewFactoryDefaultLevelIsWarn(t *testing.T) {
 	}
 }
 
+// byob-config.3: f.Config must be a memoized closure so commands that
+// never dereference it (--help, --version, completions) pay no
+// filesystem cost. NewFactory wires it; tests can swap via LazyConfig.
+func TestNewFactoryConfigIsLazy(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".ralph"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	chdir(t, root)
+
+	f := NewFactory()
+	if f.Config == nil {
+		t.Fatal("NewFactory().Config = nil; want closure")
+	}
+	cfg, err := f.Config()
+	if err != nil {
+		t.Fatalf("f.Config(): %v", err)
+	}
+	if cfg.Loop.MaxIterations == 0 {
+		t.Errorf("Config returned zero defaults: %+v", cfg.Loop)
+	}
+}
+
+// LazyConfig must propagate a RepoRoot error rather than calling the
+// loader with an empty path (which would mis-classify the failure as
+// a config-load error).
+func TestLazyConfigPropagatesRepoRootError(t *testing.T) {
+	rootErr := errors.New("no repo")
+	fn := LazyConfig(func() (string, error) { return "", rootErr })
+	_, err := fn()
+	if !errors.Is(err, rootErr) {
+		t.Errorf("err = %v, want %v", err, rootErr)
+	}
+}
+
+// sync.OnceValues guarantees one load per closure; verify by counting
+// the underlying RepoRoot invocations.
+func TestLazyConfigMemoizes(t *testing.T) {
+	root := t.TempDir()
+	calls := 0
+	fn := LazyConfig(func() (string, error) {
+		calls++
+		return root, nil
+	})
+	if _, err := fn(); err != nil {
+		t.Fatalf("fn(): %v", err)
+	}
+	if _, err := fn(); err != nil {
+		t.Fatalf("fn() second call: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("RepoRoot called %d times; want 1 (sync.OnceValues)", calls)
+	}
+}
+
 func TestRepoRootFindsRalph(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".ralph"), 0o755); err != nil {

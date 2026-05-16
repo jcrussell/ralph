@@ -61,9 +61,11 @@ func scaffold(t *testing.T, state *fsm.FSM, withRun bool, trans []runs.Transitio
 func newFactory(t *testing.T, repo string) (*cmdutil.Factory, *iostreams.TestBuffers) {
 	t.Helper()
 	ios, bufs := iostreams.Test()
+	rootFn := func() (string, error) { return repo, nil }
 	return &cmdutil.Factory{
 		IOStreams: ios,
-		RepoRoot:  func() (string, error) { return repo, nil },
+		RepoRoot:  rootFn,
+		Config:    cmdutil.LazyConfig(rootFn),
 	}, bufs
 }
 
