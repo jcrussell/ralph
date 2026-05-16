@@ -345,6 +345,40 @@ func TestRootVersionFlagPrintsShortBanner(t *testing.T) {
 	}
 }
 
+// byob-command-shape.3: root declares a small set of command groups and
+// every feature subcommand carries a GroupID so `ralph --help` renders
+// semantically grouped. Cobra's auto-generated `help` and `completion`
+// commands are exempt — they belong in "Additional Commands".
+func TestRootGroupsCoverAllFeatureCommands(t *testing.T) {
+	ios, _ := iostreams.Test()
+	f := &cmdutil.Factory{IOStreams: ios}
+	root := NewCmdRoot(f)
+
+	wantGroups := map[string]bool{"core": false, "obs": false, "info": false, "setup": false}
+	for _, g := range root.Groups() {
+		if _, ok := wantGroups[g.ID]; !ok {
+			t.Errorf("unexpected group %q on root", g.ID)
+			continue
+		}
+		wantGroups[g.ID] = true
+	}
+	for id, found := range wantGroups {
+		if !found {
+			t.Errorf("missing group %q on root", id)
+		}
+	}
+
+	cobraAuto := map[string]bool{"help": true, "completion": true}
+	for _, c := range root.Commands() {
+		if cobraAuto[c.Name()] {
+			continue
+		}
+		if c.GroupID == "" {
+			t.Errorf("command %q has no GroupID; every feature command must opt into a group", c.Name())
+		}
+	}
+}
+
 // When f.Logger is nil (tests that construct a bare Factory),
 // PersistentPreRunE must fall back to slog.Default() rather than panic.
 func TestRootSurvivesNilLogger(t *testing.T) {
