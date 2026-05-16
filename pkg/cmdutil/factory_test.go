@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -78,6 +79,41 @@ func TestRepoRootMissing(t *testing.T) {
 	var h *ErrHint
 	if !errors.As(err, &h) || h.Hint == "" {
 		t.Errorf("err = %v, want *ErrHint with a non-empty hint", err)
+	}
+}
+
+// byob-user-docs.5: anchor stability is a compatibility contract.
+// Each anchor referenced from an ErrHint must exist as a matching
+// "## <anchor>" heading in docs/troubleshooting.md. Renaming either
+// side without the other breaks the docs link in already-shipped
+// binaries.
+var troubleshootingAnchors = map[string]string{
+	"no-repo-root": "ErrNoRepoRoot in findRepoRoot",
+}
+
+func TestRepoRootMissingHintLinksToTroubleshooting(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	_, err := findRepoRoot()
+	var h *ErrHint
+	if !errors.As(err, &h) {
+		t.Fatalf("err = %v, want *ErrHint", err)
+	}
+	if !strings.Contains(h.Hint, "#no-repo-root") {
+		t.Errorf("hint = %q, want anchor reference to #no-repo-root", h.Hint)
+	}
+}
+
+func TestTroubleshootingAnchorsExistInDocs(t *testing.T) {
+	path := filepath.Join("..", "..", "docs", "troubleshooting.md")
+	docs, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	for anchor, origin := range troubleshootingAnchors {
+		if !strings.Contains(string(docs), "## "+anchor+"\n") {
+			t.Errorf("docs/troubleshooting.md missing `## %s` heading (referenced from %s)", anchor, origin)
+		}
 	}
 }
 

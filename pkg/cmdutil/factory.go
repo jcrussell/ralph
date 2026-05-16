@@ -79,8 +79,9 @@ func findRepoRoot() (string, error) {
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			return "", &ErrHint{
-				Err:  fmt.Errorf("%w (searched from %s)", ErrNoRepoRoot, wd),
-				Hint: "run `ralph init` in your project root, or cd into a git repo",
+				Err: fmt.Errorf("%w (searched from %s)", ErrNoRepoRoot, wd),
+				Hint: "run `ralph init` in your project root, or cd into a git repo\n" +
+					"      (see: https://github.com/jcrussell/ralph/blob/main/docs/troubleshooting.md#no-repo-root)",
 			}
 		}
 		dir = parent
