@@ -36,4 +36,4 @@ The rendered prompt is at `.ralph/state/logs/iter-0001-*-prompt.txt`. Drop `--dr
 
 - `ralph --help` (and `ralph <cmd> --help`) — every subcommand and flag.
 - [docs/](docs/) — concepts (FSM, prompts, hooks, bd integration) and generated CLI reference, regenerated each release.
-- [Design decisions](https://github.com/jcrussell/byob-go-cli) — inherited from byob-go-cli; browse with `bd list --type=decision`.
+- [Design decisions](https://github.com/jcrussell/byob-go-cli) — bootstrapped from byob-go-cli; browse with `bd list --type=decision`.
