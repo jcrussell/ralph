@@ -10,9 +10,9 @@ import (
 	"github.com/jcrussell/ralph/internal/atomicfile"
 )
 
-// SchemaVersion is the on-disk schema version for FSM. Bump only when a
-// loader change is needed; older files are upgraded in place, newer
-// files are rejected with ErrSchemaTooNew.
+// SchemaVersion is the on-disk schema version for FSM (byob-runtime-
+// directories.4). Bump only when a loader change is needed; older files
+// are upgraded in place, newer files are rejected with ErrSchemaTooNew.
 const SchemaVersion = 1
 
 // ErrSchemaTooNew is returned by Load when fsm.json was written by a
