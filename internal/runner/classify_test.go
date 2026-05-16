@@ -10,6 +10,24 @@ func TestClassifyTimeoutWins(t *testing.T) {
 	}
 }
 
+func TestClassifyOOMSignalBeatsExitCode(t *testing.T) {
+	// OOMSignal (cgroup memory.events oom_kill > 0) wins over the
+	// envelope, stderr scan, and ExitCode==137 fallback.
+	s := &Session{OOMSignal: true, ExitCode: 0, Envelope: &Envelope{}}
+	if got := Classify(s); got != ModeOOM {
+		t.Errorf("Classify OOMSignal: %s, want %s", got, ModeOOM)
+	}
+}
+
+func TestClassifyTimeoutBeatsOOMSignal(t *testing.T) {
+	// Timeout is the orchestrator's own kill; if both signals are
+	// present the timeout is the proximate cause we want to report.
+	s := &Session{KilledByTimeout: true, OOMSignal: true}
+	if got := Classify(s); got != ModeTimeout {
+		t.Errorf("Classify timeout+oom: %s, want %s", got, ModeTimeout)
+	}
+}
+
 func TestClassifyNilSession(t *testing.T) {
 	if got := Classify(nil); got != ModeUnknown {
 		t.Errorf("Classify(nil) = %s, want %s", got, ModeUnknown)

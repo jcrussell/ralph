@@ -14,7 +14,7 @@ Source: `internal/isolation/systemd.go`.
 
 ## The scope
 
-A scope is the (unit-name, memory-cap) pair `internal/isolation.Scope` wraps. `NewScope(unitBase, memoryLimit)` constructs one; the loop builds one per iteration so unit names don't collide. `Argv` wraps the configured runner command:
+A scope is the (unit-name, memory-cap) pair `internal/isolation.Scope` wraps. `NewScope(unitBase, memoryLimit)` constructs one; the runner builds a fresh `ralph-<pid>-<seq>.scope` per `Run` call so unit names don't collide. `Argv` wraps the configured runner command:
 
 ```
 systemd-run --user --scope --unit=<unit>.scope \
@@ -44,7 +44,7 @@ sequenceDiagram
   Note over Loop: Classify → ModeOOM,<br/>back off oom_secs
 ```
 
-The classifier in `internal/runner/classify.go` checks `s.ExitCode == 137` as the OOM signal — `systemd-run` propagates SIGKILL as exit 137, so an iteration killed for exceeding `MemoryMax` ends up in `ModeOOM`. `isolation.OOMKilledFile(path)` parses `memory.events` directly (true when `oom_kill > 0`); the loop does not call it today, but it's available for a future cgroup-events read path if the exit-code heuristic ever proves insufficient.
+After the runner subprocess exits, `internal/runner` reads the scope's `memory.events` file via `isolation.OOMKilledFile(scope.EventsPath())` and stamps `Session.OOMSignal` when `oom_kill > 0`. The classifier prefers this in-kernel signal over `ExitCode == 137`, which can also mean "killed by some other SIGKILL". The exit-code path is still wired as a fallback for the rare case where the cgroup file has already been torn down by the time we read it.
 
 ## Probing at startup
 

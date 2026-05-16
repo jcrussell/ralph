@@ -69,6 +69,13 @@ func Classify(s *Session) Mode {
 		return ModeTimeout
 	}
 
+	// Cgroup memory.events from the systemd-run scope is authoritative
+	// when set — exit code 137 (the fallback below) can also mean
+	// "killed by some other SIGKILL", so prefer the in-kernel signal.
+	if s.OOMSignal {
+		return ModeOOM
+	}
+
 	// API-error fields in the parsed envelope are the strongest
 	// signal — Claude itself tells us what happened.
 	if s.Envelope != nil {

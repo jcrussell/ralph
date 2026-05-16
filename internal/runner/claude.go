@@ -11,22 +11,35 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
+
+	"github.com/jcrussell/ralph/internal/isolation"
 )
 
 // Runner invokes the AI runner subprocess. Construct via New.
 type Runner struct {
-	cmd  string
-	args []string
+	cmd      string
+	args     []string
+	memLimit string
+	seq      atomic.Uint64
 }
 
 // New returns a Runner. command is looked up on PATH if it's not an
 // absolute path. args are prepended to every invocation (e.g.
-// --dangerously-skip-permissions, --output-format=json).
-func New(command string, args []string) *Runner {
-	return &Runner{cmd: command, args: append([]string(nil), args...)}
+// --dangerously-skip-permissions, --output-format=json). memLimit is
+// the systemd-run MemoryMax value (e.g. "7G", "512m"); empty disables
+// the scope wrapper so each Run execs command directly. Production
+// passes cfg.Loop.MemoryLimit; tests usually pass "".
+func New(command string, args []string, memLimit string) *Runner {
+	return &Runner{
+		cmd:      command,
+		args:     append([]string(nil), args...),
+		memLimit: memLimit,
+	}
 }
 
 // Session is the result of one runner invocation. JSON tags are
@@ -36,6 +49,7 @@ type Session struct {
 	ExitCode        int
 	Duration        time.Duration
 	KilledByTimeout bool
+	OOMSignal       bool // cgroup memory.events reported oom_kill > 0
 	Stdout          string
 	Stderr          string
 	StdoutTail      string
@@ -67,7 +81,21 @@ func (r *Runner) Run(ctx context.Context, prompt string, cwd string, extraEnv []
 		return nil, errors.New("runner: empty command")
 	}
 	start := time.Now()
-	cmd := exec.CommandContext(ctx, r.cmd, r.args...) //nolint:gosec // r.cmd/r.args from operator-controlled config; KISS without /usr/bin/env wrapper
+
+	// Wrap argv with systemd-run --user --scope when memLimit is set so
+	// the child runs under a cgroup with MemoryMax + MemorySwapMax=0 and
+	// post-exec we can read cgroup memory.events for an OOM signal more
+	// reliable than ExitCode==137. memLimit="" skips this and execs
+	// command directly (test path, or operator opt-out via empty
+	// memory_limit_bytes).
+	execCmd, execArgs := r.cmd, r.args
+	var scope isolation.Scope
+	if r.memLimit != "" {
+		scope = isolation.NewScope(r.unitBase(), r.memLimit)
+		wrapped := scope.Argv(r.cmd, r.args)
+		execCmd, execArgs = wrapped[0], wrapped[1:]
+	}
+	cmd := exec.CommandContext(ctx, execCmd, execArgs...) //nolint:gosec // execCmd/execArgs from operator-controlled config (possibly wrapped with systemd-run from internal/isolation)
 	cmd.Dir = cwd
 	cmd.Stdin = strings.NewReader(prompt)
 	var stdout, stderr bytes.Buffer
@@ -110,7 +138,26 @@ func (r *Runner) Run(ctx context.Context, prompt string, cwd string, extraEnv []
 		StderrTail:      tail(errStr, 1000),
 	}
 	s.Envelope = parseEnvelope(outStr)
+	// Best-effort OOM probe: when wrapped, the cgroup memory.events file
+	// often still exists for a moment after the scope's child exits.
+	// A missing file (cleanup already happened) returns false — the
+	// ExitCode==137 fallback in Classify picks up the rest.
+	if r.memLimit != "" {
+		if oom, _ := isolation.OOMKilledFile(scope.EventsPath()); oom {
+			s.OOMSignal = true
+		}
+	}
 	return s, nil
+}
+
+// unitBase returns a unique systemd unit name for this Run call. The
+// shape is "ralph-<pid>-<seq>"; the .scope suffix is appended by
+// isolation.NewScope. pid + per-Runner counter keeps names predictable
+// for `journalctl --user --unit=...` without coupling the runner to
+// the run-id / iter the orchestrator owns.
+func (r *Runner) unitBase() string {
+	n := r.seq.Add(1)
+	return fmt.Sprintf("ralph-%d-%d", os.Getpid(), n)
 }
 
 // parseEnvelope returns nil when stdout is not a valid JSON object,

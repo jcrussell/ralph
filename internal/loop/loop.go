@@ -84,7 +84,7 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 		return fsm.Outcome{}, err
 	}
 	if opts.Runner == nil {
-		opts.Runner = runner.New(opts.Cfg.Runner.Command, opts.Cfg.Runner.Args)
+		opts.Runner = runner.New(opts.Cfg.Runner.Command, opts.Cfg.Runner.Args, opts.Cfg.Loop.MemoryLimit)
 	}
 	if opts.BD == nil {
 		opts.BD = bd.New("", opts.Repo)
