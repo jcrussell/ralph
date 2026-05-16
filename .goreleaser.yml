@@ -71,5 +71,29 @@ signs:
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot+{{ .ShortCommit }}"
 
+# byob-user-docs.4: release notes come from git history, not a hand-maintained
+# CHANGELOG.md. Commits since the previous tag are grouped by prefix; chore /
+# docs / test commits are filtered out. `use: git` keeps the source the local
+# git log (works whether or not the run has a GitHub token); the conventional-
+# commit groups stay empty until ralph adopts feat:/fix: prefixes, at which
+# point they auto-populate without further config changes.
 changelog:
-  disable: true
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^chore:'
+      - '^test:'
+  groups:
+    - title: 'Breaking changes'
+      regexp: '(?i)breaking'
+      order: 0
+    - title: 'Features'
+      regexp: '^feat'
+      order: 1
+    - title: 'Bug fixes'
+      regexp: '^fix'
+      order: 2
+    - title: 'Other'
+      order: 999
