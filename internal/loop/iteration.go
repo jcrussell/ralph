@@ -310,7 +310,7 @@ func runGate(ctx context.Context, rc *runContext, prev fsm.Outcome, commits int)
 	env.PromptFile = rc.paths.prompt
 	res, err := hooks.Run(gateCtx, hooks.StatePath(rc.repo, string(prev.State), hooks.PhaseGate), env, nil)
 	if err != nil {
-		rc.log.WarnContext(gateCtx, "gate hook error", "state", prev.State, "err", err)
+		rc.log.WarnContext(ctx, "gate hook error", "state", prev.State, "err", err)
 		return narrative.GateFailed
 	}
 	if res.NoHook {
