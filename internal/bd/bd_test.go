@@ -190,10 +190,10 @@ func TestDiffNilSnapshots(t *testing.T) {
 // fell through (in_progress→blocked, deferred/blocked→open, etc.).
 func TestDiffSnapshotsTransitions(t *testing.T) {
 	cases := []struct {
-		name    string
-		before  map[string]string
-		after   map[string]string
-		want    Diff
+		name   string
+		before map[string]string
+		after  map[string]string
+		want   Diff
 	}{
 		{
 			name:   "in_progress to blocked",
