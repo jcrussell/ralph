@@ -1,6 +1,11 @@
 # ralph
 
-An FSM-driven autonomous-loop CLI for running an AI coding agent on a task queue, hour after hour, without losing the plot. Linux-only; requires [`bd`](https://github.com/jcrussell/beads) and the `claude` CLI on `$PATH`.
+An FSM-driven autonomous-loop CLI for running an AI coding agent on a task queue, hour after hour, without losing the plot.
+
+## Requirements
+
+- Linux at runtime (cgroup-based isolation). `darwin` builds compile and the read-only subcommands work, but `ralph run` requires Linux.
+- [`bd`](https://github.com/jcrussell/beads) and the `claude` CLI on `$PATH`.
 
 ## Install
 
@@ -37,3 +42,4 @@ The rendered prompt is at `.ralph/state/logs/iter-0001-*-prompt.txt`. Drop `--dr
 - `ralph --help` (and `ralph <cmd> --help`) — every subcommand and flag.
 - [docs/](docs/) — concepts (FSM, prompts, hooks, bd integration) and generated CLI reference, regenerated each release.
 - [Design decisions](https://github.com/jcrussell/byob-go-cli) — bootstrapped from byob-go-cli; browse with `bd list --type=decision`.
+- Contributing: workflow lives in [CLAUDE.md](CLAUDE.md); run `bd prime` for the full command reference.
