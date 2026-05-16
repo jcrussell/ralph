@@ -2,8 +2,27 @@
 
 Print ralph version, commit, and build info
 
+### Synopsis
+
+Prints the multi-line version block: ralph version, commit hash,
+build date, Go toolchain, and OS/arch. Use this when reporting bugs
+or verifying which binary is on PATH.
+
+The root --version flag prints only the one-line banner — both
+routes share build.Info() so they cannot drift.
+
 ```
 ralph version [flags]
+```
+
+### Examples
+
+```
+  # full build info
+  ralph version
+
+  # just the banner (cobra's built-in --version)
+  ralph --version
 ```
 
 ### Options

@@ -49,7 +49,22 @@ func NewCmdTrace(f *cmdutil.Factory, runF func(context.Context, *Options) error)
 	cmd := &cobra.Command{
 		Use:   "trace <iter>",
 		Short: "Show every captured artifact for a single iteration",
-		Args:  cobra.ExactArgs(1),
+		Long: `trace prints the full forensic record for one iteration: the
+JSON iter record, the rendered prompt, and the runner's stdout/
+stderr (tailed by default). All four come from .ralph/state/logs/.
+
+Use this when 'ralph logs --iter=N' is not enough — typically to
+debug a failed iteration or to verify what the runner actually saw.
+--tail-lines=0 disables the tail and dumps the full stdout/stderr.`,
+		Example: `  # full trace of iter 42 (50-line stdout/stderr tail by default)
+  ralph trace 42
+
+  # dump the whole stdout/stderr, no tail
+  ralph trace 42 --tail-lines=0
+
+  # last 200 lines of runner output
+  ralph trace 42 --tail-lines=200`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			n, err := strconv.Atoi(args[0])
 			if err != nil {

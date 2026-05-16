@@ -2,8 +2,37 @@
 
 Markdown summary of orchestrator activity
 
+### Synopsis
+
+report renders a human-readable markdown summary over a time
+window: bd issues closed/created/reopened/deferred, commits, recent
+incidents, FSM state distribution, and aggregate cost / wallclock /
+iteration count. Inputs are summary.jsonl, run manifests under
+.ralph/state/runs/, incident files under .ralph/state/incidents/,
+and 'git log'.
+
+Use this for end-of-day or end-of-week briefings — pipe to your
+favorite markdown viewer or commit it to a journal. --since takes
+a Go duration (24h, 7d → use 168h) or an RFC3339 timestamp.
+
 ```
 ralph report [flags]
+```
+
+### Examples
+
+```
+  # last 24h (default)
+  ralph report
+
+  # last week
+  ralph report --since=168h
+
+  # since a specific timestamp
+  ralph report --since=2026-05-12T00:00:00Z
+
+  # commit a daily report to a journal
+  ralph report > journal/$(date -I).md
 ```
 
 ### Options

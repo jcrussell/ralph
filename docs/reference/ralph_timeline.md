@@ -8,8 +8,29 @@ Reads .ralph/state/runs/<latest>/transitions.jsonl and prints one
 line per FSM transition, joined with the narrative from summary.jsonl
 on iter number.
 
+Use 'ralph timeline' when you want the chronological FSM view; use
+'ralph logs' when you want only the iteration narrative; use 'ralph
+status' for the single-screen dashboard. --since takes a Go duration
+(1h, 30m) or an RFC3339 timestamp; --state and --reason filter rows.
+
 ```
 ralph timeline [flags]
+```
+
+### Examples
+
+```
+  # all transitions for the latest run
+  ralph timeline
+
+  # only the last hour
+  ralph timeline --since=1h
+
+  # only failed-state transitions
+  ralph timeline --state=failed
+
+  # raw JSONL for scripting
+  ralph timeline --json | jq 'select(.to=="dirty")'
 ```
 
 ### Options

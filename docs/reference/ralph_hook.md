@@ -2,6 +2,14 @@
 
 Inspect and run ralph hooks
 
+### Synopsis
+
+Hooks are git-style executable scripts under .ralph/hooks/ that
+ralph invokes at well-known points (pre-iteration, post-iteration,
+failure, and per-state enter/exit/gate). The hook subcommand is for
+running them manually with the documented environment so you can
+debug them outside the loop.
+
 ### Options
 
 ```

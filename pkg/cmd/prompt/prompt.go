@@ -46,6 +46,10 @@ func NewCmdPrompt(f *cmdutil.Factory, runF func(context.Context, *Options) error
 	cmd := &cobra.Command{
 		Use:   "prompt",
 		Short: "Inspect ralph prompts",
+		Long: `Prompts compose as _header.md + prompts/<state>.md + _footer.md
+(header and footer optional). Use the prompt subcommand to render a
+state's prompt without invoking the runner — fast iteration on
+prompt authoring without burning tokens.`,
 	}
 	cmd.AddCommand(newCmdShow(f, runF))
 	return cmd
@@ -58,7 +62,19 @@ func newCmdShow(f *cmdutil.Factory, runF func(context.Context, *Options) error) 
 		Short: "Render the prompt for <state> without running anything",
 		Long: `Renders prompts/<state>.md from the current repo's .ralph/ directory,
 wrapped with prompts/_header.md and prompts/_footer.md when present.
-<state> must be one of: clean, dirty, revert, review.`,
+<state> must be one of: clean, dirty, revert, review.
+
+Template vars (.Iter, .GitHead, .GitDirty, .GateResult) default to
+zero values; override with the matching flags to preview how the
+prompt looks under realistic loop conditions.`,
+		Example: `  # preview the clean-state prompt as it would render on iter 0
+  ralph prompt show clean
+
+  # preview the dirty-state prompt after a failed gate, iter 42
+  ralph prompt show dirty --iter=42 --gate-result=failed --git-dirty
+
+  # diff a prompt edit against the live render
+  ralph prompt show clean | diff -u .ralph/prompts/clean.md -`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.State = args[0]

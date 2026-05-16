@@ -8,8 +8,22 @@ Creates .ralph/{config.toml, prompts/*.md, hooks/...} and writes a
 .gitignore inside .ralph/state/ so runtime state is ignored. Existing
 files are preserved unless --force is given.
 
+Run this once per repo before the first ralph run. Re-running is
+safe — already-edited files are skipped. Use --force only when you
+want to reset prompts or hooks back to the defaults.
+
 ```
 ralph init [flags]
+```
+
+### Examples
+
+```
+  # scaffold a fresh .ralph/ tree
+  ralph init
+
+  # reset prompts and hooks to defaults (overwrites your edits)
+  ralph init --force
 ```
 
 ### Options

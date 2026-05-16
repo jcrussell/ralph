@@ -2,6 +2,13 @@
 
 Inspect ralph prompts
 
+### Synopsis
+
+Prompts compose as _header.md + prompts/<state>.md + _footer.md
+(header and footer optional). Use the prompt subcommand to render a
+state's prompt without invoking the runner — fast iteration on
+prompt authoring without burning tokens.
+
 ### Options
 
 ```

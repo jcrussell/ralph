@@ -63,8 +63,19 @@ func newShow(f *cmdutil.Factory, runF func(context.Context, *Options) error) *co
 	cmd := &cobra.Command{
 		Use:   "show",
 		Short: "Pretty-print .ralph/state/fsm.json",
-		Example: `  ralph fsm show
-  ralph fsm show --json | jq .`,
+		Long: `show reads .ralph/state/fsm.json — the orchestrator's persisted
+state — and prints it as indented JSON. Use this when you want the
+full record (every counter, every cumulative total); use 'ralph
+status' instead when you just want the dashboard view.
+
+--json is a no-op for show: the output is JSON either way. The
+flag is kept for consistency with other commands that gate JSON
+output.`,
+		Example: `  # pretty-print fsm.json
+  ralph fsm show
+
+  # pipe to jq for ad-hoc queries
+  ralph fsm show | jq '.cumulative_cost_usd, .iter'`,
 		RunE: func(c *cobra.Command, args []string) error {
 			if runF != nil {
 				return runF(c.Context(), opts)

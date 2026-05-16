@@ -4,7 +4,30 @@ FSM-driven autonomous-loop CLI
 
 ### Synopsis
 
-ralph runs an AI coding agent in a loop, routed by a built-in state machine. See docs/concepts/ralph-fsm.md.
+ralph runs an AI coding agent in a loop, routed by a built-in
+state machine. Each iteration ends in clean, dirty, revert, or one
+of the terminal done{*}/failed{*} states; the next prompt is chosen
+from the resulting state.
+
+See docs/concepts/ralph-fsm.md for the state diagram and
+docs/concepts/configuration.md for the .ralph/config.toml schema.
+
+### Examples
+
+```
+  # one-time setup
+  ralph doctor && ralph init
+
+  # autonomous run against the bd queue
+  ralph run
+
+  # review an open PR
+  ralph review --pr=123
+
+  # mid-run observability
+  ralph status
+  ralph logs --tail
+```
 
 ### Options
 

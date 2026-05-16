@@ -10,8 +10,29 @@ Default: one narrative line per iteration.
 --tail follows appends until interrupted.
 --json emits raw JSONL.
 
+Use 'ralph logs' when you want the per-iteration narrative stream;
+use 'ralph timeline' when you want the FSM transition view joined
+with narratives; use 'ralph trace <iter>' when you want every
+captured artifact (prompt, stdout, stderr) for one iteration.
+
 ```
 ralph logs [flags]
+```
+
+### Examples
+
+```
+  # one narrative line per iteration (default)
+  ralph logs
+
+  # follow a live run
+  ralph logs --tail
+
+  # pretty-print iter 42 in full
+  ralph logs --iter=42
+
+  # raw JSONL for scripting
+  ralph logs --json | jq 'select(.state=="dirty")'
 ```
 
 ### Options

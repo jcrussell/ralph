@@ -47,6 +47,11 @@ func NewCmdHook(f *cmdutil.Factory, runF func(context.Context, *Options) error) 
 	cmd := &cobra.Command{
 		Use:   "hook",
 		Short: "Inspect and run ralph hooks",
+		Long: `Hooks are git-style executable scripts under .ralph/hooks/ that
+ralph invokes at well-known points (pre-iteration, post-iteration,
+failure, and per-state enter/exit/gate). The hook subcommand is for
+running them manually with the documented environment so you can
+debug them outside the loop.`,
 	}
 	cmd.AddCommand(newCmdRun(f, runF))
 	return cmd
@@ -59,7 +64,19 @@ func newCmdRun(f *cmdutil.Factory, runF func(context.Context, *Options) error) *
 		Short: "Run a hook manually with the standard environment",
 		Long: `<path> is relative to .ralph/hooks/ or absolute. The resolved path
 must live under <repo>/.ralph/hooks/. The hook's exit code propagates
-to ralph's exit code; stdout and stderr are passed through.`,
+to ralph's exit code; stdout and stderr are passed through.
+
+RALPH_REPO, RALPH_STATE, and RALPH_ITER are populated from fsm.json
+by default; override them with --state, --prev-state, --next-state,
+or --env KEY=VALUE to reproduce a specific iteration's environment.`,
+		Example: `  # run the global pre-iteration hook with current fsm.json state
+  ralph hook run pre-iteration
+
+  # simulate the clean → dirty transition for the dirty/enter hook
+  ralph hook run dirty/enter --state=dirty --prev-state=clean
+
+  # inject extra env vars for an ad-hoc hook
+  ralph hook run my-debug-hook --env=DEBUG=1 --env=DRY_RUN=1`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.Path = args[0]

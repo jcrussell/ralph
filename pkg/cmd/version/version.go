@@ -26,6 +26,17 @@ func NewCmdVersion(f *cmdutil.Factory, runF func(context.Context, *Options) erro
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print ralph version, commit, and build info",
+		Long: `Prints the multi-line version block: ralph version, commit hash,
+build date, Go toolchain, and OS/arch. Use this when reporting bugs
+or verifying which binary is on PATH.
+
+The root --version flag prints only the one-line banner — both
+routes share build.Info() so they cannot drift.`,
+		Example: `  # full build info
+  ralph version
+
+  # just the banner (cobra's built-in --version)
+  ralph --version`,
 		RunE: func(c *cobra.Command, args []string) error {
 			if runF != nil {
 				return runF(c.Context(), opts)

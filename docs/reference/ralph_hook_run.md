@@ -8,8 +8,25 @@ Run a hook manually with the standard environment
 must live under <repo>/.ralph/hooks/. The hook's exit code propagates
 to ralph's exit code; stdout and stderr are passed through.
 
+RALPH_REPO, RALPH_STATE, and RALPH_ITER are populated from fsm.json
+by default; override them with --state, --prev-state, --next-state,
+or --env KEY=VALUE to reproduce a specific iteration's environment.
+
 ```
 ralph hook run <path> [flags]
+```
+
+### Examples
+
+```
+  # run the global pre-iteration hook with current fsm.json state
+  ralph hook run pre-iteration
+
+  # simulate the clean → dirty transition for the dirty/enter hook
+  ralph hook run dirty/enter --state=dirty --prev-state=clean
+
+  # inject extra env vars for an ad-hoc hook
+  ralph hook run my-debug-hook --env=DEBUG=1 --env=DRY_RUN=1
 ```
 
 ### Options

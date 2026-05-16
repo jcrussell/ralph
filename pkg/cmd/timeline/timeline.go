@@ -53,7 +53,23 @@ func NewCmdTimeline(f *cmdutil.Factory, runF func(context.Context, *Options) err
 		Short: "Chronological state transitions with narrative",
 		Long: `Reads .ralph/state/runs/<latest>/transitions.jsonl and prints one
 line per FSM transition, joined with the narrative from summary.jsonl
-on iter number.`,
+on iter number.
+
+Use 'ralph timeline' when you want the chronological FSM view; use
+'ralph logs' when you want only the iteration narrative; use 'ralph
+status' for the single-screen dashboard. --since takes a Go duration
+(1h, 30m) or an RFC3339 timestamp; --state and --reason filter rows.`,
+		Example: `  # all transitions for the latest run
+  ralph timeline
+
+  # only the last hour
+  ralph timeline --since=1h
+
+  # only failed-state transitions
+  ralph timeline --state=failed
+
+  # raw JSONL for scripting
+  ralph timeline --json | jq 'select(.to=="dirty")'`,
 		RunE: func(c *cobra.Command, args []string) error {
 			if err := opts.Validate(); err != nil {
 				return err
