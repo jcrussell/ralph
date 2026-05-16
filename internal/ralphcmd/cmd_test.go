@@ -134,18 +134,28 @@ func TestMapErrSilentSuppressesHint(t *testing.T) {
 	}
 }
 
-func TestClassifyUnknownCommandWrapsUnknownCommand(t *testing.T) {
-	got := classifyUnknownCommand(errors.New(`unknown command "foo" for "ralph"`))
+func TestClassifyUsageErrorWrapsUnknownCommand(t *testing.T) {
+	got := classifyUsageError(errors.New(`unknown command "foo" for "ralph"`))
 	var fe *cmdutil.FlagError
 	if !errors.As(got, &fe) {
 		t.Errorf("err = %v; want errors.As(_, **FlagError)", got)
 	}
 }
 
-func TestClassifyUnknownCommandLeavesUnrelated(t *testing.T) {
-	got := classifyUnknownCommand(errors.New("connection refused"))
+func TestClassifyUsageErrorWrapsFlagGroupViolation(t *testing.T) {
+	// Matches the format cobra returns from MarkFlagsMutuallyExclusive
+	// (flag_groups.go).
+	got := classifyUsageError(errors.New("if any flags in the group [iter tail] are set none of the others can be; [iter tail] were all set"))
+	var fe *cmdutil.FlagError
+	if !errors.As(got, &fe) {
+		t.Errorf("err = %v; want errors.As(_, **FlagError)", got)
+	}
+}
+
+func TestClassifyUsageErrorLeavesUnrelated(t *testing.T) {
+	got := classifyUsageError(errors.New("connection refused"))
 	var fe *cmdutil.FlagError
 	if errors.As(got, &fe) {
-		t.Errorf("non-unknown-command error must not be wrapped, got %v", got)
+		t.Errorf("non-usage error must not be wrapped, got %v", got)
 	}
 }

@@ -32,7 +32,7 @@ func mapErr(err error, errOut io.Writer) int {
 	if err == nil {
 		return 0
 	}
-	err = classifyUnknownCommand(err)
+	err = classifyUsageError(err)
 	switch {
 	case errors.Is(err, cmdutil.ErrCancel):
 		return 2
@@ -60,15 +60,18 @@ func printHint(err error, errOut io.Writer) {
 	}
 }
 
-// classifyUnknownCommand wraps cobra's untyped "unknown command" error
-// as *FlagError so the runner maps it to exit 2. Cobra has no public
-// sentinel for that path.
-func classifyUnknownCommand(err error) error {
+// classifyUsageError wraps cobra's untyped usage errors as *FlagError so
+// the runner maps them to exit 2. Cobra exposes no sentinel for these:
+//   - "unknown command ..." (typo'd subcommand)
+//   - flag-group violations from MarkFlagsMutuallyExclusive /
+//     MarkFlagsRequiredTogether / MarkFlagsOneRequired
+func classifyUsageError(err error) error {
 	var fe *cmdutil.FlagError
 	if errors.As(err, &fe) {
 		return err
 	}
-	if strings.HasPrefix(err.Error(), "unknown command ") {
+	msg := err.Error()
+	if strings.HasPrefix(msg, "unknown command ") || strings.Contains(msg, "flags in the group [") {
 		return &cmdutil.FlagError{Err: err}
 	}
 	return err

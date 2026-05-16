@@ -155,8 +155,10 @@ func TestNewCmdLogsRejectsConflictingFlags(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected mutually-exclusive error")
 	}
-	if !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Errorf("err = %v, want substring 'mutually exclusive'", err)
+	// cobra's MarkFlagsMutuallyExclusive error format includes the flag
+	// names; matching on a stable substring keeps the test resilient.
+	if !strings.Contains(err.Error(), "[iter tail]") {
+		t.Errorf("err = %v, want substring '[iter tail]'", err)
 	}
 }
 

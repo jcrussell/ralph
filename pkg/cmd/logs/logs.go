@@ -37,12 +37,12 @@ type Options struct {
 
 // Validate enforces flag-value invariants before any side effects.
 // Errors are FlagErrors so the runner maps them to exit code 2.
+// Flag-relationship checks (e.g. --iter and --tail are mutually
+// exclusive) live on the cobra.Command via MarkFlagsMutuallyExclusive
+// — see NewCmdLogs.
 func (o *Options) Validate() error {
 	if o.Iter < 0 {
 		return cmdutil.FlagErrorf("--iter must be non-negative")
-	}
-	if o.Iter > 0 && o.Tail {
-		return cmdutil.FlagErrorf("--iter and --tail are mutually exclusive")
 	}
 	return nil
 }
@@ -87,6 +87,7 @@ captured artifact (prompt, stdout, stderr) for one iteration.`,
 	cmd.Flags().IntVar(&opts.Iter, "iter", 0, "only print the record with this iter")
 	cmd.Flags().BoolVar(&opts.Tail, "tail", false, "follow new records as they're appended")
 	cmd.Flags().BoolVar(&opts.JSON, "json", false, "emit raw JSONL")
+	cmd.MarkFlagsMutuallyExclusive("iter", "tail")
 	return cmd
 }
 
