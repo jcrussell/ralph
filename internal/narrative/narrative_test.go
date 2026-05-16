@@ -115,6 +115,15 @@ func TestCompose(t *testing.T) {
 			want: "clean → clean: opened a, created b, c, deferred d",
 		},
 		{
+			name: "blocked segment renders between created and deferred",
+			in: Input{
+				Prev: clean,
+				Next: clean,
+				Diff: bd.Diff{Blocked: []string{"b1"}},
+			},
+			want: "clean → clean: blocked b1",
+		},
+		{
 			name: "full house: every segment in canonical order",
 			in: Input{
 				Prev:    clean,
@@ -125,11 +134,12 @@ func TestCompose(t *testing.T) {
 					Closed:     []string{"c1"},
 					Opened:     []string{"o1"},
 					Created:    []string{"n1"},
+					Blocked:    []string{"b1"},
 					Deferred:   []string{"d1"},
 				},
 				Gate: GatePassed,
 			},
-			want: "clean → clean: claimed wip, 3 commits, closed c1, opened o1, created n1, deferred d1, gate green",
+			want: "clean → clean: claimed wip, 3 commits, closed c1, opened o1, created n1, blocked b1, deferred d1, gate green",
 		},
 	}
 	for _, c := range cases {

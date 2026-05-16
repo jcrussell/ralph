@@ -177,13 +177,18 @@ func (c *Client) Snapshot(ctx context.Context) (*Snapshot, error) {
 }
 
 // Diff captures the bead-level deltas between two snapshots. Used by
-// internal/narrative to compose the per-iteration narrative line.
+// internal/narrative to compose the per-iteration narrative line. Each
+// arm records "transitioned to X" — an issue that moved between two
+// non-identity states lands in exactly one bucket, keyed by the target
+// state. The closed/resolved bucket guards against intra-category
+// resolved↔closed shuffles so a still-closed issue is not re-reported.
 type Diff struct {
 	Created    []string // present in after, absent in before
-	Closed     []string // before.open -> after.closed
-	Opened     []string // before.closed -> after.open
-	Deferred   []string // status moved to deferred
-	InProgress []string // status moved to in_progress
+	Closed     []string // transitioned to closed/resolved from a non-closed state
+	Opened     []string // transitioned to open from any other state
+	Deferred   []string // transitioned to deferred
+	InProgress []string // transitioned to in_progress
+	Blocked    []string // transitioned to blocked
 }
 
 // DiffSnapshots computes the deltas going from before to after.
@@ -204,15 +209,19 @@ func DiffSnapshots(before, after *Snapshot) Diff {
 		if st == old {
 			continue
 		}
-		switch {
-		case isClosed(st) && !isClosed(old):
-			d.Closed = append(d.Closed, id)
-		case !isClosed(st) && isClosed(old):
+		switch st {
+		case "open":
 			d.Opened = append(d.Opened, id)
-		case st == "deferred":
-			d.Deferred = append(d.Deferred, id)
-		case st == "in_progress":
+		case "in_progress":
 			d.InProgress = append(d.InProgress, id)
+		case "blocked":
+			d.Blocked = append(d.Blocked, id)
+		case "deferred":
+			d.Deferred = append(d.Deferred, id)
+		case "closed", "resolved":
+			if !isClosed(old) {
+				d.Closed = append(d.Closed, id)
+			}
 		}
 	}
 	return d

@@ -534,5 +534,5 @@ func relPathOrAbs(repo, p string) string {
 
 func diffIsEmpty(d bd.Diff) bool {
 	return len(d.Created) == 0 && len(d.Closed) == 0 && len(d.Opened) == 0 &&
-		len(d.Deferred) == 0 && len(d.InProgress) == 0
+		len(d.Deferred) == 0 && len(d.InProgress) == 0 && len(d.Blocked) == 0
 }

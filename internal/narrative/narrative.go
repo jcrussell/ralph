@@ -63,6 +63,9 @@ func Compose(in Input) string {
 	if s := joinIDs("created", in.Diff.Created); s != "" {
 		segs = append(segs, s)
 	}
+	if s := joinIDs("blocked", in.Diff.Blocked); s != "" {
+		segs = append(segs, s)
+	}
 	if s := joinIDs("deferred", in.Diff.Deferred); s != "" {
 		segs = append(segs, s)
 	}

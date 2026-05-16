@@ -185,6 +185,87 @@ func TestDiffNilSnapshots(t *testing.T) {
 	}
 }
 
+// TestDiffSnapshotsTransitions exercises the switch directly against
+// every status pair we care about, including the cases that previously
+// fell through (in_progress→blocked, deferred/blocked→open, etc.).
+func TestDiffSnapshotsTransitions(t *testing.T) {
+	cases := []struct {
+		name    string
+		before  map[string]string
+		after   map[string]string
+		want    Diff
+	}{
+		{
+			name:   "in_progress to blocked",
+			before: map[string]string{"x": "in_progress"},
+			after:  map[string]string{"x": "blocked"},
+			want:   Diff{Blocked: []string{"x"}},
+		},
+		{
+			name:   "deferred to open",
+			before: map[string]string{"x": "deferred"},
+			after:  map[string]string{"x": "open"},
+			want:   Diff{Opened: []string{"x"}},
+		},
+		{
+			name:   "blocked to open",
+			before: map[string]string{"x": "blocked"},
+			after:  map[string]string{"x": "open"},
+			want:   Diff{Opened: []string{"x"}},
+		},
+		{
+			name:   "open to closed",
+			before: map[string]string{"x": "open"},
+			after:  map[string]string{"x": "closed"},
+			want:   Diff{Closed: []string{"x"}},
+		},
+		{
+			name:   "closed to open",
+			before: map[string]string{"x": "closed"},
+			after:  map[string]string{"x": "open"},
+			want:   Diff{Opened: []string{"x"}},
+		},
+		{
+			name:   "resolved to closed is intra-category and silent",
+			before: map[string]string{"x": "resolved"},
+			after:  map[string]string{"x": "closed"},
+			want:   Diff{},
+		},
+		{
+			name:   "open to in_progress",
+			before: map[string]string{"x": "open"},
+			after:  map[string]string{"x": "in_progress"},
+			want:   Diff{InProgress: []string{"x"}},
+		},
+		{
+			name:   "open to deferred",
+			before: map[string]string{"x": "open"},
+			after:  map[string]string{"x": "deferred"},
+			want:   Diff{Deferred: []string{"x"}},
+		},
+		{
+			name:   "absent before is Created",
+			before: map[string]string{},
+			after:  map[string]string{"x": "open"},
+			want:   Diff{Created: []string{"x"}},
+		},
+		{
+			name:   "no change is silent",
+			before: map[string]string{"x": "open"},
+			after:  map[string]string{"x": "open"},
+			want:   Diff{},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := DiffSnapshots(&Snapshot{Status: c.before}, &Snapshot{Status: c.after})
+			if diff := cmp.Diff(c.want, got); diff != "" {
+				t.Errorf("DiffSnapshots mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 func TestRunReturnsErrorWithStderr(t *testing.T) {
 	dir := t.TempDir() // no .beads here
 	c := New("", dir)
