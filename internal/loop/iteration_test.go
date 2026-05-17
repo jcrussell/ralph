@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/jcrussell/ralph/internal/config"
 	"github.com/jcrussell/ralph/internal/fsm"
 	"github.com/jcrussell/ralph/internal/runner"
+	"github.com/jcrussell/ralph/pkg/iostreams"
 )
 
 // classifyToReason maps modes to fsm reasons per the contract:
@@ -419,6 +421,69 @@ func TestRun_HooksRunInOrder(t *testing.T) {
 	want := "pre-iteration\nenter\ngate\npost-iteration\nexit"
 	if got != want {
 		t.Errorf("hook order:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// A normal iteration emits one progress line on ErrOut, matching the
+// `iter NNNN  <narrative>` shape that `ralph logs` uses by default.
+// summary.jsonl stays the source of truth — ErrOut is a live mirror.
+func TestRun_EmitsIterLineOnErrOut(t *testing.T) {
+	repo := scaffoldRepo(t)
+	ios, bufs := iostreams.Test()
+	opts := baseOpts(t, repo)
+	opts.IO = ios
+	opts.Once = true
+	opts.DryRun = true
+	opts.BD = &fakeBD{ReadyByLabel: map[string][]bd.Issue{"": {{ID: "x"}}}}
+	opts.Runner = &fakeRunner{}
+	opts.Clock = newFakeClock()
+
+	if _, err := Run(context.Background(), opts); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	recs := readSummary(t, repo)
+	if len(recs) == 0 {
+		t.Fatalf("no summary rows recorded")
+	}
+	rec := recs[len(recs)-1]
+	want := fmt.Sprintf("iter %04d  %s\n", rec.Iter, rec.Narrative)
+	got := bufs.ErrOut.String()
+	if !strings.Contains(got, want) {
+		t.Errorf("ErrOut missing iter line\nwant substring: %q\ngot:\n%s", want, got)
+	}
+	if bufs.Out.Len() != 0 {
+		t.Errorf("Out should be empty (chatter goes to ErrOut); got %q", bufs.Out.String())
+	}
+}
+
+// A skipped iteration (pre-iteration hook exits non-zero) also emits
+// its iter line so the user sees the counter advance.
+func TestRun_EmitsIterLineOnSkippedIteration(t *testing.T) {
+	repo := scaffoldRepo(t)
+	ios, bufs := iostreams.Test()
+	opts := baseOpts(t, repo)
+	opts.IO = ios
+	opts.Once = true
+	opts.BD = &fakeBD{ReadyByLabel: map[string][]bd.Issue{"": {{ID: "x"}}}}
+	opts.Runner = &fakeRunner{}
+	opts.Clock = newFakeClock()
+
+	writeExecutableHook(t,
+		filepath.Join(repo, ".ralph", "hooks", "pre-iteration"),
+		"#!/bin/sh\nexit 7\n",
+	)
+
+	if _, err := Run(context.Background(), opts); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got := bufs.ErrOut.String()
+	if !strings.Contains(got, "skipped (pre-iteration exit 7)") {
+		t.Errorf("ErrOut missing skipped narrative; got:\n%s", got)
+	}
+	if !strings.Contains(got, "iter 0001") {
+		t.Errorf("ErrOut missing iter counter; got:\n%s", got)
 	}
 }
 

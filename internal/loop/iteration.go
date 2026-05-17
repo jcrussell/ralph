@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jcrussell/ralph/internal/atomicfile"
@@ -208,6 +209,7 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 	if werr := rc.sum.Write(rec); werr != nil {
 		rc.log.ErrorContext(ctx, "write summary failed", "err", werr)
 	}
+	emitIterLine(rc, rec)
 	if werr := rc.run.AppendTransition(runs.Transition{
 		TS:           now,
 		Iter:         rec.Iter,
@@ -254,7 +256,25 @@ func recordSkippedIteration(rc *runContext, prev fsm.Outcome, reason string) err
 	if err := rc.sum.Write(rec); err != nil {
 		return fmt.Errorf("loop: write skipped: %w", err)
 	}
+	emitIterLine(rc, rec)
 	return nil
+}
+
+// emitIterLine writes one progress line per iteration to ErrOut, in the
+// same shape `ralph logs` renders by default. When the attached color
+// scheme is enabled, the gate token is colored. The summary.jsonl row
+// is untouched — only the bytes printed here carry any ANSI codes.
+func emitIterLine(rc *runContext, rec IterRecord) {
+	if rc.io == nil || rc.io.ErrOut == nil {
+		return
+	}
+	cs := rc.io.ColorScheme()
+	text := rec.Narrative
+	if cs != nil && cs.Enabled() {
+		text = strings.Replace(text, "gate green", "gate "+cs.Green("green"), 1)
+		text = strings.Replace(text, "gate red", "gate "+cs.Red("red"), 1)
+	}
+	fmt.Fprintf(rc.io.ErrOut, "iter %04d  %s\n", rec.Iter, text)
 }
 
 // composePrompt renders the per-state prompt with the iteration's vars.
