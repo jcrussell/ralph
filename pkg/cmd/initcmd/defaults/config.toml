@@ -50,3 +50,11 @@
 [review]
 # Base branch for review-mode merge filing.
 # base_branch = "main"
+
+[beads]
+# Issue types to drop from orchestrator-side `bd ready` / `bd list`
+# queries. Useful when the bead DB includes reference/library
+# records that aren't actionable work — e.g. byob-go-cli ships its
+# decisions under a "byob" type so consumers can filter them out.
+# Empty (the default) = no filter.
+# exclude_types = ["byob"]

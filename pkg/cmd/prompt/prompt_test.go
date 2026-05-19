@@ -54,9 +54,11 @@ func TestShowRunRendersTemplate(t *testing.T) {
 	}
 
 	io, bufs := iostreams.Test()
+	repoRoot := func() (string, error) { return repo, nil }
 	f := &cmdutil.Factory{
 		IOStreams: io,
-		RepoRoot:  func() (string, error) { return repo, nil },
+		RepoRoot:  repoRoot,
+		Config:    cmdutil.LazyConfig(repoRoot),
 	}
 	opts := &Options{
 		F:          f,
@@ -90,7 +92,12 @@ func TestShowRunUsesHeaderFooter(t *testing.T) {
 		}
 	}
 	io, bufs := iostreams.Test()
-	f := &cmdutil.Factory{IOStreams: io, RepoRoot: func() (string, error) { return repo, nil }}
+	repoRoot := func() (string, error) { return repo, nil }
+	f := &cmdutil.Factory{
+		IOStreams: io,
+		RepoRoot:  repoRoot,
+		Config:    cmdutil.LazyConfig(repoRoot),
+	}
 	opts := &Options{F: f, State: "clean"}
 	if err := showRun(context.Background(), opts); err != nil {
 		t.Fatalf("showRun: %v", err)

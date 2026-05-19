@@ -5,8 +5,9 @@
 Run through these in order every iteration. Skipping a step is how
 work goes wrong.
 
- 1. **Recover context.** Read the prompt above, `bd ready`, and any
-    relevant `bd memories` keyword search.
+ 1. **Recover context.** Read the prompt above,
+    `bd ready{{.Beads.ExcludeFlags}}`, and any relevant
+    `bd memories` keyword search.
  2. **Pick scope.** Choose the smallest unit of work that fits one
     iteration. If the natural unit is bigger, file a smaller bead
     and work that instead.
@@ -48,9 +49,9 @@ These never bend:
 - **No silent edits to shared state.** Don't edit `.git/`,
   `.beads/db/`, or `.ralph/state/` by hand. Use the surfacing CLI
   (`bd`, `git`, ralph hooks) and let the tools record the change.
-- **No fabricating work.** If `bd ready` is empty, exit with the
-  tree clean — don't invent tasks to keep the loop busy. The FSM is
-  designed to finish.
+- **No fabricating work.** If `bd ready{{.Beads.ExcludeFlags}}` is
+  empty, exit with the tree clean — don't invent tasks to keep the
+  loop busy. The FSM is designed to finish.
 
 ## Communicate
 

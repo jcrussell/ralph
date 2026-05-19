@@ -21,15 +21,33 @@ import (
 // Client invokes the bd CLI. The zero value uses "bd" on PATH; use
 // New to override the binary or working directory.
 type Client struct {
-	binary string // empty -> "bd"
-	dir    string // working directory; cwd of caller if empty
+	binary       string // empty -> "bd"
+	dir          string // working directory; cwd of caller if empty
+	excludeTypes []string
+}
+
+// Option configures a Client at construction time. Composes via the
+// variadic tail of New, so callers can opt in to filters without
+// disturbing the two-positional-arg shape that older call sites use.
+type Option func(*Client)
+
+// WithExcludeTypes sets a list of bd issue types to drop from every
+// Ready/List/Snapshot query the orchestrator issues. The slice is
+// copied; later mutation of the caller's slice is not observed.
+func WithExcludeTypes(types ...string) Option {
+	cp := append([]string(nil), types...)
+	return func(c *Client) { c.excludeTypes = cp }
 }
 
 // New returns a Client. binary is looked up on PATH if non-absolute;
 // pass an empty string for the default "bd". dir sets the cwd
 // (matters because bd resolves .beads/ relative to cwd).
-func New(binary, dir string) *Client {
-	return &Client{binary: binary, dir: dir}
+func New(binary, dir string, opts ...Option) *Client {
+	c := &Client{binary: binary, dir: dir}
+	for _, o := range opts {
+		o(c)
+	}
+	return c
 }
 
 func (c *Client) bin() string {
@@ -50,18 +68,21 @@ type Issue struct {
 }
 
 // Ready returns issues with no blockers, optionally filtered to a
-// single label (empty label = unscoped).
+// single label (empty label = unscoped). Types passed via
+// WithExcludeTypes are dropped server-side.
 func (c *Client) Ready(ctx context.Context, label string) ([]Issue, error) {
 	args := []string{"ready", "--json"}
 	if label != "" {
 		args = append(args, "-l", label)
 	}
+	args = append(args, c.excludeFlags()...)
 	return c.runList(ctx, args)
 }
 
 // List returns issues filtered by status and optionally label.
 // status="" passes --all so closed/deferred/etc. are included; use a
 // specific status ("open", "in_progress", "closed", …) to filter.
+// Types passed via WithExcludeTypes are dropped server-side.
 func (c *Client) List(ctx context.Context, status, label string) ([]Issue, error) {
 	args := []string{"list", "--json", "-n", "0"}
 	if status == "" {
@@ -72,7 +93,34 @@ func (c *Client) List(ctx context.Context, status, label string) ([]Issue, error
 	if label != "" {
 		args = append(args, "-l", label)
 	}
+	args = append(args, c.excludeFlags()...)
 	return c.runList(ctx, args)
+}
+
+// ExcludeTypes returns the configured exclude-type filter (a copy
+// so callers can't mutate the client's slice). Read-only accessor
+// for diagnostics and tests; the filter is applied automatically.
+func (c *Client) ExcludeTypes() []string {
+	if len(c.excludeTypes) == 0 {
+		return nil
+	}
+	out := make([]string, len(c.excludeTypes))
+	copy(out, c.excludeTypes)
+	return out
+}
+
+// excludeFlags renders the configured excludeTypes as repeated
+// `--exclude-type <t>` argv pairs. Returns nil when empty so the
+// surrounding append is a no-op.
+func (c *Client) excludeFlags() []string {
+	if len(c.excludeTypes) == 0 {
+		return nil
+	}
+	out := make([]string, 0, 2*len(c.excludeTypes))
+	for _, t := range c.excludeTypes {
+		out = append(out, "--exclude-type", t)
+	}
+	return out
 }
 
 // CreateOpts is the input to Create. Fields with zero values fall back

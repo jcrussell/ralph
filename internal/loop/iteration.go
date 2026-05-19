@@ -292,6 +292,7 @@ func composePrompt(ctx context.Context, rc *runContext, prev fsm.Outcome, headSH
 			Branch: rc.fsm.ReviewBranch,
 			Base:   rc.fsm.ReviewBase,
 		},
+		Beads: promptlib.BeadsVarsFromExcludeTypes(rc.cfg.Beads.ExcludeTypes),
 	}
 	root, err := promptlib.Open(rc.repo)
 	if err != nil {

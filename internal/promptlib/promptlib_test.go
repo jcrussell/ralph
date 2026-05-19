@@ -47,6 +47,49 @@ func TestRenderReviewVars(t *testing.T) {
 	}
 }
 
+func TestBeadsVarsFromExcludeTypes(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want string
+	}{
+		{"empty", nil, ""},
+		{"empty slice", []string{}, ""},
+		{"one", []string{"byob"}, " --exclude-type=byob"},
+		{"two", []string{"byob", "convoy"}, " --exclude-type=byob --exclude-type=convoy"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := BeadsVarsFromExcludeTypes(c.in).ExcludeFlags
+			if got != c.want {
+				t.Errorf("ExcludeFlags = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestRenderBeadsExcludeFlagsInline(t *testing.T) {
+	fsys := mapFS(map[string]string{
+		"clean.md": "run: bd ready{{.Beads.ExcludeFlags}}",
+	})
+	// Default zero value of Vars.Beads is empty — concatenation is safe.
+	got, err := Render(fsys, "clean", Vars{})
+	if err != nil {
+		t.Fatalf("Render zero: %v", err)
+	}
+	if got != "run: bd ready" {
+		t.Errorf("zero render = %q, want %q", got, "run: bd ready")
+	}
+
+	got, err = Render(fsys, "clean", Vars{Beads: BeadsVarsFromExcludeTypes([]string{"byob"})})
+	if err != nil {
+		t.Fatalf("Render filtered: %v", err)
+	}
+	if got != "run: bd ready --exclude-type=byob" {
+		t.Errorf("filtered render = %q, want %q", got, "run: bd ready --exclude-type=byob")
+	}
+}
+
 func TestRenderHeaderFooterAutoWrap(t *testing.T) {
 	fsys := mapFS(map[string]string{
 		"_header.md": "HDR",

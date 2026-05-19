@@ -6,7 +6,7 @@ iteration based on the current signal:
 
 | Signal                                | Sub-flow         |
 |---------------------------------------|------------------|
-| `bd ready -l review:{{.Review.Branch}}` has fresh items | **ingest**  |
+| `bd ready -l review:{{.Review.Branch}}{{.Beads.ExcludeFlags}}` has fresh items | **ingest**  |
 | any open finding in progress           | **fix**          |
 | `{{.GateResult}}` == `fail`            | **address-gate** |
 | no open findings + tree clean + gate ok | **file-merge**   |
@@ -19,7 +19,7 @@ Working tree is {{if .GitDirty}}dirty{{else}}clean{{end}}.
 priority, and either fix in this branch or defer with a clear note.
 Do not let the queue accumulate uncategorized findings.
 
-**Fix.** Pick one finding (`bd ready -l review:{{.Review.Branch}}`),
+**Fix.** Pick one finding (`bd ready -l review:{{.Review.Branch}}{{.Beads.ExcludeFlags}}`),
 claim it, implement, test, commit, close. Same discipline as
 clean-state iterations — one finding per iteration.
 

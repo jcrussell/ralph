@@ -87,7 +87,7 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 		opts.Runner = runner.New(opts.Cfg.Runner.Command, opts.Cfg.Runner.Args, opts.Cfg.Loop.MemoryLimit)
 	}
 	if opts.BD == nil {
-		opts.BD = bd.New("", opts.Repo)
+		opts.BD = bd.New("", opts.Repo, bd.WithExcludeTypes(opts.Cfg.Beads.ExcludeTypes...))
 	}
 	if opts.Clock == nil {
 		opts.Clock = defaultClock{}

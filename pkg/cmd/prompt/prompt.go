@@ -102,6 +102,10 @@ func showRun(_ context.Context, opts *Options) error {
 	if err != nil {
 		return err
 	}
+	cfg, err := opts.F.Config()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
 	root, err := promptlib.Open(repo)
 	if err != nil {
 		return fmt.Errorf("open prompts: %w", err)
@@ -114,6 +118,7 @@ func showRun(_ context.Context, opts *Options) error {
 		GitDirty:   opts.GitDirty,
 		RepoRoot:   repo,
 		GateResult: string(opts.GateResult),
+		Beads:      promptlib.BeadsVarsFromExcludeTypes(cfg.Beads.ExcludeTypes),
 	}
 	out, err := promptlib.Render(root.FS(), opts.State, vars)
 	if err != nil {

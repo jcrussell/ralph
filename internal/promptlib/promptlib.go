@@ -42,6 +42,7 @@ type Vars struct {
 	LastIter   any // opaque iteration record; templates access by field
 	GateResult string
 	Review     ReviewVars
+	Beads      BeadsVars
 }
 
 // ReviewVars are the review-state fields. OpenFindings is the count
@@ -50,6 +51,33 @@ type ReviewVars struct {
 	Branch       string
 	Base         string
 	OpenFindings int
+}
+
+// BeadsVars exposes the bd query filters the orchestrator applies, so
+// prompt templates can render the same flags the FSM uses internally
+// (avoids the prompt showing a `bd ready` example that returns
+// library beads the FSM is silently filtering out).
+type BeadsVars struct {
+	// ExcludeFlags is the rendered " --exclude-type=byob
+	// --exclude-type=…" suffix safe to concatenate into a
+	// `bd ready` / `bd list` command in a prompt. Empty string when
+	// no filter is configured.
+	ExcludeFlags string
+}
+
+// BeadsVarsFromExcludeTypes builds the BeadsVars for the given
+// configured excludeTypes. Centralized here so the loop and the
+// `ralph prompt show` command render identical flag suffixes.
+func BeadsVarsFromExcludeTypes(excludeTypes []string) BeadsVars {
+	if len(excludeTypes) == 0 {
+		return BeadsVars{}
+	}
+	var b strings.Builder
+	for _, t := range excludeTypes {
+		b.WriteString(" --exclude-type=")
+		b.WriteString(t)
+	}
+	return BeadsVars{ExcludeFlags: b.String()}
 }
 
 // PromptsDir returns the .ralph/prompts directory under repoRoot.

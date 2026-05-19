@@ -204,6 +204,10 @@ func TestValidateRejectsBadValues(t *testing.T) {
 		{"budget max_cost_usd negative", func(c *Config) { c.Budget.MaxCostUSD = -0.01 }, "max_cost_usd"},
 		{"budget max_wallclock_secs negative", func(c *Config) { c.Budget.MaxWallclockSecs = -1 }, "max_wallclock_secs"},
 		{"review base_branch empty", func(c *Config) { c.Review.BaseBranch = "" }, "base_branch is required"},
+		{"beads exclude_types blank entry", func(c *Config) { c.Beads.ExcludeTypes = []string{""} }, "exclude_types"},
+		{"beads exclude_types whitespace entry", func(c *Config) { c.Beads.ExcludeTypes = []string{"  "} }, "exclude_types"},
+		{"beads exclude_types comma-separated", func(c *Config) { c.Beads.ExcludeTypes = []string{"byob,foo"} }, "comma-separated"},
+		{"beads exclude_types embedded space", func(c *Config) { c.Beads.ExcludeTypes = []string{"by ob"} }, "single type"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -218,6 +222,50 @@ func TestValidateRejectsBadValues(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBeadsDefaultsEmpty(t *testing.T) {
+	d := Defaults()
+	if len(d.Beads.ExcludeTypes) != 0 {
+		t.Errorf("Beads.ExcludeTypes default = %v, want empty", d.Beads.ExcludeTypes)
+	}
+}
+
+func TestLoadBeadsExcludeTypesRoundTrip(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	repo := t.TempDir()
+
+	repoDir := filepath.Join(repo, ".ralph")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repoTOML := `[beads]
+exclude_types = ["byob", "convoy"]
+`
+	if err := os.WriteFile(filepath.Join(repoDir, "config.toml"), []byte(repoTOML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(repo)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := cfg.Beads.ExcludeTypes, []string{"byob", "convoy"}; !equalStrings(got, want) {
+		t.Errorf("Beads.ExcludeTypes = %v, want %v", got, want)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestLoadRejectsUnknownKey(t *testing.T) {

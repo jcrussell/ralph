@@ -93,6 +93,79 @@ func TestClientCreateAndCloseRoundTrip(t *testing.T) {
 	}
 }
 
+func TestClientReadyHonorsExcludeTypes(t *testing.T) {
+	dir := newBDRepo(t)
+	bdBin := requireBD(t)
+	ctx := context.Background()
+
+	// Register a custom "library" type so `bd create --type=library`
+	// is accepted. byob does the same trick with its "byob" type.
+	cfg := exec.Command(bdBin, "config", "set", "types.custom", "library")
+	cfg.Dir = dir
+	if out, err := cfg.CombinedOutput(); err != nil {
+		t.Skipf("bd config set types.custom unsupported (skipping): %v\n%s", err, out)
+	}
+
+	c := New("", dir)
+	if _, err := c.Create(ctx, CreateOpts{Title: "work", Type: "task", Priority: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Create(ctx, CreateOpts{Title: "lib1", Type: "library", Priority: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Create(ctx, CreateOpts{Title: "lib2", Type: "library", Priority: 2}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Unfiltered client sees everything.
+	all, err := c.Ready(ctx, "")
+	if err != nil {
+		t.Fatalf("Ready unfiltered: %v", err)
+	}
+	if len(all) < 3 {
+		t.Errorf("Ready unfiltered = %d issues, want >= 3", len(all))
+	}
+
+	// Filtered client drops the two library issues.
+	filtered := New("", dir, WithExcludeTypes("library"))
+	got, err := filtered.Ready(ctx, "")
+	if err != nil {
+		t.Fatalf("Ready filtered: %v", err)
+	}
+	titles := make([]string, 0, len(got))
+	for _, i := range got {
+		titles = append(titles, i.Title)
+	}
+	if diff := cmp.Diff([]string{"work"}, titles); diff != "" {
+		t.Errorf("Ready filtered titles (-want +got):\n%s", diff)
+	}
+
+	// List with --all also honors the filter.
+	allList, err := filtered.List(ctx, "open", "")
+	if err != nil {
+		t.Fatalf("List filtered: %v", err)
+	}
+	if len(allList) != 1 || allList[0].Title != "work" {
+		t.Errorf("List filtered = %v, want one 'work' issue", allList)
+	}
+}
+
+func TestExcludeFlagsEmpty(t *testing.T) {
+	if got := (&Client{}).excludeFlags(); got != nil {
+		t.Errorf("excludeFlags() with no excludeTypes = %v, want nil", got)
+	}
+}
+
+func TestWithExcludeTypesCopies(t *testing.T) {
+	src := []string{"byob"}
+	c := &Client{}
+	WithExcludeTypes(src...)(c)
+	src[0] = "mutated"
+	if c.excludeTypes[0] != "byob" {
+		t.Errorf("excludeTypes[0] = %q, want %q (WithExcludeTypes must copy)", c.excludeTypes[0], "byob")
+	}
+}
+
 func TestClientReadyHonorsLabel(t *testing.T) {
 	dir := newBDRepo(t)
 	c := New("", dir)

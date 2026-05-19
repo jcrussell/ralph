@@ -27,6 +27,7 @@ type Config struct {
 	Backoff BackoffConfig `toml:"backoff"`
 	Budget  BudgetConfig  `toml:"budget"`
 	Review  ReviewConfig  `toml:"review"`
+	Beads   BeadsConfig   `toml:"beads"`
 }
 
 // LoopConfig holds the [loop] section.
@@ -72,6 +73,18 @@ type ReviewConfig struct {
 	BaseBranch string `toml:"base_branch"`
 }
 
+// BeadsConfig holds the [beads] section — knobs that shape every
+// orchestrator-side bd invocation. Does not affect bd calls the
+// runner makes from inside an iteration.
+type BeadsConfig struct {
+	// ExcludeTypes lists issue types to drop from queue queries
+	// (`bd ready` and the open-issue `bd list` calls in the FSM).
+	// Useful when the bead DB includes reference/library records
+	// that aren't actionable work — e.g. byob-go-cli's "byob"
+	// decision/epic catalog. Empty (the default) = no filter.
+	ExcludeTypes []string `toml:"exclude_types"`
+}
+
 // Defaults returns a Config populated with the values documented in
 // the master plan's [config.toml] block.
 func Defaults() *Config {
@@ -107,6 +120,7 @@ func Defaults() *Config {
 		Review: ReviewConfig{
 			BaseBranch: "main",
 		},
+		Beads: BeadsConfig{},
 	}
 }
 
@@ -194,6 +208,9 @@ func (c *Config) Validate() error {
 	if err := c.Review.Validate(); err != nil {
 		return fmt.Errorf("review: %w", err)
 	}
+	if err := c.Beads.Validate(); err != nil {
+		return fmt.Errorf("beads: %w", err)
+	}
 	return nil
 }
 
@@ -276,6 +293,21 @@ func (b *BudgetConfig) Validate() error {
 func (r *ReviewConfig) Validate() error {
 	if r.BaseBranch == "" {
 		return errors.New("base_branch is required")
+	}
+	return nil
+}
+
+// Validate checks BeadsConfig invariants. Reject entries that would
+// fail at the bd CLI boundary so the misconfiguration surfaces at
+// startup rather than as a confusing bd error on the first iteration.
+func (b *BeadsConfig) Validate() error {
+	for _, t := range b.ExcludeTypes {
+		if strings.TrimSpace(t) == "" {
+			return errors.New("exclude_types: entries must be non-empty")
+		}
+		if strings.ContainsAny(t, " ,") {
+			return fmt.Errorf("exclude_types: %q must be a single type, not a comma-separated list", t)
+		}
 	}
 	return nil
 }
