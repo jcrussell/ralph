@@ -183,8 +183,39 @@ exit 1
 	if v, ok := s.Envelope.APIErrorStatus.(float64); !ok || v != 429 {
 		t.Errorf("APIErrorStatus = %v (%T), want 429 (float64)", s.Envelope.APIErrorStatus, s.Envelope.APIErrorStatus)
 	}
+	if !s.Envelope.IsError {
+		t.Errorf("IsError = false, want true")
+	}
 	if _, ok := s.Envelope.Raw["is_error"]; !ok {
 		t.Errorf("Raw missing is_error: %v", s.Envelope.Raw)
+	}
+}
+
+// TestRunQuotaEnvelopeClassifies pins the end-to-end path for the
+// captured-from-the-wild monthly-quota envelope: subprocess emits the
+// real JSON shape, parseEnvelope must populate Result + IsError, and
+// Classify must return ModeQuota so the loop exits failed{quota}
+// instead of looping to iter_cap.
+func TestRunQuotaEnvelopeClassifies(t *testing.T) {
+	bin := writeScript(t, `#!/bin/sh
+echo '{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"duration_ms":294,"num_turns":1,"result":"You'"'"'ve hit your org'"'"'s monthly usage limit","stop_reason":"stop_sequence"}'
+`)
+	r := New(bin, nil, "")
+	s, err := runForTest(t, r, context.Background(), "", t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if s.Envelope == nil {
+		t.Fatalf("Envelope = nil")
+	}
+	if !s.Envelope.IsError {
+		t.Errorf("IsError = false, want true")
+	}
+	if want := "You've hit your org's monthly usage limit"; s.Envelope.Result != want {
+		t.Errorf("Result = %q, want %q", s.Envelope.Result, want)
+	}
+	if got := Classify(s); got != ModeQuota {
+		t.Errorf("Classify = %s, want %s", got, ModeQuota)
 	}
 }
 

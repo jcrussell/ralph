@@ -55,11 +55,75 @@ func TestClassifyAPIError(t *testing.T) {
 		{"usage limit message", map[string]any{"message": "Usage limit reached"}, ModeQuota},
 		{"session_limit type", map[string]any{"type": "session_limit_reached"}, ModeQuota},
 		{"object empty", map[string]any{}, ""},
+		// Numeric HTTP status (e.g. JSON 429 unmarshals to float64) is
+		// intentionally not classified by api_error_status alone — 429
+		// is ambiguous between rate-limit and quota, so disambiguation
+		// is left to the envelope's "result" text scan in Classify.
+		{"numeric 429", float64(429), ""},
+		{"numeric 401", float64(401), ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := classifyAPIError(c.field); got != c.want {
 				t.Errorf("classifyAPIError(%v) = %s, want %s", c.field, got, c.want)
+			}
+		})
+	}
+}
+
+// TestClassifyEnvelopeResult covers the captured-from-the-wild case
+// where the claude CLI emits is_error=true plus a "result" field
+// containing the human-readable error, while api_error_status is a
+// bare HTTP status code (e.g. 429). Pre-fix, ralph treated these
+// envelopes as ModeOK and looped to iter_cap; the IsError-gated
+// result scan must produce the right terminal mode instead.
+func TestClassifyEnvelopeResult(t *testing.T) {
+	cases := []struct {
+		name string
+		env  *Envelope
+		want Mode
+	}{
+		{
+			"monthly usage limit (captured envelope)",
+			&Envelope{IsError: true, APIErrorStatus: float64(429), Result: "You've hit your org's monthly usage limit"},
+			ModeQuota,
+		},
+		{
+			"weekly limit in result",
+			&Envelope{IsError: true, APIErrorStatus: float64(429), Result: "Weekly limit reached"},
+			ModeQuota,
+		},
+		{
+			"credit balance in result",
+			&Envelope{IsError: true, Result: "your credit balance is too low"},
+			ModeBudget,
+		},
+		{
+			"rate limit in result",
+			&Envelope{IsError: true, APIErrorStatus: float64(429), Result: "rate limit exceeded"},
+			ModeRateLimit,
+		},
+		{
+			"auth in result",
+			&Envelope{IsError: true, Result: "Authentication failed"},
+			ModeAuth,
+		},
+		{
+			"is_error=false suppresses scan (no false positive)",
+			&Envelope{IsError: false, Result: "Here's an example log line: usage limit exceeded"},
+			ModeOK,
+		},
+		{
+			"is_error=true with unrecognized text falls through to OK",
+			&Envelope{IsError: true, Result: "something else went wrong"},
+			ModeOK,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := Classify(&Session{Envelope: c.env, ExitCode: 0})
+			if got != c.want {
+				t.Errorf("Classify = %s, want %s", got, c.want)
 			}
 		})
 	}

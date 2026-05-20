@@ -67,6 +67,8 @@ type Envelope struct {
 	OutputTokens   int64
 	NumTurns       int
 	Subtype        string
+	Result         string
+	IsError        bool
 	APIErrorStatus any
 	Raw            map[string]any
 }
@@ -225,6 +227,12 @@ func parseEnvelope(stdout string) *Envelope {
 	e.NumTurns = int(readFloat(raw, "num_turns"))
 	if v, ok := raw["subtype"].(string); ok {
 		e.Subtype = v
+	}
+	if v, ok := raw["result"].(string); ok {
+		e.Result = v
+	}
+	if v, ok := raw["is_error"].(bool); ok {
+		e.IsError = v
 	}
 	e.APIErrorStatus = raw["api_error_status"]
 

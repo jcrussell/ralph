@@ -90,6 +90,16 @@ func Classify(s *Session) Mode {
 		if m := classifyAPIError(s.Envelope.APIErrorStatus); m != "" {
 			return m
 		}
+		// When the CLI flags is_error=true, the human-readable failure
+		// text lives in the "result" field rather than stderr (the
+		// --output-format=json wrapper routes everything through stdout).
+		// Gate on IsError so prose containing "usage limit" in a normal
+		// model response cannot trip a terminal mode.
+		if s.Envelope.IsError {
+			if m := matchAPIErrorText(s.Envelope.Result); m != "" {
+				return m
+			}
+		}
 		if strings.EqualFold(s.Envelope.Subtype, "error_max_turns") {
 			return ModeDeadSession
 		}
@@ -151,7 +161,10 @@ func Classify(s *Session) Mode {
 // classifyAPIError maps the envelope's api_error_status field (which
 // claude renders as either a string or an object) to a Mode. Returns
 // "" when the field is empty or unrecognized so callers can fall
-// through to other signals.
+// through to other signals. Numeric HTTP status codes (e.g. float64
+// 429) are intentionally not classified here — 429 is ambiguous
+// between rate-limit and quota, and the disambiguating text lives in
+// the envelope's "result" field, scanned separately by Classify.
 func classifyAPIError(v any) Mode {
 	if v == nil {
 		return ""
@@ -170,16 +183,27 @@ func classifyAPIError(v any) Mode {
 	default:
 		return ""
 	}
+	return matchAPIErrorText(s)
+}
+
+// matchAPIErrorText scans free-form error text (envelope result or
+// api_error_status string/message) for the same set of substrings used
+// by classifyAPIError, so callers stay in sync about what counts as a
+// budget/quota/auth/rate-limit/overloaded signal.
+func matchAPIErrorText(s string) Mode {
 	low := strings.ToLower(s)
 	switch {
 	case strings.Contains(low, "credit balance"), strings.Contains(low, "insufficient credit"):
 		return ModeBudget
 	case strings.Contains(low, "quota_exceeded"),
+		strings.Contains(low, "quota exceeded"),
 		strings.Contains(low, "usage_limit"),
 		strings.Contains(low, "usage limit"),
-		strings.Contains(low, "session_limit"):
-		// API envelope quota-exhaustion signals — refine once a real
-		// envelope is captured (ralph-ii3).
+		strings.Contains(low, "session_limit"),
+		strings.Contains(low, "session limit"),
+		strings.Contains(low, "monthly usage"),
+		strings.Contains(low, "weekly limit"),
+		strings.Contains(low, "5-hour limit"):
 		return ModeQuota
 	case strings.Contains(low, "authentication"), strings.Contains(low, "invalid api key"), strings.Contains(low, "unauthorized"):
 		return ModeAuth
