@@ -30,6 +30,7 @@ func TestClassifyToReason(t *testing.T) {
 		{runner.ModeOK, 0, 3, fsm.ReasonNone},
 		{runner.ModeAuth, 0, 3, fsm.ReasonAuth},
 		{runner.ModeBudget, 0, 3, fsm.ReasonRunnerTerminal},
+		{runner.ModeQuota, 0, 3, fsm.ReasonRunnerTerminal},
 		{runner.ModeRateLimit, 0, 3, fsm.ReasonNone},
 		{runner.ModeDeadSession, 2, 3, fsm.ReasonNone},
 		{runner.ModeDeadSession, 3, 3, fsm.ReasonRunnerTerminal},

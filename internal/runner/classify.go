@@ -21,6 +21,14 @@ const (
 	// via the FSM predicate, not via classification).
 	ModeBudget Mode = "budget"
 
+	// ModeQuota — the runner reports it has hit a session/usage cap
+	// that resets (5-hour window, weekly limit, etc.) rather than the
+	// account being out of money. Terminal: ralph cannot make progress
+	// on this run; the operator either waits for the cap to reset or
+	// switches plans. Distinct from ModeBudget because the operator's
+	// action differs (top up vs. wait).
+	ModeQuota Mode = "quota"
+
 	// ModeRateLimit — the runner says it has been rate-limited.
 	// Recoverable; the loop sleeps and retries.
 	ModeRateLimit Mode = "rate_limit"
@@ -49,12 +57,12 @@ const (
 	ModeUnknown Mode = "unknown"
 )
 
-// Terminal reports whether m forces the FSM into failed{m}. ModeAuth
-// and ModeBudget are the only intrinsically terminal modes —
+// Terminal reports whether m forces the FSM into failed{m}. ModeAuth,
+// ModeBudget, and ModeQuota are the intrinsically terminal modes —
 // ModeDeadSession only escalates after dead_session_threshold hits
 // (handled by the loop, not here).
 func (m Mode) Terminal() bool {
-	return m == ModeAuth || m == ModeBudget
+	return m == ModeAuth || m == ModeBudget || m == ModeQuota
 }
 
 // Classify inspects s and returns the matched Mode. Order of checks is
@@ -88,12 +96,21 @@ func Classify(s *Session) Mode {
 	}
 
 	// Stderr substring scan — case-insensitive, longest-match-wins
-	// implied by check order: auth + credit before rate-limit before
-	// overloaded before oom.
+	// implied by check order: auth + credit + quota before rate-limit
+	// before overloaded before oom.
 	low := strings.ToLower(s.Stderr + "\n" + s.StderrTail)
 	switch {
 	case strings.Contains(low, "credit balance") || strings.Contains(low, "insufficient credit"):
 		return ModeBudget
+	case strings.Contains(low, "usage limit"),
+		strings.Contains(low, "5-hour limit"),
+		strings.Contains(low, "weekly limit"),
+		strings.Contains(low, "session limit"),
+		strings.Contains(low, "quota exceeded"):
+		// Best-guess substrings for claude CLI quota-exhaustion
+		// errors (5-hour window, weekly cap, session cap). Refine
+		// when a real quota failure is captured — see ralph-ii3.
+		return ModeQuota
 	case strings.Contains(low, "invalid api key"),
 		strings.Contains(low, "authentication"),
 		strings.Contains(low, "unauthorized"):
@@ -157,6 +174,13 @@ func classifyAPIError(v any) Mode {
 	switch {
 	case strings.Contains(low, "credit balance"), strings.Contains(low, "insufficient credit"):
 		return ModeBudget
+	case strings.Contains(low, "quota_exceeded"),
+		strings.Contains(low, "usage_limit"),
+		strings.Contains(low, "usage limit"),
+		strings.Contains(low, "session_limit"):
+		// API envelope quota-exhaustion signals — refine once a real
+		// envelope is captured (ralph-ii3).
+		return ModeQuota
 	case strings.Contains(low, "authentication"), strings.Contains(low, "invalid api key"), strings.Contains(low, "unauthorized"):
 		return ModeAuth
 	case strings.Contains(low, "rate limit"), strings.Contains(low, "rate_limit"):

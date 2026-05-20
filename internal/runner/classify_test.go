@@ -50,6 +50,10 @@ func TestClassifyAPIError(t *testing.T) {
 		{"overloaded string", "Overloaded — try again later", ModeModelOverloaded},
 		{"object with message", map[string]any{"message": "Rate limit exceeded"}, ModeRateLimit},
 		{"object with type only", map[string]any{"type": "authentication_error"}, ModeAuth},
+		{"quota_exceeded type", map[string]any{"type": "quota_exceeded"}, ModeQuota},
+		{"usage_limit type", map[string]any{"type": "usage_limit_exceeded"}, ModeQuota},
+		{"usage limit message", map[string]any{"message": "Usage limit reached"}, ModeQuota},
+		{"session_limit type", map[string]any{"type": "session_limit_reached"}, ModeQuota},
 		{"object empty", map[string]any{}, ""},
 	}
 	for _, c := range cases {
@@ -92,6 +96,11 @@ func TestClassifyStderrPatterns(t *testing.T) {
 	}{
 		{"credit balance", "Error: your credit balance is too low\n", ModeBudget},
 		{"insufficient credit", "insufficient credit\n", ModeBudget},
+		{"5-hour limit", "You've reached your 5-hour limit. Try again later.\n", ModeQuota},
+		{"weekly limit", "Weekly limit reached for your plan\n", ModeQuota},
+		{"session limit", "session limit hit\n", ModeQuota},
+		{"usage limit", "Usage limit reached on this account\n", ModeQuota},
+		{"quota exceeded", "quota exceeded for the current window\n", ModeQuota},
 		{"invalid api key", "Authentication failed: Invalid API Key\n", ModeAuth},
 		{"unauthorized", "401 Unauthorized\n", ModeAuth},
 		{"rate limit", "429 rate limit exceeded\n", ModeRateLimit},
@@ -136,6 +145,7 @@ func TestModeTerminal(t *testing.T) {
 	terminal := map[Mode]bool{
 		ModeAuth:            true,
 		ModeBudget:          true,
+		ModeQuota:           true,
 		ModeOK:              false,
 		ModeRateLimit:       false,
 		ModeModelOverloaded: false,

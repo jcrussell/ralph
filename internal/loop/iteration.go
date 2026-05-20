@@ -431,15 +431,16 @@ func buildHookEnv(rc *runContext, phase hooks.Phase, nextState string) hooks.Env
 }
 
 // classifyToReason maps a runner.Mode (plus the dead-session streak)
-// to an fsm.Reason. ModeAuth → ReasonAuth; ModeBudget at the runner
-// level → ReasonRunnerTerminal (fsm.ReasonBudget is reserved for
-// ralph's own cost cap). ModeDeadSession crossing the threshold also
-// escalates. Everything else → ReasonNone.
+// to an fsm.Reason. ModeAuth → ReasonAuth; ModeBudget and ModeQuota at
+// the runner level → ReasonRunnerTerminal (fsm.ReasonBudget is reserved
+// for ralph's own cost cap; ModeBudget/ModeQuota stay distinguishable
+// via Session.Mode in the iteration record). ModeDeadSession crossing
+// the threshold also escalates. Everything else → ReasonNone.
 func classifyToReason(mode runner.Mode, deadStreak, threshold int) fsm.Reason {
 	switch mode {
 	case runner.ModeAuth:
 		return fsm.ReasonAuth
-	case runner.ModeBudget:
+	case runner.ModeBudget, runner.ModeQuota:
 		return fsm.ReasonRunnerTerminal
 	}
 	if threshold <= 0 {
