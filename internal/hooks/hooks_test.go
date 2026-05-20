@@ -10,7 +10,7 @@ import (
 )
 
 func TestRunMissingHookIsNoOp(t *testing.T) {
-	r, err := Run(context.Background(), filepath.Join(t.TempDir(), "does-not-exist"), Env{}, nil)
+	r, err := Run(context.Background(), filepath.Join(t.TempDir(), "does-not-exist"), Env{}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -25,7 +25,7 @@ func TestRunNonExecutableIsError(t *testing.T) {
 	if err := os.WriteFile(path, []byte("#!/bin/sh\necho hi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Run(context.Background(), path, Env{}, nil)
+	_, err := Run(context.Background(), path, Env{}, nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for non-executable hook")
 	}
@@ -63,7 +63,7 @@ exec "`+hook+`" "`+out+`"
 		NextState:  "dirty",
 		PromptFile: "/tmp/p.txt",
 	}
-	r, err := Run(context.Background(), wrapper, env, nil)
+	r, err := Run(context.Background(), wrapper, env, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -98,7 +98,7 @@ cat > "`+out+`"
 `, dir)
 
 	payload := `{"iter": 3, "state": "clean"}`
-	r, err := Run(context.Background(), hook, Env{Repo: dir}, strings.NewReader(payload))
+	r, err := Run(context.Background(), hook, Env{Repo: dir}, strings.NewReader(payload), nil, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -122,7 +122,7 @@ echo "noisy"
 echo "warned" >&2
 exit 7
 `, dir)
-	r, err := Run(context.Background(), hook, Env{}, nil)
+	r, err := Run(context.Background(), hook, Env{}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

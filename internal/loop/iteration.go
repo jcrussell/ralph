@@ -27,33 +27,37 @@ import (
 // It is the single source of truth for that shape; observability
 // commands (logs, report, timeline) decode the subset they need.
 type IterRecord struct {
-	Iter         int      `json:"iter"`
-	IterID       string   `json:"iter_id"`
-	Timestamp    string   `json:"timestamp"`
-	State        string   `json:"state"`
-	Reason       string   `json:"reason,omitempty"`
-	PrevState    string   `json:"prev_state,omitempty"`
-	Narrative    string   `json:"narrative"`
-	RunnerMode   string   `json:"runner_mode,omitempty"`
-	GateResult   string   `json:"gate_result,omitempty"`
-	CostUSD      float64  `json:"cost_usd,omitempty"`
-	DurationSecs float64  `json:"duration_secs,omitempty"`
-	Commits      int      `json:"commits,omitempty"`
-	GitHead      string   `json:"git_head,omitempty"`
-	BDDiff       *bd.Diff `json:"bd_diff,omitempty"`
-	PromptFile   string   `json:"prompt_file,omitempty"`
-	Skipped      string   `json:"skipped,omitempty"`
+	Iter           int      `json:"iter"`
+	IterID         string   `json:"iter_id"`
+	Timestamp      string   `json:"timestamp"`
+	State          string   `json:"state"`
+	Reason         string   `json:"reason,omitempty"`
+	PrevState      string   `json:"prev_state,omitempty"`
+	Narrative      string   `json:"narrative"`
+	RunnerMode     string   `json:"runner_mode,omitempty"`
+	GateResult     string   `json:"gate_result,omitempty"`
+	GateStdoutFile string   `json:"gate_stdout_file,omitempty"`
+	GateStderrFile string   `json:"gate_stderr_file,omitempty"`
+	CostUSD        float64  `json:"cost_usd,omitempty"`
+	DurationSecs   float64  `json:"duration_secs,omitempty"`
+	Commits        int      `json:"commits,omitempty"`
+	GitHead        string   `json:"git_head,omitempty"`
+	BDDiff         *bd.Diff `json:"bd_diff,omitempty"`
+	PromptFile     string   `json:"prompt_file,omitempty"`
+	Skipped        string   `json:"skipped,omitempty"`
 }
 
-// iterPaths bundles the four per-iteration artifact paths. Computed
+// iterPaths bundles the per-iteration artifact paths. Computed
 // once at the top of runIteration.
 type iterPaths struct {
-	stem    string
-	prompt  string
-	stdout  string
-	stderr  string
-	json    string
-	logsDir string
+	stem       string
+	prompt     string
+	stdout     string
+	stderr     string
+	gateStdout string
+	gateStderr string
+	json       string
+	logsDir    string
 }
 
 func newIterPaths(repo string, iter int, ts time.Time) iterPaths {
@@ -61,12 +65,14 @@ func newIterPaths(repo string, iter int, ts time.Time) iterPaths {
 	stem := fmt.Sprintf("iter-%04d-%s", iter, ts.UTC().Format("20060102T150405Z"))
 	join := func(suffix string) string { return filepath.Join(logsDir, stem+suffix) }
 	return iterPaths{
-		stem:    stem,
-		prompt:  join("-prompt.txt"),
-		stdout:  join("-stdout.txt"),
-		stderr:  join("-stderr.txt"),
-		json:    join(".json"),
-		logsDir: logsDir,
+		stem:       stem,
+		prompt:     join("-prompt.txt"),
+		stdout:     join("-stdout.txt"),
+		stderr:     join("-stderr.txt"),
+		gateStdout: join("-gate-stdout.txt"),
+		gateStderr: join("-gate-stderr.txt"),
+		json:       join(".json"),
+		logsDir:    logsDir,
 	}
 }
 
@@ -91,7 +97,7 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 	// 1. Global pre-iteration hook. Non-zero → skip the runner this tick.
 	preEnv := buildHookEnv(rc, hooks.PhaseNone, "")
 	preEnv.PromptFile = "" // not rendered yet
-	preRes, err := hooks.Run(ctx, hooks.GlobalPath(rc.repo, "pre-iteration"), preEnv, nil)
+	preRes, err := hooks.Run(ctx, hooks.GlobalPath(rc.repo, "pre-iteration"), preEnv, nil, nil, nil)
 	if err != nil {
 		return prev, fmt.Errorf("loop: pre-iteration: %w", err)
 	}
@@ -103,7 +109,7 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 	// 2. Per-state enter hook (only on entry into a new state).
 	if rc.lastEnteredState != prev.State {
 		env := buildHookEnv(rc, hooks.PhaseEnter, "")
-		_, hErr := hooks.Run(ctx, hooks.StatePath(rc.repo, string(prev.State), hooks.PhaseEnter), env, nil)
+		_, hErr := hooks.Run(ctx, hooks.StatePath(rc.repo, string(prev.State), hooks.PhaseEnter), env, nil, nil, nil)
 		if hErr != nil {
 			rc.log.WarnContext(ctx, "enter hook error", "state", prev.State, "err", hErr)
 		}
@@ -158,10 +164,11 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 			commits = n
 		}
 	}
-	gateResult := runGate(ctx, rc, prev, commits)
+	gate := runGate(ctx, rc, prev, commits)
+	gateResult := gate.Result
 
 	// 6. Write the iter JSON (post-iteration sees this on stdin + env).
-	preJSON := composeIterRecord(rc, prev, prev, sess, mode, gateResult, bd.Diff{}, commits, now, beforeHead)
+	preJSON := composeIterRecord(rc, prev, prev, sess, mode, gate, bd.Diff{}, commits, now, beforeHead)
 	if werr := writeIterJSON(rc.paths.json, preJSON); werr != nil {
 		return prev, fmt.Errorf("loop: write iter json: %w", werr)
 	}
@@ -171,7 +178,7 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 	postEnv.IterJSON = rc.paths.json
 	postEnv.PromptFile = rc.paths.prompt
 	if f, oerr := os.Open(rc.paths.json); oerr == nil { //nolint:gosec // path joined from rc.repo + state-controlled stem
-		_, _ = hooks.Run(ctx, hooks.GlobalPath(rc.repo, "post-iteration"), postEnv, f)
+		_, _ = hooks.Run(ctx, hooks.GlobalPath(rc.repo, "post-iteration"), postEnv, f, nil, nil)
 		_ = f.Close()
 	}
 
@@ -198,7 +205,7 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 	// 11. Exit hook for the old state when leaving it.
 	if next.State != prev.State {
 		env := buildHookEnv(rc, hooks.PhaseExit, string(next.State))
-		_, hErr := hooks.Run(ctx, hooks.StatePath(rc.repo, string(prev.State), hooks.PhaseExit), env, nil)
+		_, hErr := hooks.Run(ctx, hooks.StatePath(rc.repo, string(prev.State), hooks.PhaseExit), env, nil, nil, nil)
 		if hErr != nil {
 			rc.log.WarnContext(ctx, "exit hook error", "state", prev.State, "err", hErr)
 		}
@@ -215,7 +222,7 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 
 	// 13. Compose narrative + append summary.jsonl + transitions.jsonl.
 	currentHead, _ := git.HeadSHA(ctx, rc.repo)
-	rec := composeIterRecord(rc, prev, next, sess, mode, gateResult, diff, commits, now, currentHead)
+	rec := composeIterRecord(rc, prev, next, sess, mode, gate, diff, commits, now, currentHead)
 	if werr := rc.sum.Write(rec); werr != nil {
 		rc.log.ErrorContext(ctx, "write summary failed", "err", werr)
 	}
@@ -238,6 +245,7 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 		rc.log.ErrorContext(ctx, "incident write failed", "err", werr)
 	}
 	rc.lastGateResult = gateResult
+	rc.lastGateStdoutFile = gate.StdoutFile
 
 	// 15. Backoff sleep — skipped on terminal so Run can exit cleanly.
 	if !next.State.Terminal() {
@@ -298,6 +306,7 @@ func composePrompt(ctx context.Context, rc *runContext, prev fsm.Outcome, headSH
 		GitHead:    headSHA,
 		RepoRoot:   rc.repo,
 		GateResult: rc.lastGateResult,
+		GateOutput: gateOutputTail(rc.lastGateStdoutFile),
 		Review: promptlib.ReviewVars{
 			Branch: rc.fsm.ReviewBranch,
 			Base:   rc.fsm.ReviewBase,
@@ -316,18 +325,29 @@ func composePrompt(ctx context.Context, rc *runContext, prev fsm.Outcome, headSH
 	return out, nil
 }
 
-// runGate runs the per-state gate hook and returns one of the
-// narrative.Gate* constants. Honors --skip-gate and cfg.Gate.RunWhen.
-func runGate(ctx context.Context, rc *runContext, prev fsm.Outcome, commits int) string {
+// gateOutcome bundles what runGate produced: the narrative gate-result
+// constant plus the on-disk paths for the hook's stdout/stderr (empty
+// when the hook didn't actually run).
+type gateOutcome struct {
+	Result     string
+	StdoutFile string
+	StderrFile string
+}
+
+// runGate runs the per-state gate hook and returns the outcome.
+// Honors --skip-gate and cfg.Gate.RunWhen. When the hook actually
+// executes, its stdout/stderr stream to disk (rc.paths.gate{Stdout,Stderr})
+// and to the operator's terminal — same pattern as the runner subprocess.
+func runGate(ctx context.Context, rc *runContext, prev fsm.Outcome, commits int) gateOutcome {
 	if rc.opts.SkipGate {
-		return narrative.GateSkipped
+		return gateOutcome{Result: narrative.GateSkipped}
 	}
 	switch rc.cfg.Gate.RunWhen {
 	case "never":
-		return narrative.GateSkipped
+		return gateOutcome{Result: narrative.GateSkipped}
 	case "commits-only":
 		if commits == 0 {
-			return narrative.GateNotRun
+			return gateOutcome{Result: narrative.GateNotRun}
 		}
 	}
 
@@ -339,18 +359,55 @@ func runGate(ctx context.Context, rc *runContext, prev fsm.Outcome, commits int)
 	}
 	env := buildHookEnv(rc, hooks.PhaseGate, "")
 	env.PromptFile = rc.paths.prompt
-	res, err := hooks.Run(gateCtx, hooks.StatePath(rc.repo, string(prev.State), hooks.PhaseGate), env, nil)
+
+	// Stream to disk (always) + terminal (when IOStreams present).
+	// Files are created up-front; if the hook doesn't exist they stay
+	// empty zero-byte files, but they're cheap and keep the artifact
+	// set on disk consistent.
+	outFile, ferr := os.Create(rc.paths.gateStdout)
+	if ferr != nil {
+		rc.log.WarnContext(ctx, "gate stdout create", "err", ferr)
+		return gateOutcome{Result: narrative.GateFailed}
+	}
+	defer outFile.Close()
+	errFile, ferr := os.Create(rc.paths.gateStderr)
+	if ferr != nil {
+		rc.log.WarnContext(ctx, "gate stderr create", "err", ferr)
+		return gateOutcome{Result: narrative.GateFailed}
+	}
+	defer errFile.Close()
+	var outW io.Writer = outFile
+	var errW io.Writer = errFile
+	if rc.io != nil {
+		if rc.io.Out != nil {
+			outW = io.MultiWriter(outFile, rc.io.Out)
+		}
+		if rc.io.ErrOut != nil {
+			errW = io.MultiWriter(errFile, rc.io.ErrOut)
+		}
+	}
+
+	res, err := hooks.Run(gateCtx, hooks.StatePath(rc.repo, string(prev.State), hooks.PhaseGate), env, nil, outW, errW)
 	if err != nil {
 		rc.log.WarnContext(ctx, "gate hook error", "state", prev.State, "err", err)
-		return narrative.GateFailed
+		return gateOutcome{Result: narrative.GateFailed, StdoutFile: rc.paths.gateStdout, StderrFile: rc.paths.gateStderr}
 	}
 	if res.NoHook {
-		return narrative.GateNotRun
+		// No artifact when the hook isn't present — caller has nothing
+		// useful to surface.
+		_ = os.Remove(rc.paths.gateStdout)
+		_ = os.Remove(rc.paths.gateStderr)
+		return gateOutcome{Result: narrative.GateNotRun}
 	}
+	result := narrative.GateFailed
 	if res.ExitCode == 0 {
-		return narrative.GatePassed
+		result = narrative.GatePassed
 	}
-	return narrative.GateFailed
+	return gateOutcome{
+		Result:     result,
+		StdoutFile: rc.paths.gateStdout,
+		StderrFile: rc.paths.gateStderr,
+	}
 }
 
 // buildHookEnv produces hooks.Env consistent across all invocations in
@@ -436,7 +493,7 @@ func composeBackoff(rc *runContext, mode runner.Mode, sess *runner.Session) time
 }
 
 // composeIterRecord builds the JSONL summary row.
-func composeIterRecord(rc *runContext, prev, next fsm.Outcome, sess *runner.Session, mode runner.Mode, gateResult string, diff bd.Diff, commits int, ts time.Time, headSHA string) IterRecord {
+func composeIterRecord(rc *runContext, prev, next fsm.Outcome, sess *runner.Session, mode runner.Mode, gate gateOutcome, diff bd.Diff, commits int, ts time.Time, headSHA string) IterRecord {
 	failureMode := ""
 	if next.State == fsm.StateFailed {
 		failureMode = string(mode)
@@ -446,7 +503,7 @@ func composeIterRecord(rc *runContext, prev, next fsm.Outcome, sess *runner.Sess
 		Next:        next,
 		Diff:        diff,
 		Commits:     commits,
-		Gate:        gateResult,
+		Gate:        gate.Result,
 		FailureMode: failureMode,
 	})
 	rec := IterRecord{
@@ -458,10 +515,16 @@ func composeIterRecord(rc *runContext, prev, next fsm.Outcome, sess *runner.Sess
 		PrevState:  string(prev.State),
 		Narrative:  narrText,
 		RunnerMode: string(mode),
-		GateResult: gateResult,
+		GateResult: gate.Result,
 		Commits:    commits,
 		GitHead:    headSHA,
 		PromptFile: relPathOrAbs(rc.repo, rc.paths.prompt),
+	}
+	if gate.StdoutFile != "" {
+		rec.GateStdoutFile = relPathOrAbs(rc.repo, gate.StdoutFile)
+	}
+	if gate.StderrFile != "" {
+		rec.GateStderrFile = relPathOrAbs(rc.repo, gate.StderrFile)
 	}
 	if sess != nil {
 		if sess.Envelope != nil {
@@ -554,4 +617,53 @@ func relPathOrAbs(repo, p string) string {
 func diffIsEmpty(d bd.Diff) bool {
 	return len(d.Created) == 0 && len(d.Closed) == 0 && len(d.Opened) == 0 &&
 		len(d.Deferred) == 0 && len(d.InProgress) == 0 && len(d.Blocked) == 0
+}
+
+// gateOutputTail reads at most gateTailBytes from the end of the gate
+// stdout file at path and returns the last gateTailLines lines of it.
+// Returns "" when path is empty, the file doesn't exist, or the file is
+// empty — callers treat empty {{.GateOutput}} as "no prior gate run".
+//
+// Reads from the end with os.File.Seek so multi-MB benchmark logs don't
+// blow memory: the cap is the read size, not the file size.
+func gateOutputTail(path string) string {
+	if path == "" {
+		return ""
+	}
+	const gateTailBytes = 4096
+	const gateTailLines = 50
+	f, err := os.Open(path) //nolint:gosec // path is loop-owned state/logs file
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.Size() == 0 {
+		return ""
+	}
+	size := info.Size()
+	readFrom := int64(0)
+	if size > gateTailBytes {
+		readFrom = size - gateTailBytes
+	}
+	if _, err := f.Seek(readFrom, 0); err != nil {
+		return ""
+	}
+	buf := make([]byte, size-readFrom)
+	if _, err := io.ReadFull(f, buf); err != nil {
+		return ""
+	}
+	s := string(buf)
+	// When we truncated mid-line, drop the partial leading line so the
+	// agent sees only complete lines.
+	if readFrom > 0 {
+		if i := strings.IndexByte(s, '\n'); i >= 0 {
+			s = s[i+1:]
+		}
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) > gateTailLines {
+		lines = lines[len(lines)-gateTailLines:]
+	}
+	return strings.Join(lines, "\n")
 }

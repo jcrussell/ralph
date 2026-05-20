@@ -156,7 +156,7 @@ func run(ctx context.Context, opts *Options) error {
 		return err
 	}
 
-	res, err := hooks.Run(ctx, resolved, env, nil)
+	res, err := hooks.Run(ctx, resolved, env, nil, nil, nil)
 	if err != nil {
 		return err
 	}

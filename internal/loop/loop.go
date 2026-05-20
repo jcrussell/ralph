@@ -72,6 +72,10 @@ type runContext struct {
 	deadStreak       int
 	lastEnteredState fsm.State
 	lastGateResult   string
+	// lastGateStdoutFile is the absolute path of the previous
+	// iteration's gate-hook stdout file (when a gate ran). composePrompt
+	// reads its tail to populate {{.GateOutput}} for the next iteration.
+	lastGateStdoutFile string
 }
 
 // Run drives the FSM until a terminal outcome (done or failed). Run
@@ -238,7 +242,7 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 			FailureMode:   string(rc.fsm.Reason), // best mapping we have post-routing
 			FailureReason: string(rc.fsm.Reason),
 		}
-		if _, hErr := hooks.Run(ctx, hooks.GlobalPath(rc.repo, "failure"), env, nil); hErr != nil {
+		if _, hErr := hooks.Run(ctx, hooks.GlobalPath(rc.repo, "failure"), env, nil, nil, nil); hErr != nil {
 			logger.WarnContext(ctx, "failure hook error", "err", hErr)
 		}
 	}

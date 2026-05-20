@@ -88,7 +88,13 @@ func StatePath(repoRoot, state string, phase Phase) string {
 // exists but is not executable, Run returns a clear error. stdin is
 // piped to the hook if non-nil (used by post-iteration for the
 // iteration JSON).
-func Run(ctx context.Context, path string, env Env, stdin io.Reader) (Result, error) {
+//
+// stdout/stderr, when non-nil, receive the hook's output as it's
+// produced (stream-to-disk pattern, same as runner.Run) — Result.Stdout
+// / Result.Stderr stay empty in that case. When nil, output is
+// buffered into the Result (the historical behavior, kept for `ralph
+// hook` and phases where the caller wants the bytes back in memory).
+func Run(ctx context.Context, path string, env Env, stdin io.Reader, stdout, stderr io.Writer) (Result, error) {
 	r := Result{Path: path}
 	info, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -111,13 +117,25 @@ func Run(ctx context.Context, path string, env Env, stdin io.Reader) (Result, er
 	if stdin != nil {
 		cmd.Stdin = stdin
 	}
-	var out, errBuf bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errBuf
+	var outBuf, errBuf bytes.Buffer
+	if stdout != nil {
+		cmd.Stdout = stdout
+	} else {
+		cmd.Stdout = &outBuf
+	}
+	if stderr != nil {
+		cmd.Stderr = stderr
+	} else {
+		cmd.Stderr = &errBuf
+	}
 
 	runErr := cmd.Run()
-	r.Stdout = out.String()
-	r.Stderr = errBuf.String()
+	if stdout == nil {
+		r.Stdout = outBuf.String()
+	}
+	if stderr == nil {
+		r.Stderr = errBuf.String()
+	}
 	r.ExitCode = cmd.ProcessState.ExitCode()
 
 	if runErr != nil {

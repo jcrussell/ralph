@@ -41,6 +41,11 @@ type Vars struct {
 	RepoRoot   string
 	LastIter   any // opaque iteration record; templates access by field
 	GateResult string
+	// GateOutput is the tail of the previous iteration's gate-hook
+	// stdout, populated by the loop when a gate ran. Bounded to a
+	// few KB so a multi-MB perf table doesn't blow the context. Empty
+	// string when no gate output is available.
+	GateOutput string
 	Review     ReviewVars
 	Beads      BeadsVars
 }

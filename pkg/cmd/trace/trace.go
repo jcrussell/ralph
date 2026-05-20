@@ -120,6 +120,15 @@ func Render(rootFS fs.FS, iter, tailLines int, w io.Writer) error {
 	if err := dumpSection(rootFS, stem+"-stderr.txt", "RUNNER STDERR", tailLines, w); err != nil {
 		return err
 	}
+	// Gate output is only present when the gate hook actually ran;
+	// dumpSection prints "(missing)" otherwise. That's the right
+	// signal — operators see at a glance whether the gate ran.
+	if err := dumpSection(rootFS, stem+"-gate-stdout.txt", "GATE STDOUT", tailLines, w); err != nil {
+		return err
+	}
+	if err := dumpSection(rootFS, stem+"-gate-stderr.txt", "GATE STDERR", tailLines, w); err != nil {
+		return err
+	}
 	return nil
 }
 

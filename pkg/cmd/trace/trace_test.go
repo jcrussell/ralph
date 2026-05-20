@@ -9,11 +9,13 @@ import (
 
 func TestRenderHappyPath(t *testing.T) {
 	fs := fstest.MapFS{
-		"iter-0001-1700000000.json":       {Data: []byte(`{"iter":1,"state":"clean","narrative":"first"}`)},
-		"iter-0001-1700000000-prompt.txt": {Data: []byte("rendered prompt body\n")},
-		"iter-0001-1700000000-stdout.txt": {Data: []byte("line1\nline2\nline3\n")},
-		"iter-0001-1700000000-stderr.txt": {Data: []byte("err line\n")},
-		"iter-0002-1700000010.json":       {Data: []byte(`{"iter":2}`)},
+		"iter-0001-1700000000.json":            {Data: []byte(`{"iter":1,"state":"clean","narrative":"first"}`)},
+		"iter-0001-1700000000-prompt.txt":      {Data: []byte("rendered prompt body\n")},
+		"iter-0001-1700000000-stdout.txt":      {Data: []byte("line1\nline2\nline3\n")},
+		"iter-0001-1700000000-stderr.txt":      {Data: []byte("err line\n")},
+		"iter-0001-1700000000-gate-stdout.txt": {Data: []byte("gate out line\n")},
+		"iter-0001-1700000000-gate-stderr.txt": {Data: []byte("gate err line\n")},
+		"iter-0002-1700000010.json":            {Data: []byte(`{"iter":2}`)},
 	}
 	var buf bytes.Buffer
 	if err := Render(fs, 1, 0, &buf); err != nil {
@@ -29,6 +31,10 @@ func TestRenderHappyPath(t *testing.T) {
 		"line1\nline2\nline3",
 		"=== RUNNER STDERR (iter-0001-1700000000-stderr.txt) ===",
 		"err line",
+		"=== GATE STDOUT (iter-0001-1700000000-gate-stdout.txt) ===",
+		"gate out line",
+		"=== GATE STDERR (iter-0001-1700000000-gate-stderr.txt) ===",
+		"gate err line",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing in output: %q\n---\n%s", want, out)

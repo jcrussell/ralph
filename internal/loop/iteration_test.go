@@ -179,6 +179,95 @@ func TestRun_GateNotRunWhenCommitsOnlyAndZeroCommits(t *testing.T) {
 	}
 }
 
+// gateOutputTail returns only the trailing N lines / N bytes of the
+// gate stdout file. Confirms ralph-c25's memory bound: a multi-MB
+// benchmark log doesn't end up in {{.GateOutput}} or in memory.
+func TestGateOutputTail(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gate-stdout.txt")
+
+	// Empty path → empty result.
+	if got := gateOutputTail(""); got != "" {
+		t.Errorf("empty path = %q, want empty", got)
+	}
+	// Missing file → empty result.
+	if got := gateOutputTail(filepath.Join(dir, "nope.txt")); got != "" {
+		t.Errorf("missing file = %q, want empty", got)
+	}
+	// Short file → return everything (lines preserved).
+	if err := os.WriteFile(path, []byte("a\nb\nc\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := gateOutputTail(path); !strings.Contains(got, "a") || !strings.Contains(got, "c") {
+		t.Errorf("short file tail = %q, want to contain a..c", got)
+	}
+	// File > 4KB → trailing window only; partial leading line dropped.
+	var b strings.Builder
+	for i := 0; i < 5000; i++ {
+		fmt.Fprintf(&b, "filler-line-%05d\n", i)
+	}
+	b.WriteString("TAIL-MARKER\n")
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := gateOutputTail(path)
+	if !strings.Contains(got, "TAIL-MARKER") {
+		t.Errorf("tail missing TAIL-MARKER: %q", got)
+	}
+	if len(got) > 4096 {
+		t.Errorf("tail length %d > 4096 cap", len(got))
+	}
+	if strings.Contains(got, "filler-line-00000") {
+		t.Errorf("tail includes file head; got=%q", got[:80])
+	}
+}
+
+// Gate hook stdout/stderr are persisted to state/logs/iter-NNNN-*-gate-
+// {stdout,stderr}.txt and surfaced in the IterRecord (gate_stdout_file /
+// gate_stderr_file). Confirms ralph-c25: operators get a forensic
+// artifact instead of just a pass/fail bit.
+func TestRun_GateHookOutputPersisted(t *testing.T) {
+	repo := scaffoldRepo(t)
+	opts := baseOpts(t, repo)
+	opts.Once = true
+	opts.BD = &fakeBD{ReadyByLabel: map[string][]bd.Issue{"": {{ID: "x"}}}}
+	opts.Runner = &fakeRunner{}
+	opts.Clock = newFakeClock()
+	writeExecutableHook(t,
+		filepath.Join(repo, ".ralph", "hooks", "states", "clean", "gate"),
+		"#!/bin/sh\necho 'GATE-STDOUT-LINE'\necho 'GATE-STDERR-LINE' >&2\nexit 1\n",
+	)
+
+	if _, err := Run(context.Background(), opts); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	recs := readSummary(t, repo)
+	if recs[0].GateResult != "failed" {
+		t.Errorf("GateResult = %q, want failed (gate exited 1)", recs[0].GateResult)
+	}
+	if recs[0].GateStdoutFile == "" {
+		t.Fatalf("GateStdoutFile empty, want path to gate-stdout file")
+	}
+	if recs[0].GateStderrFile == "" {
+		t.Fatalf("GateStderrFile empty, want path to gate-stderr file")
+	}
+	// Paths in the record are relative to repo root.
+	outBytes, err := os.ReadFile(filepath.Join(repo, recs[0].GateStdoutFile))
+	if err != nil {
+		t.Fatalf("read gate stdout: %v", err)
+	}
+	if !strings.Contains(string(outBytes), "GATE-STDOUT-LINE") {
+		t.Errorf("gate stdout file = %q, want to contain GATE-STDOUT-LINE", outBytes)
+	}
+	errBytes, err := os.ReadFile(filepath.Join(repo, recs[0].GateStderrFile))
+	if err != nil {
+		t.Fatalf("read gate stderr: %v", err)
+	}
+	if !strings.Contains(string(errBytes), "GATE-STDERR-LINE") {
+		t.Errorf("gate stderr file = %q, want to contain GATE-STDERR-LINE", errBytes)
+	}
+}
+
 // Exit hook fires with RALPH_NEXT_STATE on state transition; enter and
 // gate phases do not receive NEXT_STATE.
 func TestRun_ExitHookReceivesNextState(t *testing.T) {
