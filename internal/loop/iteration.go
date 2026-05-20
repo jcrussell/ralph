@@ -292,7 +292,7 @@ func emitIterLine(rc *runContext, rec IterRecord) {
 		text = strings.Replace(text, "gate green", "gate "+cs.Green("green"), 1)
 		text = strings.Replace(text, "gate red", "gate "+cs.Red("red"), 1)
 	}
-	fmt.Fprintf(rc.io.ErrOut, "iter %04d  %s\n", rec.Iter, text)
+	_, _ = fmt.Fprintf(rc.io.ErrOut, "iter %04d  %s\n", rec.Iter, text)
 }
 
 // composePrompt renders the per-state prompt with the iteration's vars.
@@ -369,13 +369,13 @@ func runGate(ctx context.Context, rc *runContext, prev fsm.Outcome, commits int)
 		rc.log.WarnContext(ctx, "gate stdout create", "err", ferr)
 		return gateOutcome{Result: narrative.GateFailed}
 	}
-	defer outFile.Close()
+	defer func() { _ = outFile.Close() }()
 	errFile, ferr := os.Create(rc.paths.gateStderr)
 	if ferr != nil {
 		rc.log.WarnContext(ctx, "gate stderr create", "err", ferr)
 		return gateOutcome{Result: narrative.GateFailed}
 	}
-	defer errFile.Close()
+	defer func() { _ = errFile.Close() }()
 	var outW io.Writer = outFile
 	var errW io.Writer = errFile
 	if rc.io != nil {
@@ -637,7 +637,7 @@ func gateOutputTail(path string) string {
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil || info.Size() == 0 {
 		return ""
