@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,13 +131,22 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 			sessCtx, cancel = context.WithTimeout(ctx, time.Duration(rc.cfg.Loop.SessionTimeoutSecs)*time.Second)
 			defer cancel()
 		}
-		sess, err = rc.runr.Run(sessCtx, prompt, rc.repo, nil)
+		var stdoutTee, stderrTee io.Writer
+		if rc.io != nil {
+			stdoutTee, stderrTee = rc.io.Out, rc.io.ErrOut
+		}
+		sess, err = rc.runr.Run(sessCtx, runner.RunOpts{
+			Prompt:     prompt,
+			Cwd:        rc.repo,
+			StdoutPath: rc.paths.stdout,
+			StderrPath: rc.paths.stderr,
+			StdoutTee:  stdoutTee,
+			StderrTee:  stderrTee,
+		})
 		if err != nil {
 			return prev, fmt.Errorf("loop: runner start: %w", err)
 		}
 		mode = runner.Classify(sess)
-		_ = writeAtomic(rc.paths.stdout, []byte(sess.Stdout))
-		_ = writeAtomic(rc.paths.stderr, []byte(sess.Stderr))
 		updateStreaks(rc, mode)
 		updateCumulatives(rc, sess)
 	}

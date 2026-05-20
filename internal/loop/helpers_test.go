@@ -32,26 +32,37 @@ type fakeRunner struct {
 	Errs     []error
 }
 
-func (f *fakeRunner) Run(_ context.Context, prompt, cwd string, _ []string) (*runner.Session, error) {
+func (f *fakeRunner) Run(_ context.Context, opts runner.RunOpts) (*runner.Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.Prompts = append(f.Prompts, prompt)
-	f.Cwds = append(f.Cwds, cwd)
+	f.Prompts = append(f.Prompts, opts.Prompt)
+	f.Cwds = append(f.Cwds, opts.Cwd)
 	idx := f.Calls
 	f.Calls++
 	if idx < len(f.Errs) && f.Errs[idx] != nil {
 		return nil, f.Errs[idx]
 	}
+	// Mirror the production runner: write any synthetic stdout/stderr to
+	// the requested paths so iteration.go's downstream (trace, IterRecord)
+	// finds files on disk where the real runner would have left them.
+	var sess *runner.Session
 	if idx < len(f.Sessions) {
-		return f.Sessions[idx], nil
+		sess = f.Sessions[idx]
+	} else {
+		sess = &runner.Session{
+			ExitCode: 0,
+			Duration: time.Second,
+			Stdout:   `{"total_cost_usd":0.01,"num_turns":1,"subtype":"success"}`,
+			Envelope: &runner.Envelope{TotalCostUSD: 0.01, NumTurns: 1, Subtype: "success", Raw: map[string]any{"subtype": "success"}},
+		}
 	}
-	// Default: a healthy session with $0.01 cost.
-	return &runner.Session{
-		ExitCode: 0,
-		Duration: time.Second,
-		Stdout:   `{"total_cost_usd":0.01,"num_turns":1,"subtype":"success"}`,
-		Envelope: &runner.Envelope{TotalCostUSD: 0.01, NumTurns: 1, Subtype: "success", Raw: map[string]any{"subtype": "success"}},
-	}, nil
+	if opts.StdoutPath != "" {
+		_ = os.WriteFile(opts.StdoutPath, []byte(sess.Stdout), 0o600)
+	}
+	if opts.StderrPath != "" {
+		_ = os.WriteFile(opts.StderrPath, []byte(sess.Stderr), 0o600)
+	}
+	return sess, nil
 }
 
 // fakeBD lets tests pin Ready/List output by (label) and List(status,label),

@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -18,7 +19,7 @@ exit 0
 `)
 	r := New(bin, nil, "")
 	ctx := context.Background()
-	s, err := r.Run(ctx, "hello", t.TempDir(), nil)
+	s, err := runForTest(t, r, ctx, "hello", t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -50,7 +51,7 @@ func TestRunLegacyCostKey(t *testing.T) {
 echo '{"cost_usd": 1.5, "input_tokens": 100, "output_tokens": 200}'
 `)
 	r := New(bin, nil, "")
-	s, err := r.Run(context.Background(), "", t.TempDir(), nil)
+	s, err := runForTest(t, r, context.Background(), "", t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -71,7 +72,7 @@ echo "boom" >&2
 exit 3
 `)
 	r := New(bin, nil, "")
-	s, err := r.Run(context.Background(), "", t.TempDir(), nil)
+	s, err := runForTest(t, r, context.Background(), "", t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -92,7 +93,7 @@ exec cat   # echoes stdin to stdout
 `)
 	r := New(bin, nil, "")
 	prompt := "the prompt body"
-	s, err := r.Run(context.Background(), prompt, t.TempDir(), nil)
+	s, err := runForTest(t, r, context.Background(), prompt, t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -107,7 +108,7 @@ echo "$@" > "$RALPH_TEST_ARGS_OUT"
 `)
 	argsOut := filepath.Join(t.TempDir(), "args")
 	r := New(bin, []string{"--flag-a", "--flag-b=value"}, "")
-	_, err := r.Run(context.Background(), "", t.TempDir(), []string{"RALPH_TEST_ARGS_OUT=" + argsOut})
+	_, err := runForTest(t, r, context.Background(), "", t.TempDir(), []string{"RALPH_TEST_ARGS_OUT=" + argsOut})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -134,7 +135,7 @@ echo '{}'
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	s, err := r.Run(ctx, "", t.TempDir(), nil)
+	s, err := runForTest(t, r, ctx, "", t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -151,7 +152,7 @@ func TestRunNonJSONStdout(t *testing.T) {
 echo "hello, not JSON"
 `)
 	r := New(bin, nil, "")
-	s, err := r.Run(context.Background(), "", t.TempDir(), nil)
+	s, err := runForTest(t, r, context.Background(), "", t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -169,7 +170,7 @@ echo '{"subtype": "error", "api_error_status": 429, "is_error": true}'
 exit 1
 `)
 	r := New(bin, nil, "")
-	s, err := r.Run(context.Background(), "", t.TempDir(), nil)
+	s, err := runForTest(t, r, context.Background(), "", t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -199,7 +200,7 @@ echo '{}'
 	r := New(bin, nil, "")
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
-	s, err := r.Run(ctx, "", t.TempDir(), nil)
+	s, err := runForTest(t, r, ctx, "", t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -213,7 +214,7 @@ echo '{}'
 
 func TestRunMissingBinary(t *testing.T) {
 	r := New("/no/such/binary-12345", nil, "")
-	_, err := r.Run(context.Background(), "", t.TempDir(), nil)
+	_, err := runForTest(t, r, context.Background(), "", t.TempDir(), nil)
 	if err == nil {
 		t.Fatalf("Run: nil err, want missing-binary error")
 	}
@@ -242,7 +243,7 @@ echo '{}'
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	r := New("/path/to/claude", []string{"--dangerously-skip-permissions"}, "1G")
-	if _, err := r.Run(context.Background(), "", t.TempDir(), []string{"RALPH_TEST_ARGV_OUT=" + argvOut}); err != nil {
+	if _, err := runForTest(t, r, context.Background(), "", t.TempDir(), []string{"RALPH_TEST_ARGV_OUT=" + argvOut}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -301,7 +302,7 @@ echo '{}'
 
 	r := New("/path/to/claude", nil, "512m")
 	for i := 0; i < 3; i++ {
-		if _, err := r.Run(context.Background(), "", t.TempDir(), []string{"RALPH_TEST_ARGV_OUT=" + argvOut}); err != nil {
+		if _, err := runForTest(t, r, context.Background(), "", t.TempDir(), []string{"RALPH_TEST_ARGV_OUT=" + argvOut}); err != nil {
 			t.Fatalf("Run %d: %v", i, err)
 		}
 	}
@@ -343,4 +344,75 @@ func writeScript(t *testing.T, body string) string {
 		t.Fatalf("write script: %v", err)
 	}
 	return path
+}
+
+// TestRunStreamsOutputToTeeAndDisk verifies the streaming contract:
+// every byte the subprocess writes lands in the captured tee writer
+// AND in the on-disk log file before Run returns. The script sleeps
+// between two writes; the producer-then-consumer test would deadlock
+// today if the runner buffered output until Wait.
+func TestRunStreamsOutputToTeeAndDisk(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping streaming test in -short")
+	}
+	bin := writeScript(t, `#!/bin/sh
+printf 'first\n'
+sleep 0.1
+printf 'second\n'
+printf 'err-one\n' >&2
+sleep 0.1
+printf 'err-two\n' >&2
+`)
+	r := New(bin, nil, "")
+	logs := t.TempDir()
+	stdoutPath := filepath.Join(logs, "stdout")
+	stderrPath := filepath.Join(logs, "stderr")
+	var outTee, errTee bytes.Buffer
+	s, err := r.Run(context.Background(), RunOpts{
+		Cwd:        t.TempDir(),
+		StdoutPath: stdoutPath,
+		StderrPath: stderrPath,
+		StdoutTee:  &outTee,
+		StderrTee:  &errTee,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, want := range []string{"first", "second"} {
+		if !strings.Contains(outTee.String(), want) {
+			t.Errorf("stdout tee = %q, want to contain %q", outTee.String(), want)
+		}
+		if !strings.Contains(s.Stdout, want) {
+			t.Errorf("Session.Stdout = %q, want to contain %q", s.Stdout, want)
+		}
+	}
+	for _, want := range []string{"err-one", "err-two"} {
+		if !strings.Contains(errTee.String(), want) {
+			t.Errorf("stderr tee = %q, want to contain %q", errTee.String(), want)
+		}
+	}
+	// Files on disk must match what the tee saw.
+	diskOut, _ := os.ReadFile(stdoutPath)
+	diskErr, _ := os.ReadFile(stderrPath)
+	if string(diskOut) != outTee.String() {
+		t.Errorf("disk stdout %q != tee stdout %q", diskOut, outTee.String())
+	}
+	if string(diskErr) != errTee.String() {
+		t.Errorf("disk stderr %q != tee stderr %q", diskErr, errTee.String())
+	}
+}
+
+// runForTest is a convenience that supplies tmpdir-based stdout/stderr
+// paths so existing tests stay focused on inputs they actually care
+// about (prompt / cwd / env). Production callers build RunOpts directly.
+func runForTest(t *testing.T, r *Runner, ctx context.Context, prompt, cwd string, extraEnv []string) (*Session, error) {
+	t.Helper()
+	logs := t.TempDir()
+	return r.Run(ctx, RunOpts{
+		Prompt:     prompt,
+		Cwd:        cwd,
+		ExtraEnv:   extraEnv,
+		StdoutPath: filepath.Join(logs, "stdout"),
+		StderrPath: filepath.Join(logs, "stderr"),
+	})
 }

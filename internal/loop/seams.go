@@ -21,7 +21,7 @@ import (
 // Runner is the narrow surface the loop needs from internal/runner.
 // *runner.Runner satisfies it.
 type Runner interface {
-	Run(ctx context.Context, prompt, cwd string, extraEnv []string) (*runner.Session, error)
+	Run(ctx context.Context, opts runner.RunOpts) (*runner.Session, error)
 }
 
 // BDClient is the bd surface the loop needs: enough to satisfy the

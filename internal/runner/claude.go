@@ -6,11 +6,11 @@
 package runner
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -71,16 +71,48 @@ type Envelope struct {
 	Raw            map[string]any
 }
 
-// Run starts the runner with prompt on stdin and waits for it to
-// complete, honoring ctx for cancellation/timeout. cwd is the
-// working directory; extraEnv is appended to the parent env. The
-// returned error is non-nil only for failures starting the process;
+// RunOpts bundles parameters for one Run call. StdoutPath/StderrPath
+// are required: the runner writes subprocess output directly to these
+// files (no in-memory buffer), so output appears on disk as the
+// subprocess produces it instead of after Wait. StdoutTee/StderrTee,
+// when non-nil, receive a copy of the bytes — production passes the
+// operator's terminal so output streams live; tests usually leave them
+// nil.
+type RunOpts struct {
+	Prompt     string
+	Cwd        string
+	ExtraEnv   []string
+	StdoutPath string
+	StderrPath string
+	StdoutTee  io.Writer
+	StderrTee  io.Writer
+}
+
+// Run starts the runner with opts.Prompt on stdin and waits for it to
+// complete, honoring ctx for cancellation/timeout. Subprocess stdout
+// and stderr stream to opts.StdoutPath / opts.StderrPath (and to
+// opts.StdoutTee / opts.StderrTee when set) as they're produced — the
+// runner does not buffer them in memory. The returned error is non-nil
+// only for failures starting the process or opening the log files;
 // non-zero exit codes are reported via Session.ExitCode.
-func (r *Runner) Run(ctx context.Context, prompt string, cwd string, extraEnv []string) (*Session, error) {
+func (r *Runner) Run(ctx context.Context, opts RunOpts) (*Session, error) {
 	if r.cmd == "" {
 		return nil, errors.New("runner: empty command")
 	}
+	if opts.StdoutPath == "" || opts.StderrPath == "" {
+		return nil, errors.New("runner: stdout/stderr paths required")
+	}
 	start := time.Now()
+
+	stdoutFile, err := os.Create(opts.StdoutPath)
+	if err != nil {
+		return nil, fmt.Errorf("runner: create stdout file: %w", err)
+	}
+	stderrFile, err := os.Create(opts.StderrPath)
+	if err != nil {
+		_ = stdoutFile.Close()
+		return nil, fmt.Errorf("runner: create stderr file: %w", err)
+	}
 
 	// Wrap argv with systemd-run --user --scope when memLimit is set so
 	// the child runs under a cgroup with MemoryMax + MemorySwapMax=0 and
@@ -96,13 +128,20 @@ func (r *Runner) Run(ctx context.Context, prompt string, cwd string, extraEnv []
 		execCmd, execArgs = wrapped[0], wrapped[1:]
 	}
 	cmd := exec.CommandContext(ctx, execCmd, execArgs...) //nolint:gosec // execCmd/execArgs from operator-controlled config (possibly wrapped with systemd-run from internal/isolation)
-	cmd.Dir = cwd
-	cmd.Stdin = strings.NewReader(prompt)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if len(extraEnv) > 0 {
-		cmd.Env = append(cmd.Environ(), extraEnv...)
+	cmd.Dir = opts.Cwd
+	cmd.Stdin = strings.NewReader(opts.Prompt)
+	var stdoutW io.Writer = stdoutFile
+	if opts.StdoutTee != nil {
+		stdoutW = io.MultiWriter(stdoutFile, opts.StdoutTee)
+	}
+	var stderrW io.Writer = stderrFile
+	if opts.StderrTee != nil {
+		stderrW = io.MultiWriter(stderrFile, opts.StderrTee)
+	}
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
+	if len(opts.ExtraEnv) > 0 {
+		cmd.Env = append(cmd.Environ(), opts.ExtraEnv...)
 	}
 
 	// Platform-specific: Unix puts the child in its own process group
@@ -117,6 +156,10 @@ func (r *Runner) Run(ctx context.Context, prompt string, cwd string, extraEnv []
 	runErr := cmd.Run()
 	dur := time.Since(start)
 
+	// Close before reading back so any buffered writes flush to disk.
+	_ = stdoutFile.Close()
+	_ = stderrFile.Close()
+
 	timeoutKilled := errors.Is(ctx.Err(), context.DeadlineExceeded)
 	if runErr != nil && !timeoutKilled {
 		// Distinguish "couldn't start" from "exited non-zero".
@@ -126,8 +169,13 @@ func (r *Runner) Run(ctx context.Context, prompt string, cwd string, extraEnv []
 		}
 	}
 
-	outStr := stdout.String()
-	errStr := stderr.String()
+	// Re-read from disk for Session.Stdout/Stderr + envelope parsing.
+	// Streaming-to-disk made the runtime memory profile flat; the read-
+	// back is a transient end-of-run cost.
+	outBytes, _ := os.ReadFile(opts.StdoutPath)
+	errBytes, _ := os.ReadFile(opts.StderrPath)
+	outStr := string(outBytes)
+	errStr := string(errBytes)
 	s := &Session{
 		ExitCode:        cmd.ProcessState.ExitCode(),
 		Duration:        dur,
