@@ -1,5 +1,10 @@
 # ralph
 
+[![CI](https://github.com/jcrussell/ralph/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jcrussell/ralph/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/jcrussell/ralph?logo=github)](https://github.com/jcrussell/ralph/releases)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/jcrussell/ralph)](go.mod)
+[![License](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
+
 An FSM-driven autonomous-loop CLI for running an AI coding agent on a task queue, hour after hour, without losing the plot.
 
 ## Requirements
