@@ -55,17 +55,17 @@ sboms:
 # byob-security.3: cosign keyless signing — GitHub's OIDC token authenticates
 # to Sigstore, so there are no long-lived keys to manage. Signs every release
 # artifact (archives, checksums, sboms) so any downloaded file can be verified
-# independently against the workflow that produced it.
+# independently against the workflow that produced it. Output is cosign's new
+# bundle format: a single JSON file per artifact embedding the signature,
+# certificate, and Rekor transparency log entry.
 signs:
   - cmd: cosign
     artifacts: all
-    signature: "${artifact}.sig"
-    certificate: "${artifact}.pem"
+    signature: "${artifact}.cosign.bundle"
     args:
       - "sign-blob"
       - "--yes"
-      - "--output-signature=${signature}"
-      - "--output-certificate=${certificate}"
+      - "--bundle=${signature}"
       - "${artifact}"
 
 snapshot:
