@@ -84,6 +84,63 @@ func TestLazyConfigMemoizes(t *testing.T) {
 	}
 }
 
+// byob-runtime-directories.2: f.Paths must be a memoized closure rooted
+// at RepoRoot so commands resolve .ralph/state joins from one injection
+// point. NewFactory wires it; tests can swap via LazyPaths.
+func TestNewFactoryPathsIsLazy(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".ralph"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	chdir(t, root)
+
+	f := NewFactory()
+	if f.Paths == nil {
+		t.Fatal("NewFactory().Paths = nil; want closure")
+	}
+	p, err := f.Paths()
+	if err != nil {
+		t.Fatalf("f.Paths(): %v", err)
+	}
+	// RepoRoot resolves via os.Getwd; compare symlink-resolved (macOS /tmp).
+	wantRoot, _ := filepath.EvalSymlinks(root)
+	gotRoot, _ := filepath.EvalSymlinks(p.RepoRoot())
+	if gotRoot != wantRoot {
+		t.Errorf("Paths.RepoRoot() = %s, want %s", gotRoot, wantRoot)
+	}
+	if want := filepath.Join(p.RepoRoot(), ".ralph", "state", "fsm.json"); p.FSM() != want {
+		t.Errorf("Paths.FSM() = %s, want %s", p.FSM(), want)
+	}
+}
+
+// LazyPaths must propagate a RepoRoot error rather than rooting Paths at
+// "" (which would silently produce paths under the cwd).
+func TestLazyPathsPropagatesRepoRootError(t *testing.T) {
+	rootErr := errors.New("no repo")
+	fn := LazyPaths(func() (string, error) { return "", rootErr })
+	if _, err := fn(); !errors.Is(err, rootErr) {
+		t.Errorf("err = %v, want %v", err, rootErr)
+	}
+}
+
+// sync.OnceValues guarantees one resolution per closure.
+func TestLazyPathsMemoizes(t *testing.T) {
+	calls := 0
+	fn := LazyPaths(func() (string, error) {
+		calls++
+		return "/repo", nil
+	})
+	if _, err := fn(); err != nil {
+		t.Fatalf("fn(): %v", err)
+	}
+	if _, err := fn(); err != nil {
+		t.Fatalf("fn() second call: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("RepoRoot called %d times; want 1 (sync.OnceValues)", calls)
+	}
+}
+
 func TestRepoRootFindsRalph(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".ralph"), 0o755); err != nil {

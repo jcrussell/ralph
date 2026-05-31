@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/jcrussell/ralph/internal/config"
+	"github.com/jcrussell/ralph/internal/paths"
 	"github.com/jcrussell/ralph/pkg/iostreams"
 )
 
@@ -42,6 +43,14 @@ type Factory struct {
 	// commands that don't need it (byob-config.3).
 	Config func() (*config.Config, error)
 
+	// Paths returns ralph's on-disk layout (.ralph/state/...) rooted at
+	// RepoRoot. Lazy and memoized like Config: commands that never touch
+	// state (--help, --version, completions) pay no resolution cost, and
+	// the pure path-joining accessors keep call sites from re-deriving
+	// .ralph/state joins by hand (byob-runtime-directories.2). Tests
+	// override f.Paths to point at a t.TempDir().
+	Paths func() (*paths.Paths, error)
+
 	// Future expensive dependencies belong here as lazy closures,
 	// matching the RepoRoot/Config pattern above. (Ralph deliberately
 	// has no Store: it persists via bd + JSONL, not SQL — see the
@@ -63,6 +72,7 @@ func NewFactory() *Factory {
 	}
 	f.RepoRoot = sync.OnceValues(findRepoRoot)
 	f.Config = LazyConfig(f.RepoRoot)
+	f.Paths = LazyPaths(f.RepoRoot)
 	return f
 }
 
@@ -77,6 +87,21 @@ func LazyConfig(repoRoot func() (string, error)) func() (*config.Config, error) 
 			return nil, err
 		}
 		return config.Load(repo)
+	})
+}
+
+// LazyPaths returns a sync.OnceValues closure resolving a *paths.Paths
+// rooted at the supplied RepoRoot. Mirrors LazyConfig so tests that
+// build a bare Factory can wire `Paths: LazyPaths(rootFn)` without
+// depending on os.Getwd. The RepoRoot error is propagated rather than
+// rooting Paths at "".
+func LazyPaths(repoRoot func() (string, error)) func() (*paths.Paths, error) {
+	return sync.OnceValues(func() (*paths.Paths, error) {
+		repo, err := repoRoot()
+		if err != nil {
+			return nil, err
+		}
+		return paths.New(repo), nil
 	})
 }
 
