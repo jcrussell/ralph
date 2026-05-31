@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -22,8 +21,6 @@ import (
 	"github.com/jcrussell/ralph/internal/runs"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
-
-const summaryRel = ".ralph/state/logs/summary.jsonl"
 
 // Options is the three-part command shape's Options struct.
 type Options struct {
@@ -91,12 +88,12 @@ status' for the single-screen dashboard. --since takes a Go duration
 }
 
 func run(_ context.Context, opts *Options) error {
-	repo, err := opts.F.RepoRoot()
+	p, err := opts.F.Paths()
 	if err != nil {
 		return err
 	}
 
-	r, err := runs.Latest(repo)
+	r, err := runs.Latest(p.RepoRoot())
 	if err != nil {
 		if errors.Is(err, runs.ErrNoRuns) {
 			_, _ = fmt.Fprintln(opts.F.IOStreams.ErrOut, "timeline: no runs found")
@@ -115,7 +112,7 @@ func run(_ context.Context, opts *Options) error {
 		since, _ = parseSince(opts.Since)
 	}
 
-	narrByIter, _ := loadNarratives(filepath.Join(repo, summaryRel))
+	narrByIter, _ := loadNarratives(p.Summary())
 
 	for _, t := range transitions {
 		if !since.IsZero() && t.TS.Before(since) {

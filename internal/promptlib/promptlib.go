@@ -24,9 +24,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 	"text/template"
+
+	"github.com/jcrussell/ralph/internal/paths"
 )
 
 // Vars are the documented template fields. Add fields here as
@@ -87,7 +88,7 @@ func BeadsVarsFromExcludeTypes(excludeTypes []string) BeadsVars {
 
 // PromptsDir returns the .ralph/prompts directory under repoRoot.
 func PromptsDir(repoRoot string) string {
-	return filepath.Join(repoRoot, ".ralph", "prompts")
+	return paths.New(repoRoot).PromptsDir()
 }
 
 // Open returns an *os.Root rooted at PromptsDir(repoRoot). Its FS()

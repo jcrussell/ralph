@@ -18,6 +18,7 @@ import (
 	"github.com/jcrussell/ralph/internal/hooks"
 	"github.com/jcrussell/ralph/internal/incidents"
 	"github.com/jcrussell/ralph/internal/narrative"
+	"github.com/jcrussell/ralph/internal/paths"
 	"github.com/jcrussell/ralph/internal/promptlib"
 	"github.com/jcrussell/ralph/internal/runner"
 	"github.com/jcrussell/ralph/internal/runs"
@@ -61,7 +62,7 @@ type iterPaths struct {
 }
 
 func newIterPaths(repo string, iter int, ts time.Time) iterPaths {
-	logsDir := filepath.Join(repo, ".ralph", "state", "logs")
+	logsDir := paths.New(repo).LogsDir()
 	stem := fmt.Sprintf("iter-%04d-%s", iter, ts.UTC().Format("20060102T150405Z"))
 	join := func(suffix string) string { return filepath.Join(logsDir, stem+suffix) }
 	return iterPaths{

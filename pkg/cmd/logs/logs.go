@@ -12,7 +12,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -20,8 +19,6 @@ import (
 	"github.com/jcrussell/ralph/internal/loop"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
-
-const summaryRel = ".ralph/state/logs/summary.jsonl"
 
 // Options is the three-part command shape's Options struct.
 type Options struct {
@@ -92,11 +89,11 @@ captured artifact (prompt, stdout, stderr) for one iteration.`,
 }
 
 func run(ctx context.Context, opts *Options) error {
-	repo, err := opts.F.RepoRoot()
+	p, err := opts.F.Paths()
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(repo, summaryRel)
+	path := p.Summary()
 	if opts.Tail {
 		return tailFile(ctx, path, opts)
 	}

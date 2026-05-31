@@ -26,6 +26,7 @@ import (
 
 	"github.com/jcrussell/ralph/internal/git"
 	"github.com/jcrussell/ralph/internal/loop"
+	"github.com/jcrussell/ralph/internal/paths"
 	"github.com/jcrussell/ralph/internal/runs"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
@@ -137,7 +138,7 @@ func Render(ctx context.Context, repo string, since time.Time, w io.Writer) erro
 // since. A missing file is not an error; returns an empty slice.
 // Lines that fail to decode against loop.IterRecord are skipped.
 func readSummary(repo string, since time.Time) ([]loop.IterRecord, error) {
-	path := filepath.Join(repo, ".ralph", "state", "logs", "summary.jsonl")
+	path := paths.New(repo).Summary()
 	f, err := os.Open(path) //nolint:gosec // path joined from repo root
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -254,7 +255,7 @@ func writeCommits(ctx context.Context, repo string, since time.Time, w io.Writer
 // ----- Incidents -----------------------------------------------------
 
 func writeIncidents(repo string, since time.Time, w io.Writer) error {
-	dir := filepath.Join(repo, ".ralph", "state", "incidents")
+	dir := paths.New(repo).IncidentsDir()
 	_, _ = fmt.Fprintln(w, "## Incidents")
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -308,7 +309,7 @@ func firstHeader(path string) string {
 // ----- State distribution + cost (from manifests) -------------------
 
 func readManifests(repo string, since time.Time) ([]runs.Manifest, error) {
-	dir := filepath.Join(repo, ".ralph", "state", "runs")
+	dir := paths.New(repo).RunsDir()
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil

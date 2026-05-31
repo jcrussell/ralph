@@ -10,7 +10,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,8 +18,6 @@ import (
 
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
-
-const logsRel = ".ralph/state/logs"
 
 // Options is the three-part command shape's Options struct.
 type Options struct {
@@ -85,12 +82,11 @@ debug a failed iteration or to verify what the runner actually saw.
 }
 
 func run(_ context.Context, opts *Options) error {
-	repo, err := opts.F.RepoRoot()
+	p, err := opts.F.Paths()
 	if err != nil {
 		return err
 	}
-	dir := filepath.Join(repo, logsRel)
-	rootFS := os.DirFS(dir)
+	rootFS := os.DirFS(p.LogsDir())
 	return Render(rootFS, opts.Iter, opts.TailLines, opts.F.IOStreams.Out)
 }
 

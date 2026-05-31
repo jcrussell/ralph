@@ -28,6 +28,7 @@ import (
 	"github.com/jcrussell/ralph/internal/atomicfile"
 	"github.com/jcrussell/ralph/internal/fsm"
 	"github.com/jcrussell/ralph/internal/log"
+	"github.com/jcrussell/ralph/internal/paths"
 )
 
 // SchemaVersion is the on-disk schema version for manifest.json.
@@ -91,7 +92,7 @@ func (r *Run) Dir() string { return r.dir }
 
 // runsDir is <repoRoot>/.ralph/state/runs.
 func runsDir(repoRoot string) string {
-	return filepath.Join(repoRoot, ".ralph", "state", "runs")
+	return paths.New(repoRoot).RunsDir()
 }
 
 // Begin creates a new run directory under repoRoot and writes the

@@ -23,6 +23,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/jcrussell/ralph/internal/paths"
 )
 
 // Result captures one hook invocation.
@@ -68,7 +70,7 @@ const (
 
 // Dir returns the .ralph/hooks directory under repoRoot.
 func Dir(repoRoot string) string {
-	return filepath.Join(repoRoot, ".ralph", "hooks")
+	return paths.New(repoRoot).HooksDir()
 }
 
 // GlobalPath returns the absolute path of a global hook by name

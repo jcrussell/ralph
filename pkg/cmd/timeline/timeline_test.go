@@ -70,9 +70,11 @@ func scaffoldRunWith(t *testing.T, transitions []runs.Transition, narratives map
 func factoryAt(t *testing.T, repo string) (*cmdutil.Factory, *iostreams.TestBuffers) {
 	t.Helper()
 	ios, bufs := iostreams.Test()
+	rootFn := func() (string, error) { return repo, nil }
 	f := &cmdutil.Factory{
 		IOStreams: ios,
-		RepoRoot:  func() (string, error) { return repo, nil },
+		RepoRoot:  rootFn,
+		Paths:     cmdutil.LazyPaths(rootFn),
 	}
 	return f, bufs
 }

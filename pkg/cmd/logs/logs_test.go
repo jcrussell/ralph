@@ -36,7 +36,8 @@ func newRepoWithRecords(t *testing.T, records []map[string]any) (repo string) {
 
 func newFactory(repo string) (*cmdutil.Factory, *iostreams.TestBuffers) {
 	io, bufs := iostreams.Test()
-	return &cmdutil.Factory{IOStreams: io, RepoRoot: func() (string, error) { return repo, nil }}, bufs
+	rootFn := func() (string, error) { return repo, nil }
+	return &cmdutil.Factory{IOStreams: io, RepoRoot: rootFn, Paths: cmdutil.LazyPaths(rootFn)}, bufs
 }
 
 func TestDefaultPrintsNarrative(t *testing.T) {

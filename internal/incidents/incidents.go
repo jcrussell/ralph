@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jcrussell/ralph/internal/atomicfile"
+	"github.com/jcrussell/ralph/internal/paths"
 )
 
 // ErrUnknownKind is returned by Write when Kind isn't a defined
@@ -54,7 +55,7 @@ type Incident struct {
 
 // Dir is the on-disk directory of incidents under repoRoot.
 func Dir(repoRoot string) string {
-	return filepath.Join(repoRoot, ".ralph", "state", "incidents")
+	return paths.New(repoRoot).IncidentsDir()
 }
 
 // Write persists inc to .ralph/state/incidents/ and returns the

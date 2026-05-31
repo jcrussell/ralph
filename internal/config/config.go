@@ -16,6 +16,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/jcrussell/ralph/internal/paths"
 )
 
 // Config holds every tunable knob ralph exposes. Field zero-values are
@@ -138,7 +140,7 @@ func Load(repoRoot string) (*Config, error) {
 		}
 	}
 	if repoRoot != "" {
-		if err := mergeFile(cfg, filepath.Join(repoRoot, ".ralph", "config.toml")); err != nil {
+		if err := mergeFile(cfg, paths.New(repoRoot).Config()); err != nil {
 			return nil, err
 		}
 	}

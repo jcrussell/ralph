@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/jcrussell/ralph/internal/atomicfile"
+	"github.com/jcrussell/ralph/internal/paths"
 )
 
 // SchemaVersion is the on-disk schema version for FSM (byob-runtime-
@@ -38,7 +39,7 @@ type FSM struct {
 
 // Path is the on-disk location of fsm.json under repoRoot.
 func Path(repoRoot string) string {
-	return filepath.Join(repoRoot, ".ralph", "state", "fsm.json")
+	return paths.New(repoRoot).FSM()
 }
 
 // Fresh returns the start-of-life FSM. Used when fsm.json is absent.

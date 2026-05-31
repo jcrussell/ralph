@@ -14,6 +14,7 @@ import (
 	"github.com/jcrussell/ralph/internal/hooks"
 	"github.com/jcrussell/ralph/internal/lock"
 	ralphlog "github.com/jcrussell/ralph/internal/log"
+	"github.com/jcrussell/ralph/internal/paths"
 	"github.com/jcrussell/ralph/internal/runner"
 	"github.com/jcrussell/ralph/internal/runs"
 	"github.com/jcrussell/ralph/pkg/iostreams"
@@ -97,26 +98,25 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 		opts.Clock = defaultClock{}
 	}
 
+	p := paths.New(opts.Repo)
+
 	// Acquire the repo lock first — bail fast if another orchestrator
 	// is running. ErrHeld is surfaced via %w so callers can distinguish.
-	lockPath := filepath.Join(opts.Repo, ".ralph", "state", "pid.lock")
-	l, err := lock.Acquire(lockPath)
+	l, err := lock.Acquire(p.PidLock())
 	if err != nil {
 		return fsm.Outcome{}, fmt.Errorf("loop: acquire lock: %w", err)
 	}
 	defer func() { _ = l.Release() }()
 
 	// Open slog → orchestrator.log; warnings & errors go here.
-	logPath := filepath.Join(opts.Repo, ".ralph", "state", "logs", "orchestrator.log")
-	logger, logCloser, err := ralphlog.NewSlog(logPath, slog.LevelInfo)
+	logger, logCloser, err := ralphlog.NewSlog(p.OrchestratorLog(), slog.LevelInfo)
 	if err != nil {
 		return fsm.Outcome{}, fmt.Errorf("loop: open orchestrator.log: %w", err)
 	}
 	defer func() { _ = logCloser.Close() }()
 
 	// Open summary.jsonl once for the whole run.
-	sumPath := filepath.Join(opts.Repo, ".ralph", "state", "logs", "summary.jsonl")
-	sum, err := ralphlog.OpenJSONL(sumPath)
+	sum, err := ralphlog.OpenJSONL(p.Summary())
 	if err != nil {
 		return fsm.Outcome{}, fmt.Errorf("loop: open summary.jsonl: %w", err)
 	}
