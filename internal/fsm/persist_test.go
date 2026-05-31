@@ -46,6 +46,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		CumulativeCostUSD:       1.25,
 		CumulativeWallclockSecs: 600,
 		LastGateResult:          "passed",
+		ConsecutiveGateFail:     3,
 	}
 	if err := in.Save(repo); err != nil {
 		t.Fatalf("Save: %v", err)

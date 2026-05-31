@@ -25,3 +25,21 @@ func (f *FSM) ObserveTransition(next State) {
 		f.ConsecutiveDirty = 0
 	}
 }
+
+// ObserveGate updates the consecutive gate-failure streak. Unlike
+// ConsecutiveDirty (a function of the state transition), the gate
+// pass/fail signal isn't visible in the transition shape, so the loop
+// calls this with the iteration's gate outcome:
+//   - ran && !passed → increment ConsecutiveGateFail
+//   - ran &&  passed → reset to 0
+//   - !ran           → unchanged (a skipped / not-run gate carries no
+//     signal, mirroring how a non-clean|dirty transition leaves
+//     ConsecutiveDirty alone)
+func (f *FSM) ObserveGate(ran, passed bool) {
+	switch {
+	case ran && passed:
+		f.ConsecutiveGateFail = 0
+	case ran && !passed:
+		f.ConsecutiveGateFail++
+	}
+}

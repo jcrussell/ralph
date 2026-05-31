@@ -42,6 +42,10 @@ type Vars struct {
 	RepoRoot   string
 	LastIter   any // opaque iteration record; templates access by field
 	GateResult string
+	// GateFailStreak is the count of consecutive gate failures
+	// (FSM.ConsecutiveGateFail), reset to 0 on the first gate pass. Lets a
+	// prompt back off or change tack after repeated red gates.
+	GateFailStreak int
 	// GateOutput is the tail of the previous iteration's gate-hook
 	// stdout, populated by the loop when a gate ran. Bounded to a
 	// few KB so a multi-MB perf table doesn't blow the context. Empty

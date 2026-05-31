@@ -48,3 +48,28 @@ func TestObserveTransition(t *testing.T) {
 		})
 	}
 }
+
+func TestObserveGate(t *testing.T) {
+	cases := []struct {
+		name        string
+		ran, passed bool
+		start, want int
+	}{
+		{"fail from zero increments", true, false, 0, 1},
+		{"fail again increments", true, false, 2, 3},
+		{"pass resets", true, true, 4, 0},
+		{"pass from zero stays zero", true, true, 0, 0},
+		{"not-run leaves streak (failed=false ignored)", false, false, 5, 5},
+		{"not-run leaves streak (passed=true ignored)", false, true, 5, 5},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := &FSM{ConsecutiveGateFail: c.start}
+			f.ObserveGate(c.ran, c.passed)
+			if f.ConsecutiveGateFail != c.want {
+				t.Errorf("ObserveGate(ran=%v, passed=%v) start=%d = %d, want %d",
+					c.ran, c.passed, c.start, f.ConsecutiveGateFail, c.want)
+			}
+		})
+	}
+}

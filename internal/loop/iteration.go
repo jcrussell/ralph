@@ -291,6 +291,14 @@ func routeAndPersist(ctx context.Context, rc *runContext, prev fsm.Outcome, befo
 	if gate.Result != "" {
 		rc.fsm.LastGateResult = gate.Result
 	}
+	// Track the gate-failure streak. Only passed/failed are real "the gate
+	// ran" signals; skipped/not-run leave the streak untouched.
+	switch gate.Result {
+	case narrative.GatePassed:
+		rc.fsm.ObserveGate(true, true)
+	case narrative.GateFailed:
+		rc.fsm.ObserveGate(true, false)
+	}
 	if err := rc.fsm.Save(rc.repo); err != nil {
 		return next, fmt.Errorf("loop: save fsm: %w", err)
 	}
@@ -377,14 +385,15 @@ func emitIterLine(rc *runContext, rec IterRecord) {
 func composePrompt(ctx context.Context, rc *runContext, prev fsm.Outcome, headSHA string) (string, error) {
 	clean, _ := git.Clean(ctx, rc.repo)
 	vars := promptlib.Vars{
-		Iter:       rc.fsm.Iter,
-		State:      string(prev.State),
-		PrevState:  string(prev.State),
-		GitDirty:   !clean,
-		GitHead:    headSHA,
-		RepoRoot:   rc.repo,
-		GateResult: rc.lastGateResult,
-		GateOutput: gateOutputTail(rc.lastGateStdoutFile),
+		Iter:           rc.fsm.Iter,
+		State:          string(prev.State),
+		PrevState:      string(prev.State),
+		GitDirty:       !clean,
+		GitHead:        headSHA,
+		RepoRoot:       rc.repo,
+		GateResult:     rc.lastGateResult,
+		GateOutput:     gateOutputTail(rc.lastGateStdoutFile),
+		GateFailStreak: rc.fsm.ConsecutiveGateFail,
 		Review: promptlib.ReviewVars{
 			Branch: rc.fsm.ReviewBranch,
 			Base:   rc.fsm.ReviewBase,

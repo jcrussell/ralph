@@ -35,6 +35,7 @@ type FSM struct {
 	CumulativeCostUSD       float64 `json:"cumulative_cost_usd"`
 	CumulativeWallclockSecs int     `json:"cumulative_wallclock_secs"`
 	LastGateResult          string  `json:"last_gate_result,omitempty"`
+	ConsecutiveGateFail     int     `json:"consecutive_gate_fail"`
 }
 
 // Path is the on-disk location of fsm.json under repoRoot.

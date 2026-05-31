@@ -18,17 +18,17 @@ func mapFS(files map[string]string) fstest.MapFS {
 
 func TestRenderVariables(t *testing.T) {
 	fsys := mapFS(map[string]string{
-		"clean.md": "iter={{.Iter}} state={{.State}} prev={{.PrevState}} dirty={{.GitDirty}} head={{.GitHead}} root={{.RepoRoot}} gate={{.GateResult}}",
+		"clean.md": "iter={{.Iter}} state={{.State}} prev={{.PrevState}} dirty={{.GitDirty}} head={{.GitHead}} root={{.RepoRoot}} gate={{.GateResult}} gatefails={{.GateFailStreak}}",
 	})
 	out, err := Render(fsys, "clean", Vars{
 		Iter: 4, State: "clean", PrevState: "dirty",
 		GitDirty: false, GitHead: "abc123", RepoRoot: "/r",
-		GateResult: "passed",
+		GateResult: "passed", GateFailStreak: 2,
 	})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	want := "iter=4 state=clean prev=dirty dirty=false head=abc123 root=/r gate=passed"
+	want := "iter=4 state=clean prev=dirty dirty=false head=abc123 root=/r gate=passed gatefails=2"
 	if out != want {
 		t.Errorf("Render = %q, want %q", out, want)
 	}
