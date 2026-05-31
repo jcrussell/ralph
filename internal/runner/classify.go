@@ -57,6 +57,27 @@ const (
 	ModeUnknown Mode = "unknown"
 )
 
+// Error-text substrings scanned case-insensitively in both the runner's
+// stderr and the envelope's api_error_status/result text. Lifted to
+// consts so the two scan sites — Classify's stderr switch and
+// matchAPIErrorText — reference one source of truth and cannot drift
+// apart. Substrings used by only one site (underscore variants, OOM
+// phrases, "too many requests") stay inline at their single use.
+const (
+	txtCreditBalance      = "credit balance"
+	txtInsufficientCredit = "insufficient credit"
+	txtUsageLimit         = "usage limit"
+	txtQuotaExceeded      = "quota exceeded"
+	txtSessionLimit       = "session limit"
+	txtWeeklyLimit        = "weekly limit"
+	txtFiveHourLimit      = "5-hour limit"
+	txtInvalidAPIKey      = "invalid api key"
+	txtAuthentication     = "authentication"
+	txtUnauthorized       = "unauthorized"
+	txtRateLimit          = "rate limit"
+	txtOverloaded         = "overloaded"
+)
+
 // Terminal reports whether m forces the FSM into failed{m}. ModeAuth,
 // ModeBudget, and ModeQuota are the intrinsically terminal modes —
 // ModeDeadSession only escalates after dead_session_threshold hits
@@ -110,24 +131,24 @@ func Classify(s *Session) Mode {
 	// before overloaded before oom.
 	low := strings.ToLower(s.Stderr + "\n" + s.StderrTail)
 	switch {
-	case strings.Contains(low, "credit balance") || strings.Contains(low, "insufficient credit"):
+	case strings.Contains(low, txtCreditBalance) || strings.Contains(low, txtInsufficientCredit):
 		return ModeBudget
-	case strings.Contains(low, "usage limit"),
-		strings.Contains(low, "5-hour limit"),
-		strings.Contains(low, "weekly limit"),
-		strings.Contains(low, "session limit"),
-		strings.Contains(low, "quota exceeded"):
+	case strings.Contains(low, txtUsageLimit),
+		strings.Contains(low, txtFiveHourLimit),
+		strings.Contains(low, txtWeeklyLimit),
+		strings.Contains(low, txtSessionLimit),
+		strings.Contains(low, txtQuotaExceeded):
 		// Best-guess substrings for claude CLI quota-exhaustion
 		// errors (5-hour window, weekly cap, session cap). Refine
 		// when a real quota failure is captured — see ralph-ii3.
 		return ModeQuota
-	case strings.Contains(low, "invalid api key"),
-		strings.Contains(low, "authentication"),
-		strings.Contains(low, "unauthorized"):
+	case strings.Contains(low, txtInvalidAPIKey),
+		strings.Contains(low, txtAuthentication),
+		strings.Contains(low, txtUnauthorized):
 		return ModeAuth
-	case strings.Contains(low, "rate limit"), strings.Contains(low, "too many requests"):
+	case strings.Contains(low, txtRateLimit), strings.Contains(low, "too many requests"):
 		return ModeRateLimit
-	case strings.Contains(low, "overloaded"):
+	case strings.Contains(low, txtOverloaded):
 		return ModeModelOverloaded
 	case strings.Contains(low, "killed") && strings.Contains(low, "memory"),
 		strings.Contains(low, "out of memory"),
@@ -193,23 +214,23 @@ func classifyAPIError(v any) Mode {
 func matchAPIErrorText(s string) Mode {
 	low := strings.ToLower(s)
 	switch {
-	case strings.Contains(low, "credit balance"), strings.Contains(low, "insufficient credit"):
+	case strings.Contains(low, txtCreditBalance), strings.Contains(low, txtInsufficientCredit):
 		return ModeBudget
 	case strings.Contains(low, "quota_exceeded"),
-		strings.Contains(low, "quota exceeded"),
+		strings.Contains(low, txtQuotaExceeded),
 		strings.Contains(low, "usage_limit"),
-		strings.Contains(low, "usage limit"),
+		strings.Contains(low, txtUsageLimit),
 		strings.Contains(low, "session_limit"),
-		strings.Contains(low, "session limit"),
+		strings.Contains(low, txtSessionLimit),
 		strings.Contains(low, "monthly usage"),
-		strings.Contains(low, "weekly limit"),
-		strings.Contains(low, "5-hour limit"):
+		strings.Contains(low, txtWeeklyLimit),
+		strings.Contains(low, txtFiveHourLimit):
 		return ModeQuota
-	case strings.Contains(low, "authentication"), strings.Contains(low, "invalid api key"), strings.Contains(low, "unauthorized"):
+	case strings.Contains(low, txtAuthentication), strings.Contains(low, txtInvalidAPIKey), strings.Contains(low, txtUnauthorized):
 		return ModeAuth
-	case strings.Contains(low, "rate limit"), strings.Contains(low, "rate_limit"):
+	case strings.Contains(low, txtRateLimit), strings.Contains(low, "rate_limit"):
 		return ModeRateLimit
-	case strings.Contains(low, "overloaded"):
+	case strings.Contains(low, txtOverloaded):
 		return ModeModelOverloaded
 	}
 	return ""

@@ -210,6 +210,13 @@ func (r *Runner) unitBase() string {
 	return fmt.Sprintf("ralph-%d-%d", os.Getpid(), n)
 }
 
+// Envelope JSON keys read from more than one map (top-level and the
+// nested usage{} object); named so the two reads stay in lockstep.
+const (
+	keyInputTokens  = "input_tokens"
+	keyOutputTokens = "output_tokens"
+)
+
 // parseEnvelope returns nil when stdout is not a valid JSON object,
 // matching the Python reference behavior.
 func parseEnvelope(stdout string) *Envelope {
@@ -236,14 +243,15 @@ func parseEnvelope(stdout string) *Envelope {
 	}
 	e.APIErrorStatus = raw["api_error_status"]
 
-	// Tokens may be at top-level or under usage{}.
-	e.InputTokens = readInt(raw, "input_tokens")
-	e.OutputTokens = readInt(raw, "output_tokens")
+	// Tokens may be at top-level or under usage{}. The keys are named
+	// consts because each is read from two maps (top-level + usage).
+	e.InputTokens = readInt(raw, keyInputTokens)
+	e.OutputTokens = readInt(raw, keyOutputTokens)
 	if usage, ok := raw["usage"].(map[string]any); ok {
-		if v := readInt(usage, "input_tokens"); v != 0 {
+		if v := readInt(usage, keyInputTokens); v != 0 {
 			e.InputTokens = v
 		}
-		if v := readInt(usage, "output_tokens"); v != 0 {
+		if v := readInt(usage, keyOutputTokens); v != 0 {
 			e.OutputTokens = v
 		}
 	}
