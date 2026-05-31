@@ -82,12 +82,16 @@ func TestScaffoldCreatesExpectedTree(t *testing.T) {
 		t.Errorf("clean.md is executable; should be 0644")
 	}
 
-	if !strings.Contains(bufs.Out.String(), "created") || !strings.Contains(bufs.Out.String(), "skipped") {
-		// Should report at least one created and zero skipped.
-		t.Logf("summary: %s", bufs.Out.String())
+	// Summary and per-file chatter both go to ErrOut; stdout stays clean.
+	if bufs.Out.String() != "" {
+		t.Errorf("stdout should be empty, got %q", bufs.Out.String())
 	}
-	if !strings.Contains(bufs.Out.String(), "0 skipped") {
-		t.Errorf("first run should report 0 skipped, got %q", bufs.Out.String())
+	if !strings.Contains(bufs.ErrOut.String(), "created") || !strings.Contains(bufs.ErrOut.String(), "skipped") {
+		// Should report at least one created and zero skipped.
+		t.Logf("summary: %s", bufs.ErrOut.String())
+	}
+	if !strings.Contains(bufs.ErrOut.String(), "0 skipped") {
+		t.Errorf("first run should report 0 skipped, got %q", bufs.ErrOut.String())
 	}
 }
 
@@ -116,9 +120,9 @@ func TestScaffoldSkipsExistingNoForce(t *testing.T) {
 	if string(b) != "USER CONTENT" {
 		t.Errorf("user content was overwritten without --force: got %q", b)
 	}
-	// Summary reports skips.
-	if !strings.Contains(bufs.Out.String(), "0 created") {
-		t.Errorf("second run should report 0 created, got %q", bufs.Out.String())
+	// Summary reports skips on ErrOut.
+	if !strings.Contains(bufs.ErrOut.String(), "0 created") {
+		t.Errorf("second run should report 0 created, got %q", bufs.ErrOut.String())
 	}
 }
 

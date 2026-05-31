@@ -120,15 +120,26 @@ func TestRunMissingHook(t *testing.T) {
 }
 
 func TestValidateRejectsBadEnv(t *testing.T) {
-	opts := &Options{ExtraEnv: []string{"A=1", "B=2"}}
+	opts := &Options{Path: "some/hook", ExtraEnv: []string{"A=1", "B=2"}}
 	if err := opts.Validate(); err != nil {
 		t.Errorf("valid pairs rejected: %v", err)
 	}
-	opts = &Options{ExtraEnv: []string{"BAD"}}
+	opts = &Options{Path: "some/hook", ExtraEnv: []string{"BAD"}}
 	err := opts.Validate()
 	var fe *cmdutil.FlagError
 	if !errors.As(err, &fe) {
 		t.Errorf("invalid pair: err = %v, want FlagError", err)
+	}
+}
+
+func TestValidateRejectsEmptyPath(t *testing.T) {
+	for _, path := range []string{"", "   "} {
+		opts := &Options{Path: path}
+		err := opts.Validate()
+		var fe *cmdutil.FlagError
+		if !errors.As(err, &fe) {
+			t.Errorf("Path = %q: err = %v, want FlagError", path, err)
+		}
 	}
 }
 

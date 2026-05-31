@@ -32,6 +32,11 @@ type Options struct {
 // Validate enforces flag-value invariants before any side effects.
 // Errors are FlagErrors so the runner maps them to exit code 2.
 func (o *Options) Validate() error {
+	// Syntactic path checks only — containment under .ralph/hooks/ needs
+	// the repo root and so stays in run()/resolvePath() after RepoRoot().
+	if strings.TrimSpace(o.Path) == "" {
+		return cmdutil.FlagErrorf("hook path must not be empty")
+	}
 	if o.State != "" && !fsm.State(o.State).Valid() {
 		return cmdutil.FlagErrorf("unknown --state %q", o.State)
 	}

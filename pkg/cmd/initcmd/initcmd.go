@@ -100,7 +100,9 @@ func scaffold(repo string, opts *Options) error {
 			s.skipped++
 		}
 	}
-	_, _ = fmt.Fprintf(io.Out, "%d created, %d skipped\n", s.created, s.skipped)
+	// Summary is chatter, not data — keep stdout clean when piped
+	// (byob-iostreams.3).
+	_, _ = fmt.Fprintf(io.ErrOut, "%d created, %d skipped\n", s.created, s.skipped)
 	return nil
 }
 

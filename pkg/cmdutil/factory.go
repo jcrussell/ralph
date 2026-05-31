@@ -42,8 +42,10 @@ type Factory struct {
 	// commands that don't need it (byob-config.3).
 	Config func() (*config.Config, error)
 
-	// Lazy fields added as subsystems land:
-	//   Store      func() (store.Store, error)
+	// Future expensive dependencies belong here as lazy closures,
+	// matching the RepoRoot/Config pattern above. (Ralph deliberately
+	// has no Store: it persists via bd + JSONL, not SQL — see the
+	// storage-rules memory and the byob-storage deviation.)
 }
 
 // NewFactory builds the default Factory: real iostreams, an eager
