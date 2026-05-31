@@ -514,6 +514,48 @@ func TestRun_HooksRunInOrder(t *testing.T) {
 	}
 }
 
+// A failing post-iteration hook is recoverable: the iteration's work is
+// already persisted, so Run must not abort, and the error must be logged
+// to orchestrator.log via slog (no ErrOut spam). We trigger a hook error
+// by installing a non-executable hook file (Run reports it as an error,
+// distinct from a non-zero exit code which is not an error).
+func TestRun_PostIterationHookErrorLoggedNonFatal(t *testing.T) {
+	repo := scaffoldRepo(t)
+	ios, bufs := iostreams.Test()
+	opts := baseOpts(t, repo)
+	opts.IO = ios
+	opts.Once = true
+	opts.DryRun = true
+	opts.BD = &fakeBD{ReadyByLabel: map[string][]bd.Issue{"": {{ID: "x"}}}}
+	opts.Runner = &fakeRunner{}
+	opts.Clock = newFakeClock()
+
+	// Non-executable hook → hooks.Run returns an error, not a skip.
+	hookPath := filepath.Join(repo, ".ralph", "hooks", "post-iteration")
+	if err := os.MkdirAll(filepath.Dir(hookPath), 0o755); err != nil {
+		t.Fatalf("mkdir hook: %v", err)
+	}
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\ntrue\n"), 0o644); err != nil {
+		t.Fatalf("write hook: %v", err)
+	}
+
+	if _, err := Run(context.Background(), opts); err != nil {
+		t.Fatalf("Run must not be aborted by a failing post-iteration hook: %v", err)
+	}
+
+	logPath := filepath.Join(repo, ".ralph", "state", "logs", "orchestrator.log")
+	b, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read orchestrator.log: %v", err)
+	}
+	if !strings.Contains(string(b), "post-iteration hook error") {
+		t.Errorf("orchestrator.log missing post-iteration hook error; got:\n%s", b)
+	}
+	if strings.Contains(bufs.ErrOut.String(), "post-iteration hook error") {
+		t.Errorf("post-iteration hook error must not spam ErrOut; got:\n%s", bufs.ErrOut.String())
+	}
+}
+
 // A normal iteration emits one progress line on ErrOut, matching the
 // `iter NNNN  <narrative>` shape that `ralph logs` uses by default.
 // summary.jsonl stays the source of truth — ErrOut is a live mirror.

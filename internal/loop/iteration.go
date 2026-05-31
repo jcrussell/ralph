@@ -173,13 +173,23 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 		return prev, fmt.Errorf("loop: write iter json: %w", werr)
 	}
 
-	// 7. Global post-iteration hook (stdin = iter json).
+	// 7. Global post-iteration hook (stdin = iter json). Best-effort: a
+	// failure here is recoverable — the iteration's work is already
+	// persisted (iter json above, summary below), so log and continue
+	// rather than abort the loop. This is unlike the pre-iteration hook,
+	// whose error is fatal because it gates the runner. Mirrors the
+	// enter/exit hook convention: slog WarnContext, no ErrOut spam.
 	postEnv := buildHookEnv(rc, hooks.PhaseNone, "")
 	postEnv.IterJSON = rc.paths.json
 	postEnv.PromptFile = rc.paths.prompt
 	if f, oerr := os.Open(rc.paths.json); oerr == nil { //nolint:gosec // path joined from rc.repo + state-controlled stem
-		_, _ = hooks.Run(ctx, hooks.GlobalPath(rc.repo, "post-iteration"), postEnv, f, nil, nil)
+		_, hErr := hooks.Run(ctx, hooks.GlobalPath(rc.repo, "post-iteration"), postEnv, f, nil, nil)
 		_ = f.Close()
+		if hErr != nil {
+			rc.log.WarnContext(ctx, "post-iteration hook error", "err", hErr)
+		}
+	} else {
+		rc.log.WarnContext(ctx, "post-iteration hook: open iter json", "err", oerr)
 	}
 
 	// 8. Compute bd diff for narrative.
