@@ -19,22 +19,40 @@ type IOStreams struct {
 	stdoutIsTTY bool
 	stderrIsTTY bool
 
-	cs *ColorScheme
+	cs    *ColorScheme
+	errCS *ColorScheme
 }
 
 // System returns the IOStreams backed by os.Stdin/Stdout/Stderr with
-// TTY detection populated. Color is enabled when stdout is a TTY and
-// NO_COLOR is unset.
+// TTY detection populated. Out color is enabled when stdout is a TTY and
+// NO_COLOR is unset; ErrOut color is gated on stderr independently so the
+// two streams color correctly under split redirection (e.g. 2>file).
 func System() *IOStreams {
 	stdoutTTY := term.IsTerminal(int(os.Stdout.Fd()))
+	stderrTTY := term.IsTerminal(int(os.Stderr.Fd()))
+	allow := EnvAllowsColor()
 	return &IOStreams{
 		In:          os.Stdin,
 		Out:         os.Stdout,
 		ErrOut:      os.Stderr,
 		stdinIsTTY:  term.IsTerminal(int(os.Stdin.Fd())),
 		stdoutIsTTY: stdoutTTY,
-		stderrIsTTY: term.IsTerminal(int(os.Stderr.Fd())),
-		cs:          NewColorScheme(stdoutTTY && EnvAllowsColor()),
+		stderrIsTTY: stderrTTY,
+		cs:          NewColorScheme(stdoutTTY && allow),
+		errCS:       NewColorScheme(stderrTTY && allow),
+	}
+}
+
+// NewIOStreams returns an IOStreams over caller-supplied readers and
+// writers. TTY flags are false and both color schemes are disabled — the
+// caller opts in (e.g. the run TUI wiring a redirected inner stream).
+func NewIOStreams(in io.Reader, out, errOut io.Writer) *IOStreams {
+	return &IOStreams{
+		In:     in,
+		Out:    out,
+		ErrOut: errOut,
+		cs:     NewColorScheme(false),
+		errCS:  NewColorScheme(false),
 	}
 }
 
@@ -48,6 +66,7 @@ func Test() (*IOStreams, *TestBuffers) {
 		Out:    &bufs.Out,
 		ErrOut: &bufs.ErrOut,
 		cs:     NewColorScheme(false),
+		errCS:  NewColorScheme(false),
 	}, bufs
 }
 
@@ -60,7 +79,7 @@ func (s *IOStreams) IsStdoutTTY() bool { return s.stdoutIsTTY }
 // IsStderrTTY reports whether stderr was a TTY at construction time.
 func (s *IOStreams) IsStderrTTY() bool { return s.stderrIsTTY }
 
-// SetStdoutTTY overrides the stdout TTY flag and re-derives the color
+// SetStdoutTTY overrides the stdout TTY flag and re-derives the Out color
 // scheme so callers that branch on either stay consistent. Intended for
 // tests that exercise TTY-adaptive renderers without a real terminal.
 func (s *IOStreams) SetStdoutTTY(v bool) {
@@ -68,5 +87,19 @@ func (s *IOStreams) SetStdoutTTY(v bool) {
 	s.cs = NewColorScheme(v && EnvAllowsColor())
 }
 
-// ColorScheme returns the color renderer attached to these streams.
+// SetStderrTTY overrides the stderr TTY flag and re-derives the ErrOut
+// color scheme. Symmetric with SetStdoutTTY for tests that exercise the
+// ErrOut color path without a real terminal.
+func (s *IOStreams) SetStderrTTY(v bool) {
+	s.stderrIsTTY = v
+	s.errCS = NewColorScheme(v && EnvAllowsColor())
+}
+
+// ColorScheme returns the Out color renderer, gated on stdout. Data
+// renderers (e.g. tableprinter) that write to Out use this.
 func (s *IOStreams) ColorScheme() *ColorScheme { return s.cs }
+
+// ErrColorScheme returns the ErrOut color renderer, gated on stderr.
+// Chatter and progress written to ErrOut use this so color tracks the
+// stream it lands on, independent of stdout.
+func (s *IOStreams) ErrColorScheme() *ColorScheme { return s.errCS }

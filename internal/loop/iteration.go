@@ -289,14 +289,14 @@ func recordSkippedIteration(rc *runContext, prev fsm.Outcome, reason string) err
 }
 
 // emitIterLine writes one progress line per iteration to ErrOut, in the
-// same shape `ralph logs` renders by default. When the attached color
+// same shape `ralph logs` renders by default. When the stderr-gated color
 // scheme is enabled, the gate token is colored. The summary.jsonl row
 // is untouched — only the bytes printed here carry any ANSI codes.
 func emitIterLine(rc *runContext, rec IterRecord) {
 	if rc.io == nil || rc.io.ErrOut == nil {
 		return
 	}
-	cs := rc.io.ColorScheme()
+	cs := rc.io.ErrColorScheme()
 	text := rec.Narrative
 	if cs != nil && cs.Enabled() {
 		text = strings.Replace(text, "gate green", "gate "+cs.Green("green"), 1)
