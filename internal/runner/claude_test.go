@@ -17,7 +17,7 @@ cat > /dev/null  # consume stdin
 echo '{"total_cost_usd": 0.42, "num_turns": 3, "subtype": "success", "usage": {"input_tokens": 1000, "output_tokens": 2500}}'
 exit 0
 `)
-	r := New(bin, nil, "")
+	r := New(bin, nil, "", "")
 	ctx := context.Background()
 	s, err := runForTest(t, r, ctx, "hello", t.TempDir(), nil)
 	if err != nil {
@@ -50,7 +50,7 @@ func TestRunLegacyCostKey(t *testing.T) {
 	bin := writeScript(t, `#!/bin/sh
 echo '{"cost_usd": 1.5, "input_tokens": 100, "output_tokens": 200}'
 `)
-	r := New(bin, nil, "")
+	r := New(bin, nil, "", "")
 	s, err := runForTest(t, r, context.Background(), "", t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -71,7 +71,7 @@ func TestRunNonZeroExitNoEnvelope(t *testing.T) {
 echo "boom" >&2
 exit 3
 `)
-	r := New(bin, nil, "")
+	r := New(bin, nil, "", "")
 	s, err := runForTest(t, r, context.Background(), "", t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -91,7 +91,7 @@ func TestRunStdinIsPrompt(t *testing.T) {
 	bin := writeScript(t, `#!/bin/sh
 exec cat   # echoes stdin to stdout
 `)
-	r := New(bin, nil, "")
+	r := New(bin, nil, "", "")
 	prompt := "the prompt body"
 	s, err := runForTest(t, r, context.Background(), prompt, t.TempDir(), nil)
 	if err != nil {
@@ -107,7 +107,7 @@ func TestRunPassesArgs(t *testing.T) {
 echo "$@" > "$RALPH_TEST_ARGS_OUT"
 `)
 	argsOut := filepath.Join(t.TempDir(), "args")
-	r := New(bin, []string{"--flag-a", "--flag-b=value"}, "")
+	r := New(bin, []string{"--flag-a", "--flag-b=value"}, "", "")
 	_, err := runForTest(t, r, context.Background(), "", t.TempDir(), []string{"RALPH_TEST_ARGS_OUT=" + argsOut})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -123,6 +123,47 @@ echo "$@" > "$RALPH_TEST_ARGS_OUT"
 	}
 }
 
+func TestRunModelAppendedWhenSet(t *testing.T) {
+	bin := writeScript(t, `#!/bin/sh
+echo "$@" > "$RALPH_TEST_ARGS_OUT"
+`)
+	argsOut := filepath.Join(t.TempDir(), "args")
+	r := New(bin, []string{"--flag-a"}, "sonnet", "")
+	_, err := runForTest(t, r, context.Background(), "", t.TempDir(), []string{"RALPH_TEST_ARGS_OUT=" + argsOut})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	b, err := os.ReadFile(argsOut)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	got := strings.TrimSpace(string(b))
+	want := "--flag-a --model sonnet"
+	if got != want {
+		t.Errorf("argv = %q, want %q", got, want)
+	}
+}
+
+func TestRunModelOmittedWhenUnset(t *testing.T) {
+	bin := writeScript(t, `#!/bin/sh
+echo "$@" > "$RALPH_TEST_ARGS_OUT"
+`)
+	argsOut := filepath.Join(t.TempDir(), "args")
+	r := New(bin, []string{"--flag-a"}, "", "")
+	_, err := runForTest(t, r, context.Background(), "", t.TempDir(), []string{"RALPH_TEST_ARGS_OUT=" + argsOut})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	b, err := os.ReadFile(argsOut)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	got := strings.TrimSpace(string(b))
+	if want := "--flag-a"; got != want {
+		t.Errorf("argv = %q, want %q (no --model)", got, want)
+	}
+}
+
 func TestRunTimeoutKills(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping timeout test in -short")
@@ -131,7 +172,7 @@ func TestRunTimeoutKills(t *testing.T) {
 sleep 30
 echo '{}'
 `)
-	r := New(bin, nil, "")
+	r := New(bin, nil, "", "")
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
 	start := time.Now()
@@ -151,7 +192,7 @@ func TestRunNonJSONStdout(t *testing.T) {
 	bin := writeScript(t, `#!/bin/sh
 echo "hello, not JSON"
 `)
-	r := New(bin, nil, "")
+	r := New(bin, nil, "", "")
 	s, err := runForTest(t, r, context.Background(), "", t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -169,7 +210,7 @@ func TestRunRateLimitEnvelopeReaches(t *testing.T) {
 echo '{"subtype": "error", "api_error_status": 429, "is_error": true}'
 exit 1
 `)
-	r := New(bin, nil, "")
+	r := New(bin, nil, "", "")
 	s, err := runForTest(t, r, context.Background(), "", t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -200,7 +241,7 @@ func TestRunQuotaEnvelopeClassifies(t *testing.T) {
 	bin := writeScript(t, `#!/bin/sh
 echo '{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"duration_ms":294,"num_turns":1,"result":"You'"'"'ve hit your org'"'"'s monthly usage limit","stop_reason":"stop_sequence"}'
 `)
-	r := New(bin, nil, "")
+	r := New(bin, nil, "", "")
 	s, err := runForTest(t, r, context.Background(), "", t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -228,7 +269,7 @@ func TestRunPreStartDeadline(t *testing.T) {
 	bin := writeScript(t, `#!/bin/sh
 echo '{}'
 `)
-	r := New(bin, nil, "")
+	r := New(bin, nil, "", "")
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
 	s, err := runForTest(t, r, ctx, "", t.TempDir(), nil)
@@ -244,7 +285,7 @@ echo '{}'
 }
 
 func TestRunMissingBinary(t *testing.T) {
-	r := New("/no/such/binary-12345", nil, "")
+	r := New("/no/such/binary-12345", nil, "", "")
 	_, err := runForTest(t, r, context.Background(), "", t.TempDir(), nil)
 	if err == nil {
 		t.Fatalf("Run: nil err, want missing-binary error")
@@ -273,7 +314,7 @@ echo '{}'
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	r := New("/path/to/claude", []string{"--dangerously-skip-permissions"}, "1G")
+	r := New("/path/to/claude", []string{"--dangerously-skip-permissions"}, "", "1G")
 	if _, err := runForTest(t, r, context.Background(), "", t.TempDir(), []string{"RALPH_TEST_ARGV_OUT=" + argvOut}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -331,7 +372,7 @@ echo '{}'
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	r := New("/path/to/claude", nil, "512m")
+	r := New("/path/to/claude", nil, "", "512m")
 	for i := 0; i < 3; i++ {
 		if _, err := runForTest(t, r, context.Background(), "", t.TempDir(), []string{"RALPH_TEST_ARGV_OUT=" + argvOut}); err != nil {
 			t.Fatalf("Run %d: %v", i, err)
@@ -394,7 +435,7 @@ printf 'err-one\n' >&2
 sleep 0.1
 printf 'err-two\n' >&2
 `)
-	r := New(bin, nil, "")
+	r := New(bin, nil, "", "")
 	logs := t.TempDir()
 	stdoutPath := filepath.Join(logs, "stdout")
 	stderrPath := filepath.Join(logs, "stderr")

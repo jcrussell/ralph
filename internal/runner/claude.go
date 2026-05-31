@@ -30,14 +30,21 @@ type Runner struct {
 
 // New returns a Runner. command is looked up on PATH if it's not an
 // absolute path. args are prepended to every invocation (e.g.
-// --dangerously-skip-permissions, --output-format=json). memLimit is
-// the systemd-run MemoryMax value (e.g. "7G", "512m"); empty disables
-// the scope wrapper so each Run execs command directly. Production
-// passes cfg.Loop.MemoryLimit; tests usually pass "".
-func New(command string, args []string, memLimit string) *Runner {
+// --dangerously-skip-permissions, --output-format=json). model, when
+// non-empty, is appended as `--model <model>` after args so operator
+// args still take precedence; empty omits the flag entirely (no
+// `--model ""`). memLimit is the systemd-run MemoryMax value (e.g.
+// "7G", "512m"); empty disables the scope wrapper so each Run execs
+// command directly. Production passes cfg.Loop.MemoryLimit; tests
+// usually pass "".
+func New(command string, args []string, model, memLimit string) *Runner {
+	a := append([]string(nil), args...)
+	if model != "" {
+		a = append(a, "--model", model)
+	}
 	return &Runner{
 		cmd:      command,
-		args:     append([]string(nil), args...),
+		args:     a,
 		memLimit: memLimit,
 	}
 }

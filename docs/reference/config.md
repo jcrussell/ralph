@@ -25,7 +25,7 @@ The repo-level file is scaffolded by `ralph init` with every section present and
 |-----------|----------|--------------------------------------------------------|---------|
 | `command` | string   | `"claude"`                                             | Binary to run. Looked up on PATH if not absolute. |
 | `args`    | []string | `["--dangerously-skip-permissions", "--output-format=json"]` | Args prepended to every invocation. The JSON-output flag is load-bearing — classifier reads `total_cost_usd`, `subtype`, `api_error_status` from the parsed envelope. |
-| `model`   | string   | `"opus"`                                               | Currently informational. Reserved for v2 multi-model routing. |
+| `model`   | string   | `"opus"`                                               | When set, appended as `--model <model>` after `args`, so explicit `args` take precedence. Empty omits the flag entirely. |
 
 ## `[gate]`
 
