@@ -82,6 +82,18 @@ func Compose(in Input) string {
 	return prefix + ": " + strings.Join(segs, ", ")
 }
 
+// FormatNarrative renders the default one-line `ralph logs` view for a
+// single iteration record: "iter NNNN  <narrative>", falling back to
+// the state name when the narrative is empty. It takes the record's
+// primitive fields rather than loop.IterRecord because the loop
+// package imports this one — a reversed dependency would cycle.
+func FormatNarrative(iter int, narr, state string) string {
+	if narr != "" {
+		return fmt.Sprintf("iter %04d  %s", iter, narr)
+	}
+	return fmt.Sprintf("iter %04d  %s", iter, state)
+}
+
 // joinIDs renders "verb <id>" for one bead, "verb <id1>, <id2>" for
 // two, and "verb <id1> +N more" once the list grows past two. Empty
 // list returns "".

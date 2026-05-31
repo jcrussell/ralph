@@ -187,18 +187,6 @@ func TestTimeline_JSONMode(t *testing.T) {
 	}
 }
 
-func TestParseSince(t *testing.T) {
-	if _, err := parseSince("invalid"); err == nil {
-		t.Error("invalid spec: nil err, want failure")
-	}
-	if _, err := parseSince("1h"); err != nil {
-		t.Errorf("1h: %v", err)
-	}
-	if _, err := parseSince("2026-05-14T12:00:00Z"); err != nil {
-		t.Errorf("RFC3339: %v", err)
-	}
-}
-
 func TestTimelineStateFlagComplete(t *testing.T) {
 	f := &cmdutil.Factory{IOStreams: iostreams.System()}
 	cmd := NewCmdTimeline(f, nil)

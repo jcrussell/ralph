@@ -5,7 +5,6 @@
 package timeline
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -18,6 +17,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jcrussell/ralph/internal/fsm"
+	ralphlog "github.com/jcrussell/ralph/internal/log"
+	"github.com/jcrussell/ralph/internal/loop"
 	"github.com/jcrussell/ralph/internal/runs"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
@@ -36,7 +37,7 @@ type Options struct {
 // Errors are FlagErrors so the runner maps them to exit code 2.
 func (o *Options) Validate() error {
 	if o.Since != "" {
-		if _, err := parseSince(o.Since); err != nil {
+		if _, err := cmdutil.ParseSince(o.Since); err != nil {
 			return cmdutil.FlagErrorf("--since: %v", err)
 		}
 	}
@@ -109,7 +110,7 @@ func run(_ context.Context, opts *Options) error {
 
 	since := time.Time{}
 	if opts.Since != "" {
-		since, _ = parseSince(opts.Since)
+		since, _ = cmdutil.ParseSince(opts.Since)
 	}
 
 	narrByIter, _ := loadNarratives(p.Summary())
@@ -137,18 +138,6 @@ func run(_ context.Context, opts *Options) error {
 	return nil
 }
 
-// parseSince mirrors pkg/cmd/report.parseSince — duration first, then
-// RFC3339. Kept here so the package has no cross-cmd dependency.
-func parseSince(spec string) (time.Time, error) {
-	if d, err := time.ParseDuration(spec); err == nil {
-		return time.Now().Add(-d), nil
-	}
-	if t, err := time.Parse(time.RFC3339, spec); err == nil {
-		return t, nil
-	}
-	return time.Time{}, fmt.Errorf("not a duration or RFC3339 timestamp: %q", spec)
-}
-
 // loadNarratives builds an iter→narrative map from summary.jsonl. A
 // missing file returns an empty map and no error — narrative is
 // optional context.
@@ -163,18 +152,14 @@ func loadNarratives(path string) (map[int]string, error) {
 	defer func() { _ = f.Close() }()
 
 	out := map[int]string{}
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	sc := ralphlog.NewSummaryScanner(f)
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {
 			continue
 		}
-		var rec struct {
-			Iter      int    `json:"iter"`
-			Narrative string `json:"narrative"`
-		}
-		if err := json.Unmarshal(line, &rec); err != nil {
+		rec, _, err := loop.DecodeRecord(line)
+		if err != nil {
 			continue // tolerate malformed lines; observability commands always do
 		}
 		if rec.Iter > 0 {

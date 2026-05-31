@@ -166,3 +166,13 @@ func TestComposeIsPure(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatNarrative(t *testing.T) {
+	if got := FormatNarrative(42, "claimed angr, gate green", "clean"); got != "iter 0042  claimed angr, gate green" {
+		t.Errorf("with narrative: got %q", got)
+	}
+	// Empty narrative falls back to the state name.
+	if got := FormatNarrative(7, "", "dirty"); got != "iter 0007  dirty" {
+		t.Errorf("empty narrative: got %q", got)
+	}
+}

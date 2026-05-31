@@ -16,33 +16,6 @@ import (
 	"github.com/jcrussell/ralph/pkg/iostreams"
 )
 
-func TestParseSinceDuration(t *testing.T) {
-	got, err := parseSince("1h")
-	if err != nil {
-		t.Fatalf("parseSince: %v", err)
-	}
-	if delta := time.Since(got); delta < 50*time.Minute || delta > 70*time.Minute {
-		t.Errorf("1h yielded since=%v (delta=%v)", got, delta)
-	}
-}
-
-func TestParseSinceRFC3339(t *testing.T) {
-	got, err := parseSince("2026-01-02T03:04:05Z")
-	if err != nil {
-		t.Fatalf("parseSince: %v", err)
-	}
-	want := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	if !got.Equal(want) {
-		t.Errorf("got %v, want %v", got, want)
-	}
-}
-
-func TestParseSinceInvalid(t *testing.T) {
-	if _, err := parseSince("eleven days ago"); err == nil {
-		t.Errorf("expected error for invalid spec")
-	}
-}
-
 func TestRenderHappyPath(t *testing.T) {
 	repo := t.TempDir()
 

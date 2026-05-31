@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jcrussell/ralph/internal/git"
+	ralphlog "github.com/jcrussell/ralph/internal/log"
 	"github.com/jcrussell/ralph/internal/loop"
 	"github.com/jcrussell/ralph/internal/paths"
 	"github.com/jcrussell/ralph/internal/runs"
@@ -40,7 +41,7 @@ type Options struct {
 // Validate enforces flag-value invariants before any side effects.
 // Errors are FlagErrors so the runner maps them to exit code 2.
 func (o *Options) Validate() error {
-	if _, err := parseSince(o.Since); err != nil {
+	if _, err := cmdutil.ParseSince(o.Since); err != nil {
 		return cmdutil.FlagErrorf("--since: %v", err)
 	}
 	return nil
@@ -87,22 +88,12 @@ a Go duration (24h, 7d → use 168h) or an RFC3339 timestamp.`,
 	return cmd
 }
 
-func parseSince(spec string) (time.Time, error) {
-	if d, err := time.ParseDuration(spec); err == nil {
-		return time.Now().Add(-d), nil
-	}
-	if t, err := time.Parse(time.RFC3339, spec); err == nil {
-		return t, nil
-	}
-	return time.Time{}, fmt.Errorf("not a duration or RFC3339 timestamp: %q", spec)
-}
-
 func run(ctx context.Context, opts *Options) error {
 	repo, err := opts.F.RepoRoot()
 	if err != nil {
 		return err
 	}
-	since, err := parseSince(opts.Since)
+	since, err := cmdutil.ParseSince(opts.Since)
 	if err != nil {
 		return err
 	}
@@ -148,15 +139,14 @@ func readSummary(repo string, since time.Time) ([]loop.IterRecord, error) {
 	}
 	defer func() { _ = f.Close() }()
 	var out []loop.IterRecord
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	sc := ralphlog.NewSummaryScanner(f)
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {
 			continue
 		}
-		var rec loop.IterRecord
-		if err := json.Unmarshal(line, &rec); err != nil {
+		rec, _, err := loop.DecodeRecord(line)
+		if err != nil {
 			continue // tolerate stray lines
 		}
 		if rec.Timestamp != "" {

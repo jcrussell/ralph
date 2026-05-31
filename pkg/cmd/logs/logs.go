@@ -16,7 +16,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	ralphlog "github.com/jcrussell/ralph/internal/log"
 	"github.com/jcrussell/ralph/internal/loop"
+	"github.com/jcrussell/ralph/internal/narrative"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
 
@@ -113,8 +115,7 @@ func scanFile(path string, opts *Options) error {
 }
 
 func emit(r io.Reader, opts *Options) error {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	sc := ralphlog.NewSummaryScanner(r)
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {
@@ -128,7 +129,7 @@ func emit(r io.Reader, opts *Options) error {
 }
 
 func emitLine(line []byte, opts *Options) error {
-	rec, raw, err := decode(line)
+	rec, raw, err := loop.DecodeRecord(line)
 	if err != nil {
 		// Skip unparseable lines but surface to ErrOut so they're not
 		// lost.
@@ -150,30 +151,9 @@ func emitLine(line []byte, opts *Options) error {
 		}
 		_, _ = fmt.Fprintf(opts.F.IOStreams.Out, "%s\n", pretty)
 	default:
-		_, _ = fmt.Fprintln(opts.F.IOStreams.Out, formatNarrative(rec))
+		_, _ = fmt.Fprintln(opts.F.IOStreams.Out, narrative.FormatNarrative(rec.Iter, rec.Narrative, rec.State))
 	}
 	return nil
-}
-
-// decode parses one summary.jsonl line into the canonical loop.IterRecord
-// and (in parallel) a raw map so unknown fields survive pretty-printing.
-func decode(line []byte) (loop.IterRecord, map[string]any, error) {
-	var raw map[string]any
-	if err := json.Unmarshal(line, &raw); err != nil {
-		return loop.IterRecord{}, nil, err
-	}
-	var rec loop.IterRecord
-	if err := json.Unmarshal(line, &rec); err != nil {
-		return loop.IterRecord{}, nil, err
-	}
-	return rec, raw, nil
-}
-
-func formatNarrative(rec loop.IterRecord) string {
-	if rec.Narrative != "" {
-		return fmt.Sprintf("iter %04d  %s", rec.Iter, rec.Narrative)
-	}
-	return fmt.Sprintf("iter %04d  %s", rec.Iter, rec.State)
 }
 
 // tailFile prints the entire file once, then polls for appends until
