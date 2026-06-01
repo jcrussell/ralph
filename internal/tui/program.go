@@ -40,10 +40,11 @@ func (o observer) Observe(s loop.Snapshot) { o.send.Send(metricsMsg{s: s}) }
 // orchestration needs. The redirected IOStreams (LoopIO) and metrics Observer
 // feed loop.Run; Run renders until quit; Done signals loop completion.
 type Program struct {
-	p   *tea.Program
-	ios *iostreams.IOStreams // inner redirected streams handed to loop.Run
-	lw  *logWriter
-	obs loop.Observer
+	p    *tea.Program
+	ios  *iostreams.IOStreams // inner redirected streams handed to loop.Run
+	lw   *logWriter
+	obs  loop.Observer
+	tail []string // pane lines captured at teardown, for the post-quit flush
 }
 
 // New builds the live-run Program over the operator's real streams. ios is
@@ -58,7 +59,7 @@ type Program struct {
 func New(ios *iostreams.IOStreams, extra ...tea.ProgramOption) *Program {
 	opts := append([]tea.ProgramOption{
 		tea.WithOutput(ios.ErrOut),
-		tea.WithInput(os.Stdin),
+		tea.WithInput(os.Stdin), //nolint:forbidigo // bubbletea reads keys from the real stdin; the TUI render target stays ErrOut (ralph-g3s.1)
 		tea.WithoutSignalHandler(),
 	}, extra...)
 
@@ -88,9 +89,20 @@ func (pg *Program) Observer() loop.Observer { return pg.obs }
 // then cancels the loop and waits. It returns tea's run error, if any.
 func (pg *Program) Run() error {
 	defer pg.lw.stop()
-	_, err := pg.p.Run()
+	final, err := pg.p.Run()
+	if m, ok := final.(model); ok {
+		pg.tail = m.logs.snapshot()
+	}
 	return err
 }
+
+// Tail returns the log lines the pane held at teardown, oldest first. The run
+// orchestration flushes these to the operator's real stderr after Run returns
+// so notices the loop emitted to its redirected ErrOut — a pre-loop refusal,
+// an early-return reset — survive the screen teardown: the program renders
+// inline and a fast early return can quit before the first frame paints. Empty
+// until Run has returned.
+func (pg *Program) Tail() []string { return pg.tail }
 
 // Done signals that loop.Run has reached its terminal outcome: it Sends a
 // doneMsg, which the model folds into tea.Quit so Run unblocks. Safe to call

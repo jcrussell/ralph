@@ -8,7 +8,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/jcrussell/ralph/internal/loop"
 	"github.com/jcrussell/ralph/pkg/iostreams"
 )
 
@@ -61,7 +60,11 @@ func TestObserverSendsMetricsMsg(t *testing.T) {
 func TestProgramObserverImplementsLoopObserver(t *testing.T) {
 	ios, _ := iostreams.Test()
 	pg := New(ios, tea.WithoutRenderer(), tea.WithInput(&bytes.Buffer{}))
-	var _ loop.Observer = pg.Observer()
+	// Observer()'s return type is loop.Observer by its signature; assert it is
+	// non-nil so loop.Run never receives a nil sink.
+	if pg.Observer() == nil {
+		t.Fatal("Observer must return a non-nil loop.Observer")
+	}
 	if pg.LoopIO() == nil {
 		t.Fatal("LoopIO must return the inner redirected streams")
 	}

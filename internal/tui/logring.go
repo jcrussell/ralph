@@ -66,3 +66,13 @@ func (r *logRing) content() string {
 
 // count reports how many lines are currently retained.
 func (r *logRing) count() int { return len(r.lines) }
+
+// snapshot returns a copy of the retained lines, oldest first. The program
+// captures it at teardown so the run orchestration can re-flush the pane tail
+// to the operator's real stderr after the TUI exits (program.go). It copies so
+// the caller never aliases the ring's backing array.
+func (r *logRing) snapshot() []string {
+	out := make([]string, len(r.lines))
+	copy(out, r.lines)
+	return out
+}

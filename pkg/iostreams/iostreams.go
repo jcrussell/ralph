@@ -79,6 +79,12 @@ func (s *IOStreams) IsStdoutTTY() bool { return s.stdoutIsTTY }
 // IsStderrTTY reports whether stderr was a TTY at construction time.
 func (s *IOStreams) IsStderrTTY() bool { return s.stderrIsTTY }
 
+// SetStdinTTY overrides the stdin TTY flag. Stdin carries no color scheme,
+// so unlike the Out/Err setters this only flips the flag. Intended for tests
+// that exercise stdin-TTY-gated behavior (e.g. the run TUI activation gate)
+// without a real terminal.
+func (s *IOStreams) SetStdinTTY(v bool) { s.stdinIsTTY = v }
+
 // SetStdoutTTY overrides the stdout TTY flag and re-derives the Out color
 // scheme so callers that branch on either stay consistent. Intended for
 // tests that exercise TTY-adaptive renderers without a real terminal.

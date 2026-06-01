@@ -3,11 +3,22 @@ package run
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jcrussell/ralph/internal/config"
+	"github.com/jcrussell/ralph/internal/fsm"
+	"github.com/jcrussell/ralph/internal/loop"
+	"github.com/jcrussell/ralph/internal/tui"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
+	"github.com/jcrussell/ralph/pkg/iostreams"
 )
+
+// *tui.Program is the production liveUI; pin the seam at compile time so a
+// signature drift in either side breaks the build, not a terminal at runtime.
+var _ liveUI = (*tui.Program)(nil)
 
 func TestOptionsValidate(t *testing.T) {
 	cases := []struct {
@@ -44,7 +55,7 @@ func TestNewCmdRunMetadata(t *testing.T) {
 	}
 	for _, name := range []string{
 		"once", "skip-gate", "dry-run", "fresh", "label",
-		"max-iterations", "timeout", "memory",
+		"max-iterations", "timeout", "memory", "no-tui",
 	} {
 		if c.Flags().Lookup(name) == nil {
 			t.Errorf("--%s flag missing", name)
@@ -171,5 +182,162 @@ func TestApplyOverrides(t *testing.T) {
 				t.Errorf("Loop = %+v, want %+v", cfg.Loop, tc.want)
 			}
 		})
+	}
+}
+
+// TestShouldUseTUI pins the activation gate: auto-on only when BOTH stdin and
+// stderr are TTYs and --no-tui is unset.
+func TestShouldUseTUI(t *testing.T) {
+	cases := []struct {
+		name             string
+		stdinTTY, errTTY bool
+		noTUI            bool
+		want             bool
+	}{
+		{"both TTY, flag unset", true, true, false, true},
+		{"both TTY, --no-tui", true, true, true, false},
+		{"stdin not TTY", false, true, false, false},
+		{"stderr not TTY", true, false, false, false},
+		{"neither TTY", false, false, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			io, _ := iostreams.Test()
+			io.SetStdinTTY(tc.stdinTTY)
+			io.SetStderrTTY(tc.errTTY)
+			if got := shouldUseTUI(io, &Options{NoTUI: tc.noTUI}); got != tc.want {
+				t.Errorf("shouldUseTUI = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// fakeUI is the scripted liveUI that exercises orchestrate without a terminal
+// (byob-testing.1). Its LoopIO ErrOut feeds an in-memory buffer that doubles
+// as the captured pane (Tail). Run blocks until Done unless quitEarly is set,
+// modeling a user q/Ctrl-C that fires before the loop finishes.
+type fakeUI struct {
+	ios       *iostreams.IOStreams
+	captured  *strings.Builder
+	quitEarly bool
+
+	doneOnce sync.Once
+	doneCh   chan struct{}
+}
+
+func newFakeUI(quitEarly bool) *fakeUI {
+	buf := &strings.Builder{}
+	return &fakeUI{
+		ios:       iostreams.NewIOStreams(nil, buf, buf),
+		captured:  buf,
+		quitEarly: quitEarly,
+		doneCh:    make(chan struct{}),
+	}
+}
+
+func (f *fakeUI) LoopIO() *iostreams.IOStreams { return f.ios }
+func (f *fakeUI) Observer() loop.Observer      { return noopObserver{} }
+func (f *fakeUI) Done()                        { f.doneOnce.Do(func() { close(f.doneCh) }) }
+
+func (f *fakeUI) Run() error {
+	if f.quitEarly {
+		return nil
+	}
+	<-f.doneCh
+	return nil
+}
+
+func (f *fakeUI) Tail() []string {
+	s := strings.TrimRight(f.captured.String(), "\n")
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
+}
+
+type noopObserver struct{}
+
+func (noopObserver) Observe(loop.Snapshot) {}
+
+// TestOrchestrateLoopCompletes is acceptance (a): the loop reaches a terminal
+// outcome, signals Done so the UI quits, and the collected outcome maps to the
+// exit code — done{*} -> nil, failed{*} -> ExitCodeError.
+func TestOrchestrateLoopCompletes(t *testing.T) {
+	t.Run("done -> exit 0", func(t *testing.T) {
+		ui := newFakeUI(false)
+		run := func(context.Context, loop.Options) (fsm.Outcome, error) {
+			return fsm.Outcome{State: fsm.StateDone, Reason: fsm.ReasonQueueEmpty}, nil
+		}
+		if err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{}); err != nil {
+			t.Errorf("orchestrate = %v, want nil", err)
+		}
+	})
+	t.Run("failed -> exit code 1", func(t *testing.T) {
+		ui := newFakeUI(false)
+		run := func(context.Context, loop.Options) (fsm.Outcome, error) {
+			return fsm.Outcome{State: fsm.StateFailed, Reason: fsm.ReasonBudget}, nil
+		}
+		err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{})
+		var ec *cmdutil.ExitCodeError
+		if !errors.As(err, &ec) || ec.Code != 1 {
+			t.Errorf("orchestrate = %v, want ExitCodeError{1}", err)
+		}
+	})
+}
+
+// TestOrchestrateUIQuitCancelsLoop is acceptance (b): when the UI returns
+// first (user quit), the context is cancelled, the loop unwinds, and its
+// outcome is collected before orchestrate returns — proven by the failed{*}
+// exit code, which is only knowable if the wait happened (no early exit).
+func TestOrchestrateUIQuitCancelsLoop(t *testing.T) {
+	ui := newFakeUI(true) // Run returns immediately, before the loop finishes
+	var cancelled bool
+	run := func(ctx context.Context, _ loop.Options) (fsm.Outcome, error) {
+		<-ctx.Done() // blocks until orchestrate cancels on UI quit
+		cancelled = true
+		return fsm.Outcome{State: fsm.StateFailed, Reason: fsm.ReasonBudget}, nil
+	}
+	err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{})
+	if !cancelled {
+		t.Fatal("loop was not cancelled / waited on after UI quit")
+	}
+	var ec *cmdutil.ExitCodeError
+	if !errors.As(err, &ec) || ec.Code != 1 {
+		t.Errorf("orchestrate = %v, want ExitCodeError{1} from the collected outcome", err)
+	}
+}
+
+// TestOrchestrateLoopPanic is acceptance (c): a panic in loop.Run is recovered
+// into runResult.err and surfaced after teardown, and Done still fires so the
+// UI unblocks rather than hanging on a dead loop.
+func TestOrchestrateLoopPanic(t *testing.T) {
+	ui := newFakeUI(false) // Run blocks until Done — must still fire post-panic
+	run := func(context.Context, loop.Options) (fsm.Outcome, error) {
+		panic("boom")
+	}
+	err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("orchestrate = %v, want error carrying the panic value", err)
+	}
+}
+
+// TestOrchestrateTerminalStateFlush is acceptance (d): an ErrTerminalState
+// early return maps to a silent non-zero exit, and the refusal the loop wrote
+// to its redirected ErrOut is re-flushed to the real stderr so the operator
+// still sees it after the TUI tears down.
+func TestOrchestrateTerminalStateFlush(t *testing.T) {
+	ui := newFakeUI(false)
+	const refusal = "fsm is in terminal state; pass --fresh"
+	run := func(_ context.Context, o loop.Options) (fsm.Outcome, error) {
+		fmt.Fprintln(o.IO.ErrOut, refusal)
+		return fsm.Outcome{}, loop.ErrTerminalState
+	}
+	var realErr strings.Builder
+	err := orchestrate(context.Background(), ui, run, loop.Options{}, &realErr)
+	if !errors.Is(err, cmdutil.ErrSilent) {
+		t.Errorf("orchestrate = %v, want ErrSilent", err)
+	}
+	if !strings.Contains(realErr.String(), refusal) {
+		t.Errorf("real stderr = %q, want it to contain the refusal %q", realErr.String(), refusal)
 	}
 }

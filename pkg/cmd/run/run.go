@@ -8,12 +8,17 @@ package run
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 
 	"github.com/spf13/cobra"
 
 	"github.com/jcrussell/ralph/internal/config"
+	"github.com/jcrussell/ralph/internal/fsm"
 	"github.com/jcrussell/ralph/internal/loop"
+	"github.com/jcrussell/ralph/internal/tui"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
+	"github.com/jcrussell/ralph/pkg/iostreams"
 )
 
 // Options is the three-part command shape's Options struct.
@@ -25,6 +30,7 @@ type Options struct {
 	DryRun      bool
 	Fresh       bool
 	WaitOnQuota bool
+	NoTUI       bool
 	Label       string
 
 	MaxIterations  int    // 0 = use config
@@ -90,6 +96,7 @@ and exit 1.`,
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "render prompts and route states without invoking the runner")
 	cmd.Flags().BoolVar(&opts.Fresh, "fresh", false, "reset fsm.json before starting (required after failed{*}; done{*} auto-resets)")
 	cmd.Flags().BoolVar(&opts.WaitOnQuota, "wait-on-quota", false, "on a runner quota cap, sleep until it resets and resume instead of exiting failed (overrides [loop] wait_on_quota)")
+	cmd.Flags().BoolVar(&opts.NoTUI, "no-tui", false, "disable the live terminal UI; stream the one-line-per-iteration narrative instead (auto-disabled off a TTY)")
 	cmd.Flags().StringVar(&opts.Label, "label", "", "iteration label recorded in summary.jsonl")
 	cmd.Flags().IntVar(&opts.MaxIterations, "max-iterations", 0, "override [loop] max_iterations (0 = config)")
 	cmd.Flags().IntVar(&opts.SessionTimeout, "timeout", 0, "override [loop] session_timeout_secs (0 = config)")
@@ -108,16 +115,114 @@ func runRun(ctx context.Context, opts *Options) error {
 	}
 	applyOverrides(cfg, opts)
 
-	out, err := loop.Run(ctx, loop.Options{
+	lopts := loop.Options{
 		Repo:     repo,
 		Cfg:      cfg,
-		IO:       opts.F.IOStreams,
 		Label:    opts.Label,
 		Once:     opts.Once,
 		SkipGate: opts.SkipGate,
 		DryRun:   opts.DryRun,
 		Fresh:    opts.Fresh,
-	})
+	}
+
+	if shouldUseTUI(opts.F.IOStreams, opts) {
+		ui := tui.New(opts.F.IOStreams)
+		return orchestrate(ctx, ui, loop.Run, lopts, opts.F.IOStreams.ErrOut)
+	}
+
+	// Non-TTY / --no-tui: the original synchronous path. loop.Run streams the
+	// one-line-per-iteration narrative straight to the operator streams, and
+	// the result maps byte-identically to the pre-TUI behavior.
+	lopts.IO = opts.F.IOStreams
+	return mapLoopResult(loop.Run(ctx, lopts))
+}
+
+// shouldUseTUI is the activation gate (ralph-g3s.1): the live UI auto-enables
+// only when BOTH stdin and stderr are TTYs and --no-tui was not passed. Off a
+// TTY (CI, pipes, redirects) or when explicitly disabled, run stays on the
+// synchronous narrative path.
+func shouldUseTUI(io *iostreams.IOStreams, opts *Options) bool {
+	return !opts.NoTUI && io.IsStdinTTY() && io.IsStderrTTY()
+}
+
+// liveUI is the narrow consumer seam the activation path drives. *tui.Program
+// satisfies it; orchestrate is unit-tested against a fake, so the
+// control-inversion dance needs no real terminal. LoopIO/Observer feed
+// loop.Run; Run renders in the foreground until quit; Done signals loop
+// completion; Tail surfaces the captured pane lines for the post-quit flush.
+type liveUI interface {
+	LoopIO() *iostreams.IOStreams
+	Observer() loop.Observer
+	Run() error
+	Done()
+	Tail() []string
+}
+
+// loopFn is loop.Run's signature, injected into orchestrate so tests stand in
+// a fake loop (immediate return, ctx-blocking, or panicking) without acquiring
+// the repo lock or touching disk.
+type loopFn func(context.Context, loop.Options) (fsm.Outcome, error)
+
+// runResult is the loop goroutine's outcome, delivered over a buffered channel
+// so the goroutine never blocks on the orchestration reading it.
+type runResult struct {
+	outcome fsm.Outcome
+	err     error
+}
+
+// orchestrate inverts control for the live-UI path (ralph-g3s.1): loop.Run
+// runs in a goroutine while the TUI renders in the foreground. The ordering is
+// quit -> cancel -> wait: when the UI returns (user q/Ctrl-C, or the loop's
+// Done signal) we cancel the context, then wait for the loop to unwind and
+// report, then map the exit code. The loop's IO and Observer come from the UI
+// so its output streams into the pane.
+func orchestrate(ctx context.Context, ui liveUI, run loopFn, lopts loop.Options, realErr io.Writer) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	lopts.IO = ui.LoopIO()
+	lopts.Observer = ui.Observer()
+
+	resultCh := make(chan runResult, 1)
+	go func() {
+		// Done always fires (LIFO defer, after recover) so the UI unblocks
+		// even if loop.Run panics; otherwise Run would hang on a dead loop.
+		defer ui.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				resultCh <- runResult{err: fmt.Errorf("ralph run: loop panicked: %v", r)}
+			}
+		}()
+		out, err := run(ctx, lopts)
+		resultCh <- runResult{outcome: out, err: err}
+	}()
+
+	uiErr := ui.Run()
+	cancel()          // quit -> cancel: unwind a still-running loop
+	res := <-resultCh // -> wait: never exit mid-iteration
+
+	// The TUI renders inline and clears its frame on quit; an early return or
+	// panic can race the first paint, so its notices may never have shown.
+	// Re-emit the captured pane tail to the real stderr on any error path so
+	// they survive teardown. A clean run's final frame stays on screen, so we
+	// don't duplicate it there.
+	if uiErr != nil || res.err != nil {
+		for _, line := range ui.Tail() {
+			_, _ = fmt.Fprintln(realErr, line)
+		}
+	}
+	if uiErr != nil {
+		return uiErr
+	}
+	return mapLoopResult(res.outcome, res.err)
+}
+
+// mapLoopResult folds a loop.Run outcome+error into the command's return: the
+// ErrTerminalState refusal becomes a silent non-zero exit (its notice already
+// reached ErrOut), other errors propagate, and a terminal failed{*} maps to
+// its exit code. Shared by the synchronous and TUI paths so both exit
+// identically.
+func mapLoopResult(out fsm.Outcome, err error) error {
 	if err != nil {
 		if errors.Is(err, loop.ErrTerminalState) {
 			return cmdutil.ErrSilent
