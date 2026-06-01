@@ -31,6 +31,8 @@ func TestOptionsValidate(t *testing.T) {
 		{"negative max-iterations", Options{MaxIterations: -1}, false},
 		{"negative timeout", Options{SessionTimeout: -1}, false},
 		{"unparseable memory", Options{MemoryLimit: "bogus"}, false},
+		{"unlimited alone ok", Options{Unlimited: true}, true},
+		{"unlimited with max-iterations conflicts", Options{Unlimited: true, MaxIterations: 5}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -55,7 +57,7 @@ func TestNewCmdRunMetadata(t *testing.T) {
 	}
 	for _, name := range []string{
 		"once", "skip-gate", "dry-run", "fresh", "label",
-		"max-iterations", "timeout", "memory", "no-tui",
+		"max-iterations", "timeout", "memory", "no-tui", "unlimited",
 	} {
 		if c.Flags().Lookup(name) == nil {
 			t.Errorf("--%s flag missing", name)
@@ -97,6 +99,24 @@ func TestNewCmdRunFlagsCaptured(t *testing.T) {
 	if got.MaxIterations != 7 || got.SessionTimeout != 30 || got.MemoryLimit != "512m" {
 		t.Errorf("override flags wrong: max=%d timeout=%d mem=%q",
 			got.MaxIterations, got.SessionTimeout, got.MemoryLimit)
+	}
+}
+
+// TestNewCmdRunUnlimitedFlag pins --unlimited round-tripping into Options
+// through the cobra parser; it's exercised separately from the other override
+// flags because Validate rejects pairing it with --max-iterations.
+func TestNewCmdRunUnlimitedFlag(t *testing.T) {
+	var got *Options
+	c := NewCmdRun(&cmdutil.Factory{}, func(_ context.Context, o *Options) error {
+		got = o
+		return nil
+	})
+	c.SetArgs([]string{"--unlimited"})
+	if err := c.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got == nil || !got.Unlimited {
+		t.Errorf("Unlimited = false, want true")
 	}
 }
 
@@ -157,6 +177,19 @@ func TestApplyOverrides(t *testing.T) {
 				MaxIterations:      5,
 				SessionTimeoutSecs: 60,
 				MemoryLimit:        "2G",
+				SleepBetweenSecs:   5,
+				QuotaWaitSecs:      1800,
+			},
+		},
+		{
+			// Acceptance (1): --unlimited disables the cap via the 0 sentinel,
+			// so loop.Run sees MaxIterations == 0 and never reports CapsExceeded.
+			name: "unlimited disables the cap",
+			opts: Options{Unlimited: true},
+			want: config.LoopConfig{
+				MaxIterations:      0,
+				SessionTimeoutSecs: 3600,
+				MemoryLimit:        "7G",
 				SleepBetweenSecs:   5,
 				QuotaWaitSecs:      1800,
 			},

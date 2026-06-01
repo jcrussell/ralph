@@ -31,6 +31,7 @@ type Options struct {
 	Fresh       bool
 	WaitOnQuota bool
 	NoTUI       bool
+	Unlimited   bool
 	Label       string
 
 	MaxIterations  int    // 0 = use config
@@ -43,6 +44,9 @@ type Options struct {
 func (o *Options) Validate() error {
 	if o.MaxIterations < 0 {
 		return cmdutil.FlagErrorf("--max-iterations must be >= 0, got %d", o.MaxIterations)
+	}
+	if o.Unlimited && o.MaxIterations > 0 {
+		return cmdutil.FlagErrorf("--unlimited conflicts with --max-iterations=%d (use one or the other)", o.MaxIterations)
 	}
 	if o.SessionTimeout < 0 {
 		return cmdutil.FlagErrorf("--timeout must be >= 0, got %d", o.SessionTimeout)
@@ -93,6 +97,9 @@ and exit 1.`,
   # cap iterations at 5 for this invocation without editing config.toml
   ralph run --max-iterations=5
 
+  # run with no iteration cap (equivalent to [loop] max_iterations = 0)
+  ralph run --unlimited
+
   # disable the live TUI and stream the iteration narrative instead
   ralph run --no-tui`,
 		RunE: func(c *cobra.Command, args []string) error {
@@ -112,7 +119,8 @@ and exit 1.`,
 	cmd.Flags().BoolVar(&opts.WaitOnQuota, "wait-on-quota", false, "on a runner quota cap, sleep until it resets and resume instead of exiting failed (overrides [loop] wait_on_quota)")
 	cmd.Flags().BoolVar(&opts.NoTUI, "no-tui", false, "disable the live terminal UI; stream the one-line-per-iteration narrative instead (auto-disabled off a TTY)")
 	cmd.Flags().StringVar(&opts.Label, "label", "", "iteration label recorded in summary.jsonl")
-	cmd.Flags().IntVar(&opts.MaxIterations, "max-iterations", 0, "override [loop] max_iterations (0 = config)")
+	cmd.Flags().IntVar(&opts.MaxIterations, "max-iterations", 0, "override [loop] max_iterations (0 = use config; pass --unlimited to disable the cap)")
+	cmd.Flags().BoolVar(&opts.Unlimited, "unlimited", false, "disable the iteration cap for this invocation (sets [loop] max_iterations = 0); not recommended without a budget cap")
 	cmd.Flags().IntVar(&opts.SessionTimeout, "timeout", 0, "override [loop] session_timeout_secs (0 = config)")
 	cmd.Flags().StringVar(&opts.MemoryLimit, "memory", "", "override [loop] memory_limit_bytes ('' = config)")
 	return cmd
@@ -254,6 +262,11 @@ func mapLoopResult(out fsm.Outcome, err error) error {
 func applyOverrides(cfg *config.Config, opts *Options) {
 	if opts.MaxIterations > 0 {
 		cfg.Loop.MaxIterations = opts.MaxIterations
+	}
+	// --unlimited forces the cap off via the established 0 sentinel. Validate
+	// rejects combining it with --max-iterations>0, so the branches never race.
+	if opts.Unlimited {
+		cfg.Loop.MaxIterations = 0
 	}
 	if opts.SessionTimeout > 0 {
 		cfg.Loop.SessionTimeoutSecs = opts.SessionTimeout
