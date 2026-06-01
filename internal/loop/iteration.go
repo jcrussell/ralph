@@ -116,6 +116,17 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 		return prev, err
 	}
 
+	// 4b. Opt-in quota wait. A quota cap normally routes to
+	// failed{runner_terminal} (classifyToReason). When wait_on_quota is
+	// set, sleep a bounded, ctx-cancellable interval and resume the same
+	// state instead — the 5-hour/weekly/monthly window is expected to
+	// reset. Default stays terminate so we don't regress the fail-fast
+	// behavior. SIGINT/SIGTERM during the sleep cancels it and the loop's
+	// top-level ctx.Err() check exits cleanly on the next tick.
+	if mode == runner.ModeQuota && rc.cfg.Loop.WaitOnQuota {
+		return waitOnQuota(ctx, rc, prev)
+	}
+
 	// 5. Gate hook (post-runner, pre-routing) + commit count for the tick.
 	gate, commits := runGatePhase(ctx, rc, prev, beforeHead)
 
@@ -342,6 +353,45 @@ func sleepBackoff(ctx context.Context, rc *runContext, next fsm.Outcome, mode ru
 	if d := composeBackoff(rc, mode, sess); d > 0 {
 		rc.clock.Sleep(ctx, d)
 	}
+}
+
+// waitOnQuota records a non-productive quota-wait row, sleeps a bounded,
+// ctx-cancellable interval, then returns prev so the loop resumes the
+// same state. The sleep is the opt-in alternative to routing ModeQuota
+// to failed{runner_terminal}; see the call site in runIteration. State
+// is not advanced (prev == rc.fsm.Outcome), so no FSM save is needed —
+// the same iteration re-runs once the cap (hopefully) resets.
+func waitOnQuota(ctx context.Context, rc *runContext, prev fsm.Outcome) (fsm.Outcome, error) {
+	d := backoff.QuotaWait(rc.cfg.Loop.QuotaWaitSecs)
+	rc.log.WarnContext(ctx, "quota cap hit; waiting before resuming",
+		"state", prev.State, "wait", d.String())
+	if err := recordQuotaWait(rc, prev, d); err != nil {
+		return prev, err
+	}
+	rc.clock.Sleep(ctx, d)
+	return prev, nil
+}
+
+// recordQuotaWait writes a summary row for a quota-wait tick. The runner
+// ran and hit the cap, so RunnerMode is quota; Skipped marks the tick as
+// non-productive for tooling that filters such rows.
+func recordQuotaWait(rc *runContext, prev fsm.Outcome, d time.Duration) error {
+	now := rc.clock.Now().UTC()
+	rec := IterRecord{
+		Iter:       rc.fsm.Iter,
+		IterID:     rc.paths.stem,
+		Timestamp:  now.Format(time.RFC3339),
+		State:      string(prev.State),
+		PrevState:  string(prev.State),
+		RunnerMode: string(runner.ModeQuota),
+		Narrative:  fmt.Sprintf("%s: quota cap — waiting %s before resuming", prev.State, d),
+		Skipped:    "quota-wait",
+	}
+	if err := rc.sum.Write(rec); err != nil {
+		return fmt.Errorf("loop: write quota-wait: %w", err)
+	}
+	emitIterLine(rc, rec)
+	return nil
 }
 
 // recordSkippedIteration writes a minimal summary record for ticks the

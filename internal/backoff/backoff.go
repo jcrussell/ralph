@@ -28,6 +28,10 @@ const MaxBackoff = 80 * time.Minute
 // backoff dependent on Backoff config only.
 const OKBackoff = 10 * time.Second
 
+// DefaultQuotaWait is the fallback sleep before re-checking a quota cap
+// when wait-on-quota is enabled but no explicit interval is configured.
+const DefaultQuotaWait = 30 * time.Minute
+
 // expCap is the maximum exponent applied to the base in rate-limit and
 // dead-session exponential backoff. Matches Python's min(n, 4).
 const expCap = 4
@@ -103,6 +107,24 @@ func Compute(in Input, cfg *config.BackoffConfig) time.Duration {
 		return OKBackoff
 	}
 	return OKBackoff
+}
+
+// QuotaWait returns the bounded sleep the loop uses between quota-cap
+// retries when wait-on-quota is enabled. ModeQuota is Terminal, so
+// Compute returns 0 for it; this is the dedicated wait path. secs<=0
+// falls back to DefaultQuotaWait and the result is capped at MaxBackoff.
+//
+// The upstream 5-hour/weekly/monthly reset instant is not surfaced in
+// the error envelope the way rate-limit "resets Nam (UTC)" hints are, so
+// this is a fixed poll interval rather than a parsed reset: the loop
+// sleeps, retries, and sleeps again until the cap lifts or the operator
+// interrupts.
+func QuotaWait(secs int) time.Duration {
+	d := DefaultQuotaWait
+	if secs > 0 {
+		d = time.Duration(secs) * time.Second
+	}
+	return capDur(d)
 }
 
 // expBackoff returns base * 2^min(n, expCap). n < 0 is treated as 0.

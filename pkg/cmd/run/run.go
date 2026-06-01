@@ -20,11 +20,12 @@ import (
 type Options struct {
 	F *cmdutil.Factory
 
-	Once     bool
-	SkipGate bool
-	DryRun   bool
-	Fresh    bool
-	Label    string
+	Once        bool
+	SkipGate    bool
+	DryRun      bool
+	Fresh       bool
+	WaitOnQuota bool
+	Label       string
 
 	MaxIterations  int    // 0 = use config
 	SessionTimeout int    // seconds; 0 = use config
@@ -88,6 +89,7 @@ and exit 1.`,
 	cmd.Flags().BoolVar(&opts.SkipGate, "skip-gate", false, "skip the per-state gate hook")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "render prompts and route states without invoking the runner")
 	cmd.Flags().BoolVar(&opts.Fresh, "fresh", false, "reset fsm.json before starting (required after failed{*}; done{*} auto-resets)")
+	cmd.Flags().BoolVar(&opts.WaitOnQuota, "wait-on-quota", false, "on a runner quota cap, sleep until it resets and resume instead of exiting failed (overrides [loop] wait_on_quota)")
 	cmd.Flags().StringVar(&opts.Label, "label", "", "iteration label recorded in summary.jsonl")
 	cmd.Flags().IntVar(&opts.MaxIterations, "max-iterations", 0, "override [loop] max_iterations (0 = config)")
 	cmd.Flags().IntVar(&opts.SessionTimeout, "timeout", 0, "override [loop] session_timeout_secs (0 = config)")
@@ -139,5 +141,11 @@ func applyOverrides(cfg *config.Config, opts *Options) {
 	}
 	if opts.MemoryLimit != "" {
 		cfg.Loop.MemoryLimit = opts.MemoryLimit
+	}
+	// Boolean override is enable-only: the flag can turn wait-on-quota on
+	// for one invocation, but disabling is config-only (a false flag is
+	// indistinguishable from unset, so it must not clobber a true config).
+	if opts.WaitOnQuota {
+		cfg.Loop.WaitOnQuota = true
 	}
 }

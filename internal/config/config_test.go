@@ -195,6 +195,7 @@ func TestValidateRejectsBadValues(t *testing.T) {
 		{"loop session_timeout_secs zero", func(c *Config) { c.Loop.SessionTimeoutSecs = 0 }, "session_timeout_secs"},
 		{"loop sleep_between_secs negative", func(c *Config) { c.Loop.SleepBetweenSecs = -1 }, "sleep_between_secs"},
 		{"loop memory_limit_bytes garbage", func(c *Config) { c.Loop.MemoryLimit = "abc" }, "memory_limit_bytes"},
+		{"loop quota_wait_secs negative", func(c *Config) { c.Loop.QuotaWaitSecs = -1 }, "quota_wait_secs"},
 		{"runner command empty", func(c *Config) { c.Runner.Command = "" }, "command is required"},
 		{"gate timeout_secs negative", func(c *Config) { c.Gate.TimeoutSecs = -1 }, "timeout_secs"},
 		{"gate run_when typo", func(c *Config) { c.Gate.RunWhen = "commits_only" }, "run_when"},

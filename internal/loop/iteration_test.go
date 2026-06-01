@@ -9,12 +9,92 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jcrussell/ralph/internal/backoff"
 	"github.com/jcrussell/ralph/internal/bd"
 	"github.com/jcrussell/ralph/internal/config"
 	"github.com/jcrussell/ralph/internal/fsm"
 	"github.com/jcrussell/ralph/internal/runner"
 	"github.com/jcrussell/ralph/pkg/iostreams"
 )
+
+// quotaSession returns a session whose envelope classifies as ModeQuota
+// — the captured monthly-usage-cap shape pinned by the runner package's
+// TestRunQuotaEnvelopeClassifies.
+func quotaSession() *runner.Session {
+	return &runner.Session{
+		ExitCode: 0,
+		Duration: time.Second,
+		Envelope: &runner.Envelope{
+			IsError:        true,
+			APIErrorStatus: float64(429),
+			Result:         "You've hit your org's monthly usage limit",
+		},
+	}
+}
+
+// Default behavior: a quota envelope exits failed{runner_terminal} —
+// the fail-fast contract is not regressed when wait_on_quota is off.
+func TestRun_QuotaTerminatesByDefault(t *testing.T) {
+	repo := scaffoldRepo(t)
+	opts := baseOpts(t, repo)
+	opts.BD = &fakeBD{ReadyByLabel: map[string][]bd.Issue{"": {{ID: "x"}}}}
+	opts.Runner = &fakeRunner{Sessions: []*runner.Session{quotaSession()}}
+	opts.Clock = newFakeClock()
+
+	out, err := Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if (out != fsm.Outcome{State: fsm.StateFailed, Reason: fsm.ReasonRunnerTerminal}) {
+		t.Errorf("outcome = %+v, want failed{runner_terminal}", out)
+	}
+}
+
+// With wait_on_quota enabled, a quota envelope sleeps the configured
+// interval and resumes the same (non-terminal) state instead of dying,
+// and records a quota-wait summary row.
+func TestRun_QuotaWaitsAndResumesWhenEnabled(t *testing.T) {
+	repo := scaffoldRepo(t)
+	opts := baseOpts(t, repo)
+	opts.Once = true
+	opts.Cfg.Loop.WaitOnQuota = true
+	opts.Cfg.Loop.QuotaWaitSecs = 120
+	opts.BD = &fakeBD{ReadyByLabel: map[string][]bd.Issue{"": {{ID: "x"}}}}
+	opts.Runner = &fakeRunner{Sessions: []*runner.Session{quotaSession()}}
+	clk := newFakeClock()
+	opts.Clock = clk
+
+	out, err := Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.State.Terminal() {
+		t.Errorf("outcome = %+v, want a non-terminal resume", out)
+	}
+
+	want := backoff.QuotaWait(120)
+	slept := false
+	for _, d := range clk.Sleeps {
+		if d == want {
+			slept = true
+		}
+	}
+	if !slept {
+		t.Errorf("clock sleeps = %v, want a %s quota wait", clk.Sleeps, want)
+	}
+
+	recs := readSummary(t, repo)
+	if len(recs) == 0 {
+		t.Fatal("no summary rows written")
+	}
+	last := recs[len(recs)-1]
+	if last.Skipped != "quota-wait" {
+		t.Errorf("last summary Skipped = %q, want quota-wait", last.Skipped)
+	}
+	if last.RunnerMode != string(runner.ModeQuota) {
+		t.Errorf("last summary RunnerMode = %q, want quota", last.RunnerMode)
+	}
+}
 
 // classifyToReason maps modes to fsm reasons per the contract:
 // ModeAuth → ReasonAuth; ModeBudget → ReasonRunnerTerminal (note:

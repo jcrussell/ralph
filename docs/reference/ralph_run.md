@@ -48,6 +48,7 @@ ralph run [flags]
       --once                 run one iteration then exit
       --skip-gate            skip the per-state gate hook
       --timeout int          override [loop] session_timeout_secs (0 = config)
+      --wait-on-quota        on a runner quota cap, sleep until it resets and resume instead of exiting failed (overrides [loop] wait_on_quota)
 ```
 
 ### Options inherited from parent commands

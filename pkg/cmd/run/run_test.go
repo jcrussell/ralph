@@ -103,6 +103,7 @@ func TestApplyOverrides(t *testing.T) {
 				SessionTimeoutSecs: 3600,
 				MemoryLimit:        "7G",
 				SleepBetweenSecs:   5,
+				QuotaWaitSecs:      1800,
 			},
 		},
 		{
@@ -113,6 +114,7 @@ func TestApplyOverrides(t *testing.T) {
 				SessionTimeoutSecs: 3600,
 				MemoryLimit:        "7G",
 				SleepBetweenSecs:   5,
+				QuotaWaitSecs:      1800,
 			},
 		},
 		{
@@ -123,6 +125,7 @@ func TestApplyOverrides(t *testing.T) {
 				SessionTimeoutSecs: 30,
 				MemoryLimit:        "7G",
 				SleepBetweenSecs:   5,
+				QuotaWaitSecs:      1800,
 			},
 		},
 		{
@@ -133,6 +136,7 @@ func TestApplyOverrides(t *testing.T) {
 				SessionTimeoutSecs: 3600,
 				MemoryLimit:        "1G",
 				SleepBetweenSecs:   5,
+				QuotaWaitSecs:      1800,
 			},
 		},
 		{
@@ -143,6 +147,19 @@ func TestApplyOverrides(t *testing.T) {
 				SessionTimeoutSecs: 60,
 				MemoryLimit:        "2G",
 				SleepBetweenSecs:   5,
+				QuotaWaitSecs:      1800,
+			},
+		},
+		{
+			name: "wait-on-quota flag enables, never disables",
+			opts: Options{WaitOnQuota: true},
+			want: config.LoopConfig{
+				MaxIterations:      30,
+				SessionTimeoutSecs: 3600,
+				MemoryLimit:        "7G",
+				SleepBetweenSecs:   5,
+				WaitOnQuota:        true,
+				QuotaWaitSecs:      1800,
 			},
 		},
 	}

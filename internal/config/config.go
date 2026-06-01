@@ -38,6 +38,15 @@ type LoopConfig struct {
 	SessionTimeoutSecs int    `toml:"session_timeout_secs"`
 	MemoryLimit        string `toml:"memory_limit_bytes"`
 	SleepBetweenSecs   int    `toml:"sleep_between_secs"`
+	// WaitOnQuota opts into riding out a runner quota cap (the resettable
+	// 5-hour/weekly/monthly window, ModeQuota) by sleeping QuotaWaitSecs
+	// and resuming the same state instead of exiting failed{runner_terminal}.
+	// Default false keeps quota terminal (fail fast, don't burn iterations).
+	WaitOnQuota bool `toml:"wait_on_quota"`
+	// QuotaWaitSecs is the bounded sleep between quota retries when
+	// WaitOnQuota is set. The upstream reset instant isn't in the error
+	// envelope, so this is a fixed poll interval, not a parsed reset.
+	QuotaWaitSecs int `toml:"quota_wait_secs"`
 }
 
 // RunnerConfig holds the [runner] section.
@@ -96,6 +105,8 @@ func Defaults() *Config {
 			SessionTimeoutSecs: 3600,
 			MemoryLimit:        "7G",
 			SleepBetweenSecs:   5,
+			WaitOnQuota:        false,
+			QuotaWaitSecs:      1800,
 		},
 		Runner: RunnerConfig{
 			Command: "claude",
@@ -226,6 +237,9 @@ func (l *LoopConfig) Validate() error {
 	}
 	if l.SleepBetweenSecs < 0 {
 		return fmt.Errorf("sleep_between_secs must be >= 0, got %d", l.SleepBetweenSecs)
+	}
+	if l.QuotaWaitSecs < 0 {
+		return fmt.Errorf("quota_wait_secs must be >= 0, got %d", l.QuotaWaitSecs)
 	}
 	if _, err := ParseBytes(l.MemoryLimit); err != nil {
 		return fmt.Errorf("memory_limit_bytes: %w", err)

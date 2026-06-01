@@ -17,6 +17,11 @@
 # memory_limit_bytes = "7G"
 # Sleep between iterations (sec).
 # sleep_between_secs = 5
+# Ride out a runner quota cap (resettable 5-hour/weekly/monthly window)
+# by sleeping and resuming instead of exiting failed{runner_terminal}.
+# wait_on_quota = false
+# Bounded sleep between quota retries (sec) when wait_on_quota is true.
+# quota_wait_secs = 1800
 
 [runner]
 # command = "claude"

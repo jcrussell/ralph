@@ -198,6 +198,24 @@ func TestExpBackoffCap(t *testing.T) {
 	}
 }
 
+func TestQuotaWait(t *testing.T) {
+	cases := []struct {
+		name string
+		secs int
+		want time.Duration
+	}{
+		{"zero falls back to default", 0, DefaultQuotaWait},
+		{"negative falls back to default", -5, DefaultQuotaWait},
+		{"explicit interval", 120, 120 * time.Second},
+		{"capped at MaxBackoff", 99999, MaxBackoff},
+	}
+	for _, c := range cases {
+		if got := QuotaWait(c.secs); got != c.want {
+			t.Errorf("%s: QuotaWait(%d) = %v, want %v", c.name, c.secs, got, c.want)
+		}
+	}
+}
+
 func TestParseRateLimitReset(t *testing.T) {
 	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
 
