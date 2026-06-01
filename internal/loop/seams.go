@@ -47,6 +47,56 @@ type defaultClock struct{}
 
 func (defaultClock) Now() time.Time { return time.Now() }
 
+// Observer is an optional live-run sink for per-iteration metrics,
+// consumer-defined here alongside the other seams (byob-interfaces.1).
+// The loop calls Observe exactly once per iteration — including skipped
+// and quota-wait ticks — as it emits that iteration's summary line.
+// Production `ralph run` leaves Options.Observer nil and the loop swaps
+// in a no-op, so the off-TTY / unset path stays byte-identical. The live
+// TUI (ralph-g3s) is the first real implementation.
+//
+// Observe must not block: it runs synchronously on the iteration path.
+// Implementations should hand the Snapshot off (e.g. tea.Program.Send)
+// and return immediately.
+type Observer interface {
+	Observe(Snapshot)
+}
+
+// Snapshot is the immutable per-iteration metrics value handed to an
+// Observer. It bundles the iteration's summary record with the cumulative
+// FSM counters, the configured caps those counters are measured against,
+// and the wallclock elapsed since Run started — everything the live TUI's
+// top panel renders without reaching back into loop internals.
+type Snapshot struct {
+	// Record is this iteration's summary row (the latest IterRecord).
+	Record IterRecord
+
+	// Cumulative FSM state as of this iteration.
+	Iter                    int
+	State                   fsm.State
+	Reason                  fsm.Reason
+	CumulativeCostUSD       float64
+	CumulativeWallclockSecs int
+	ConsecutiveDirty        int
+	LastGateResult          string
+
+	// Configured caps the cumulative fields are measured against
+	// (0 == unset / no cap), copied by value so the Observer needn't
+	// retain a *config.Config.
+	MaxIterations    int
+	MaxCostUSD       float64
+	MaxWallclockSecs int
+
+	// Elapsed is the wallclock since Run started, per the loop's Clock.
+	Elapsed time.Duration
+}
+
+// noopObserver is the nil-default Observer: it drops every Snapshot so an
+// unset Options.Observer leaves behavior unchanged.
+type noopObserver struct{}
+
+func (noopObserver) Observe(Snapshot) {}
+
 func (defaultClock) Sleep(ctx context.Context, d time.Duration) {
 	if d <= 0 {
 		return

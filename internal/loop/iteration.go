@@ -414,11 +414,17 @@ func recordSkippedIteration(rc *runContext, prev fsm.Outcome, reason string) err
 	return nil
 }
 
-// emitIterLine writes one progress line per iteration to ErrOut, in the
-// same shape `ralph logs` renders by default. When the stderr-gated color
-// scheme is enabled, the gate token is colored. The summary.jsonl row
-// is untouched — only the bytes printed here carry any ANSI codes.
+// emitIterLine surfaces one iteration's IterRecord: it notifies the
+// live-run Observer, then writes one progress line to ErrOut in the same
+// shape `ralph logs` renders by default. It is the single chokepoint every
+// IterRecord passes through — normal, skipped, and quota-wait ticks all
+// call it — so the Observe call here fires exactly once per iteration.
+// When the stderr-gated color scheme is enabled, the gate token is colored;
+// the summary.jsonl row is untouched — only the bytes printed here carry
+// any ANSI codes. The Observer is notified before the ErrOut guard so a nil
+// IOStreams still produces a Snapshot.
 func emitIterLine(rc *runContext, rec IterRecord) {
+	notifyObserver(rc, rec)
 	if rc.io == nil || rc.io.ErrOut == nil {
 		return
 	}
@@ -429,6 +435,32 @@ func emitIterLine(rc *runContext, rec IterRecord) {
 		text = strings.Replace(text, "gate red", "gate "+cs.Red("red"), 1)
 	}
 	_, _ = fmt.Fprintf(rc.io.ErrOut, "iter %04d  %s\n", rec.Iter, text)
+}
+
+// notifyObserver hands the Observer a Snapshot built from the iteration's
+// record, the current cumulative FSM counters, the configured caps, and
+// the wallclock elapsed since Run started. Reads fsm/cfg through rc so the
+// values are whatever the calling site has already persisted: in
+// routeAndPersist the FSM is at the new state; on skipped/quota-wait ticks
+// it is unchanged, which is the honest view for those rows.
+func notifyObserver(rc *runContext, rec IterRecord) {
+	if rc.observer == nil {
+		return
+	}
+	rc.observer.Observe(Snapshot{
+		Record:                  rec,
+		Iter:                    rc.fsm.Iter,
+		State:                   rc.fsm.State,
+		Reason:                  rc.fsm.Reason,
+		CumulativeCostUSD:       rc.fsm.CumulativeCostUSD,
+		CumulativeWallclockSecs: rc.fsm.CumulativeWallclockSecs,
+		ConsecutiveDirty:        rc.fsm.ConsecutiveDirty,
+		LastGateResult:          rc.fsm.LastGateResult,
+		MaxIterations:           rc.cfg.Loop.MaxIterations,
+		MaxCostUSD:              rc.cfg.Budget.MaxCostUSD,
+		MaxWallclockSecs:        rc.cfg.Budget.MaxWallclockSecs,
+		Elapsed:                 rc.clock.Now().Sub(rc.started),
+	})
 }
 
 // composePrompt renders the per-state prompt with the iteration's vars.

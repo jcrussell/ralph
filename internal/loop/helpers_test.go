@@ -121,6 +121,19 @@ func (c *fakeClock) Sleep(_ context.Context, d time.Duration) {
 	c.Sleeps = append(c.Sleeps, d)
 }
 
+// fakeObserver records every Snapshot the loop hands it, in call order,
+// so tests can assert count / ordering / field values.
+type fakeObserver struct {
+	mu        sync.Mutex
+	Snapshots []Snapshot
+}
+
+func (o *fakeObserver) Observe(s Snapshot) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.Snapshots = append(o.Snapshots, s)
+}
+
 // scaffoldRepo initializes a throwaway repo with a .ralph/ tree
 // containing the minimal prompts needed to satisfy promptlib.Render
 // for every loop state. Returns the absolute repo path.

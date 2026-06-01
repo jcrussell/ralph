@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/jcrussell/ralph/internal/bd"
 	"github.com/jcrussell/ralph/internal/config"
@@ -42,6 +43,11 @@ type Options struct {
 	Runner Runner
 	BD     BDClient
 	Clock  Clock
+
+	// Observer is an optional live-run metrics sink (see seams.go). nil
+	// means no observation; Run substitutes a no-op so the iteration path
+	// never branches on it.
+	Observer Observer
 }
 
 // ErrTerminalState is returned by Run when fsm.json is already in a
@@ -65,6 +71,11 @@ type runContext struct {
 	bdClient BDClient
 	runr     Runner
 	clock    Clock
+	observer Observer
+
+	// started is the run-entry Clock.Now(), captured once so Snapshot
+	// elapsed is measured from a single origin.
+	started time.Time
 
 	// Per-iteration scratch (reset at the top of runIteration).
 	paths iterPaths
@@ -98,6 +109,13 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 	if opts.Clock == nil {
 		opts.Clock = defaultClock{}
 	}
+	if opts.Observer == nil {
+		opts.Observer = noopObserver{}
+	}
+
+	// Capture run-start time once so every Snapshot.Elapsed is measured
+	// from a single origin rather than re-reading the clock per field.
+	started := opts.Clock.Now()
 
 	p := paths.New(opts.Repo)
 
@@ -173,6 +191,8 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 		bdClient: opts.BD,
 		runr:     opts.Runner,
 		clock:    opts.Clock,
+		observer: opts.Observer,
+		started:  started,
 	}
 
 	// Handle the virtual start state inline: route immediately without
