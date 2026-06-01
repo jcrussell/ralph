@@ -247,8 +247,13 @@ func TestShouldUseTUI(t *testing.T) {
 
 // fakeUI is the scripted liveUI that exercises orchestrate without a terminal
 // (byob-testing.1). Its LoopIO ErrOut feeds an in-memory buffer that doubles
-// as the captured pane (Tail). Run blocks until Done unless quitEarly is set,
-// modeling a user q/Ctrl-C that fires before the loop finishes.
+// as the captured pane (Tail). orchestrate is decoupled from *why* Run returns
+// — it always cancels-and-waits afterward — so the fake collapses the two real
+// exit triggers into one knob: with quitEarly set Run returns immediately
+// (a user q/Ctrl-C before the loop finishes); otherwise Run returns when Done
+// fires, standing in for the user quitting the post-run review screen. (The
+// real Program.Run blocks past Done until the user quits; that stay-alive
+// lifetime is covered in internal/tui/program_test.go.)
 type fakeUI struct {
 	ios       *iostreams.IOStreams
 	captured  *strings.Builder

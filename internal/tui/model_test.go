@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jcrussell/ralph/internal/loop"
 	"github.com/jcrussell/ralph/pkg/iostreams"
 )
 
@@ -29,12 +30,14 @@ func runeKey(r rune) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
 }
 
-// newTestModel builds a model over non-TTY test streams (color off).
+// newTestModel builds a model over non-TTY test streams (color off), seeded
+// with the zero Snapshot so hasSnap is true from construction (as production is,
+// via the caps seed from run.go).
 func newTestModel(t *testing.T) model {
 	t.Helper()
 	t.Setenv("NO_COLOR", "")
 	ios, _ := iostreams.Test()
-	return newModel(ios)
+	return newModel(ios, loop.Snapshot{})
 }
 
 // sized returns a model that has received an initial WindowSizeMsg.
@@ -52,9 +55,6 @@ func TestViewBeforeResize(t *testing.T) {
 
 func TestMetricsMsgPopulatesPanel(t *testing.T) {
 	m := sized(t, 100, 24)
-	if m.hasSnap {
-		t.Fatalf("model should have no snapshot before metricsMsg")
-	}
 	m, _ = step(t, m, metricsMsg{s: fullSnapshot()})
 
 	if !m.hasSnap {
@@ -156,7 +156,7 @@ func TestTinyWindowDegradesGracefully(t *testing.T) {
 func TestNoColorYieldsNoANSI(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	ios, _ := iostreams.Test()
-	m := newModel(ios)
+	m := newModel(ios, loop.Snapshot{})
 	if m.colorEnabled {
 		t.Fatalf("non-TTY + NO_COLOR should disable color")
 	}
@@ -172,10 +172,11 @@ func TestNoColorYieldsNoANSI(t *testing.T) {
 func TestTickAdvancesElapsed(t *testing.T) {
 	m := sized(t, 100, 24)
 
-	// No snapshot yet: ticks must not advance a phantom clock.
+	// The seed makes hasSnap true from t0, so a tick advances the elapsed clock
+	// immediately (no real metricsMsg needed to start it).
 	m, cmd := step(t, m, tickMsg{})
-	if m.liveElapsed != 0 {
-		t.Errorf("tick before any metrics should leave elapsed at 0, got %v", m.liveElapsed)
+	if m.liveElapsed != tickInterval {
+		t.Errorf("tick on the seed should advance elapsed to %v, got %v", tickInterval, m.liveElapsed)
 	}
 	if cmd == nil {
 		t.Fatalf("tick should reschedule the next tick")
@@ -210,5 +211,85 @@ func TestScrollKeyForwardsToViewport(t *testing.T) {
 	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyUp})
 	if m.vp.AtBottom() {
 		t.Errorf("an up keypress should scroll the viewport off the bottom")
+	}
+}
+
+// seededModel builds a non-TTY model seeded with the given Snapshot, mirroring
+// how run.go seeds the configured caps.
+func seededModel(t *testing.T, seed loop.Snapshot) model {
+	t.Helper()
+	t.Setenv("NO_COLOR", "")
+	ios, _ := iostreams.Test()
+	return newModel(ios, seed)
+}
+
+func TestInitialPanelRendersCapsAtT0(t *testing.T) {
+	m := seededModel(t, loop.Snapshot{MaxIterations: 20, MaxCostUSD: 5})
+	m, _ = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
+
+	view := m.View()
+	for _, w := range []string{"iter 0/20", "cost $0.00/$5.00", "elapsed 0s"} {
+		if !strings.Contains(view, w) {
+			t.Errorf("seed View missing %q before any metricsMsg\n--- view ---\n%s", w, view)
+		}
+	}
+	// The empty seed must not render the redundant narrative "iter 0000" line.
+	if strings.Contains(view, "iter 0000") {
+		t.Errorf("seed View should omit the narrative line, got:\n%s", view)
+	}
+}
+
+func TestDoneKeepsModelAlive(t *testing.T) {
+	m := sized(t, 80, 20)
+	m, cmd := step(t, m, doneMsg{})
+
+	if !m.done {
+		t.Error("doneMsg should set done")
+	}
+	if m.quitting {
+		t.Error("doneMsg must not set quitting (the run stays on screen)")
+	}
+	if cmd != nil {
+		t.Errorf("doneMsg must not return a command (no tea.Quit), got %T", cmd())
+	}
+}
+
+func TestDoneStopsElapsedTicker(t *testing.T) {
+	m := sized(t, 100, 24)
+	s := fullSnapshot()
+	s.Elapsed = 10 * time.Second
+	m, _ = step(t, m, metricsMsg{s: s})
+
+	m, _ = step(t, m, doneMsg{})
+	m, cmd := step(t, m, tickMsg{})
+
+	if m.liveElapsed != 10*time.Second {
+		t.Errorf("tick after done should leave elapsed frozen at 10s, got %v", m.liveElapsed)
+	}
+	if cmd != nil {
+		t.Error("tick after done should not reschedule the ticker")
+	}
+}
+
+func TestHelpTextChangesAfterDone(t *testing.T) {
+	m := sized(t, 100, 24)
+	if !strings.Contains(m.View(), "e expand") {
+		t.Fatalf("running help should offer expand:\n%s", m.View())
+	}
+
+	m, _ = step(t, m, doneMsg{})
+	if !strings.Contains(m.View(), "run complete") {
+		t.Errorf("finished help should read 'run complete':\n%s", m.View())
+	}
+}
+
+func TestPanesAreSeparated(t *testing.T) {
+	const w = 100
+	m := sized(t, w, 24)
+	m, _ = step(t, m, metricsMsg{s: fullSnapshot()})
+
+	rule := strings.Repeat("─", w)
+	if n := strings.Count(m.View(), rule); n != 2 {
+		t.Errorf("View should contain two full-width %d-col rules (panel/log + log/help), got %d:\n%s", w, n, m.View())
 	}
 }

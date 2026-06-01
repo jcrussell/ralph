@@ -95,8 +95,12 @@ func (f *Formatter) Render(s loop.Snapshot, width int) string {
 		lines = append(lines, f.line(width, []seg{{text: "beads: " + d}}))
 	}
 
-	lines = append(lines, truncatePlain(
-		narrative.FormatNarrative(s.Iter, s.Record.Narrative, s.Record.State), width))
+	// The narrative line is omitted for the pre-first-iteration seed (iter 0,
+	// empty record), which would otherwise render a redundant "iter 0000".
+	if s.Iter > 0 || s.Record.Narrative != "" || s.Record.State != "" {
+		lines = append(lines, truncatePlain(
+			narrative.FormatNarrative(s.Iter, s.Record.Narrative, s.Record.State), width))
+	}
 
 	return strings.Join(lines, "\n")
 }

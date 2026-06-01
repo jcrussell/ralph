@@ -15,13 +15,16 @@ the loop itself; this command adds no chatter of its own.
 Display: on an interactive terminal (both stdin and stderr are TTYs)
 run shows a live UI — a metrics panel (iteration, FSM state, cost vs
 budget, elapsed, last gate result) above a scrollable log pane fed by
-the loop's output. Keys: up/down scroll, e or tab expand/collapse the
-log pane, q or Ctrl-C quit (cancel the loop, then wait for it to
-unwind). Off a TTY (CI, pipes, redirects) or with --no-tui, run streams
-the one-line-per-iteration narrative instead; that path is byte-
-identical to the pre-TUI behavior. Either way the artifact files under
-.ralph/ (summary.jsonl, the orchestrator log) stay the durable data
-sink — the TUI is a view, not a record.
+the loop's output. The panel appears immediately, seeded with the
+configured caps, and updates each iteration. Keys: up/down scroll, e or
+tab expand/collapse the log pane, q or Ctrl-C quit (mid-run this cancels
+the loop, then waits for it to unwind). When the run finishes the UI
+stays up so you can scroll back through the logs and review what
+happened; press q to exit. Off a TTY (CI, pipes, redirects) or with
+--no-tui, run streams the one-line-per-iteration narrative instead; that
+path is byte-identical to the pre-TUI behavior. Either way the artifact
+files under .ralph/ (summary.jsonl, the orchestrator log) stay the
+durable data sink — the TUI is a view, not a record.
 
 Exit codes: 0 on done{*}; 1 on failed{*}; non-zero infrastructure
 errors (lock contention, disk full, malformed config) print to stderr

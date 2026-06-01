@@ -34,6 +34,7 @@ const (
 	minWidth     = 24
 	minHeight    = 6
 	helpHeight   = 1
+	sepHeight    = 1 // a divider rule is one terminal row
 	tickInterval = time.Second
 )
 
@@ -52,10 +53,12 @@ type logLineMsg struct{ line string }
 type tickMsg struct{}
 
 // doneMsg signals that loop.Run has reached a terminal outcome. The program
-// orchestration (bead ralph-g3s.7) Sends it when the loop goroutine returns;
-// the model quits so the program's Run unblocks and the orchestration can
-// cancel-and-wait, then map the exit code (the quit -> cancel -> wait
-// ordering of ralph-g3s.1).
+// orchestration (bead ralph-g3s.7) Sends it when the loop goroutine returns.
+// The model does NOT quit on it: the run stays on screen so the operator can
+// scroll the log pane and review what happened, freezing the elapsed clock and
+// switching the help line to "run complete". Run unblocks only when the user
+// presses q / Ctrl-C; the orchestration's subsequent cancel is then a no-op
+// (the loop already returned) and its buffered result is read immediately.
 type doneMsg struct{}
 
 // model is the package-private Bubble Tea model. It satisfies tea.Model
@@ -78,6 +81,7 @@ type model struct {
 	ready         bool
 	expanded      bool
 	quitting      bool
+	done          bool // loop.Run returned; keep rendering for review, quit only on q/ctrl+c
 }
 
 // newModel builds the model for the given streams. The live TUI renders
@@ -85,7 +89,12 @@ type model struct {
 // stderr TTY and NO_COLOR exactly as the metrics Formatter is; the
 // lipgloss renderer's color profile is pinned to match so View emits no
 // ANSI when color is off.
-func newModel(ios *iostreams.IOStreams) model {
+//
+// initial seeds the metrics panel so it renders at t0 (before the loop's
+// first iteration) with the configured caps and zeroed counters; the first
+// metricsMsg overwrites it. Seeding hasSnap also starts the elapsed ticker
+// from construction.
+func newModel(ios *iostreams.IOStreams, initial loop.Snapshot) model {
 	colorEnabled := ios.IsStderrTTY() && iostreams.EnvAllowsColor()
 	r := lipgloss.NewRenderer(ios.ErrOut)
 	if !colorEnabled {
@@ -97,6 +106,9 @@ func newModel(ios *iostreams.IOStreams) model {
 		r:            r,
 		colorEnabled: colorEnabled,
 		logs:         newLogRing(),
+		snap:         initial,
+		hasSnap:      true,
+		liveElapsed:  initial.Elapsed, // 0 for the seed; tick advances from here
 	}
 }
 
@@ -151,14 +163,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
+		if m.done {
+			return m, nil // stop advancing elapsed and stop rescheduling once finished
+		}
 		if m.hasSnap {
 			m.liveElapsed += tickInterval
 		}
 		return m, tick()
 
 	case doneMsg:
-		m.quitting = true
-		return m, tea.Quit
+		m.done = true // run finished; keep rendering so the user can scroll/review
+		return m, nil // NO tea.Quit — the user quits with q/ctrl+c
 	}
 	return m, nil
 }
@@ -170,9 +185,11 @@ func (m *model) relayout() {
 	if !m.ready {
 		return
 	}
-	reserved := helpHeight
+	reserved := helpHeight + sepHeight // help line + its divider
 	if !m.expanded {
-		reserved += lineCount(m.panelView())
+		if p := m.panelView(); p != "" {
+			reserved += lineCount(p) + sepHeight // panel + its divider
+		}
 	}
 	h := m.height - reserved
 	if h < 1 {
@@ -194,13 +211,13 @@ func (m model) View() string {
 		return m.degradedView()
 	}
 
-	sections := make([]string, 0, 3)
+	sections := make([]string, 0, 5)
 	if !m.expanded {
 		if p := m.panelView(); p != "" {
-			sections = append(sections, p)
+			sections = append(sections, p, m.sepView())
 		}
 	}
-	sections = append(sections, m.vp.View(), m.helpView())
+	sections = append(sections, m.vp.View(), m.sepView(), m.helpView())
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
@@ -232,14 +249,29 @@ func (m model) panelView() string {
 	return m.f.Render(s, m.width)
 }
 
-// helpView renders the key hints, faint when color is enabled.
+// helpView renders the key hints, faint when color is enabled. Once the run
+// has finished a "run complete" prefix is added; the scroll and expand/collapse
+// affordances stay so a user who finished in expanded mode can still collapse
+// back to the frozen metrics panel (which shows the terminal state).
 func (m model) helpView() string {
 	expand := "e expand"
 	if m.expanded {
 		expand = "e collapse"
 	}
-	help := truncatePlain("↑/↓ scroll · "+expand+" · q quit", m.width)
+	help := "↑/↓ scroll · " + expand + " · q quit"
+	if m.done {
+		help = "run complete · " + help
+	}
+	help = truncatePlain(help, m.width)
 	return m.r.NewStyle().Faint(true).Render(help)
+}
+
+// sepView renders a faint full-width horizontal rule separating the panel,
+// log pane, and help line. Faint degrades to plain under the ascii profile,
+// exactly like helpView; the ─ rune prints regardless (UTF-8, like the · and
+// ↑/↓ glyphs the panel and help already use).
+func (m model) sepView() string {
+	return m.r.NewStyle().Faint(true).Render(strings.Repeat("─", m.width))
 }
 
 // lineCount counts the lines in s (0 for empty).

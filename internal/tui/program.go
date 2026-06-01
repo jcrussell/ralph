@@ -15,8 +15,9 @@ package tui
 // The Program returns concrete (byob-interfaces.2); the run package defines
 // the consumer interface it satisfies. Two seams leave the package: LoopIO
 // (the inner, redirected IOStreams handed to loop.Run) and Observer (the
-// metrics sink set on loop.Options). Lifecycle is Run (blocks until quit or
-// Done) and Done (Send a terminal signal so Run unblocks).
+// metrics sink set on loop.Options). Lifecycle is Run (blocks until the user
+// quits) and Done (mark the run finished so it stays on screen for review;
+// the user then quits).
 
 import (
 	"os"
@@ -52,18 +53,22 @@ type Program struct {
 // NO_COLOR state gates color (newModel). The returned Program owns a fresh
 // inner IOStreams whose Out and ErrOut both tee into the log pane.
 //
+// initial seeds the metrics panel so it renders at t0 (before the loop's first
+// iteration) with the configured caps and zeroed counters; the first metricsMsg
+// from the loop overwrites it (newModel).
+//
 // extra ProgramOptions are appended after the base set (output, input, no
 // signal handler) and so override them — tests pass tea.WithoutRenderer() and
 // a scripted tea.WithInput() to exercise the program headlessly. Production
 // callers pass none and get os.Stdin input rendered to ErrOut.
-func New(ios *iostreams.IOStreams, extra ...tea.ProgramOption) *Program {
+func New(ios *iostreams.IOStreams, initial loop.Snapshot, extra ...tea.ProgramOption) *Program {
 	opts := append([]tea.ProgramOption{
 		tea.WithOutput(ios.ErrOut),
 		tea.WithInput(os.Stdin), //nolint:forbidigo // bubbletea reads keys from the real stdin; the TUI render target stays ErrOut (ralph-g3s.1)
 		tea.WithoutSignalHandler(),
 	}, extra...)
 
-	p := tea.NewProgram(newModel(ios), opts...)
+	p := tea.NewProgram(newModel(ios, initial), opts...)
 	inner, lw := newLogIOStreams(p)
 	return &Program{
 		p:   p,
@@ -82,11 +87,14 @@ func (pg *Program) LoopIO() *iostreams.IOStreams { return pg.ios }
 // iteration's Snapshot reaches the metrics panel.
 func (pg *Program) Observer() loop.Observer { return pg.obs }
 
-// Run starts the Bubble Tea event loop and blocks until the program quits —
-// either a user q / Ctrl-C keypress or a Done() signal. On return it stops the
-// log writer so a still-draining loop cannot Send into the torn-down program
-// (the quit-before-cancel half of the ralph-g3s.1 ordering); the orchestration
-// then cancels the loop and waits. It returns tea's run error, if any.
+// Run starts the Bubble Tea event loop and blocks until the user quits with
+// q / Ctrl-C. A Done() signal no longer quits — the finished run stays on
+// screen for review — so by the time Run returns the loop goroutine has already
+// completed. On return it stops the log writer so a still-draining loop cannot
+// Send into the torn-down program (the quit-before-cancel half of the
+// ralph-g3s.1 ordering); the orchestration then cancels the loop (a no-op once
+// it has returned) and reads its buffered result. It returns tea's run error,
+// if any.
 func (pg *Program) Run() error {
 	defer pg.lw.stop()
 	final, err := pg.p.Run()
@@ -105,6 +113,8 @@ func (pg *Program) Run() error {
 func (pg *Program) Tail() []string { return pg.tail }
 
 // Done signals that loop.Run has reached its terminal outcome: it Sends a
-// doneMsg, which the model folds into tea.Quit so Run unblocks. Safe to call
-// after the program has already quit (Send no-ops once the program is down).
+// doneMsg, which the model folds into its finished state (frozen panel,
+// "run complete" help) but does NOT quit — the operator quits with q / Ctrl-C
+// once done reviewing. Safe to call after the program has already quit (Send
+// no-ops once the program is down).
 func (pg *Program) Done() { pg.p.Send(doneMsg{}) }

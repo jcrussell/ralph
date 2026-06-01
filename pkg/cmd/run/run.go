@@ -74,13 +74,16 @@ the loop itself; this command adds no chatter of its own.
 Display: on an interactive terminal (both stdin and stderr are TTYs)
 run shows a live UI — a metrics panel (iteration, FSM state, cost vs
 budget, elapsed, last gate result) above a scrollable log pane fed by
-the loop's output. Keys: up/down scroll, e or tab expand/collapse the
-log pane, q or Ctrl-C quit (cancel the loop, then wait for it to
-unwind). Off a TTY (CI, pipes, redirects) or with --no-tui, run streams
-the one-line-per-iteration narrative instead; that path is byte-
-identical to the pre-TUI behavior. Either way the artifact files under
-.ralph/ (summary.jsonl, the orchestrator log) stay the durable data
-sink — the TUI is a view, not a record.
+the loop's output. The panel appears immediately, seeded with the
+configured caps, and updates each iteration. Keys: up/down scroll, e or
+tab expand/collapse the log pane, q or Ctrl-C quit (mid-run this cancels
+the loop, then waits for it to unwind). When the run finishes the UI
+stays up so you can scroll back through the logs and review what
+happened; press q to exit. Off a TTY (CI, pipes, redirects) or with
+--no-tui, run streams the one-line-per-iteration narrative instead; that
+path is byte-identical to the pre-TUI behavior. Either way the artifact
+files under .ralph/ (summary.jsonl, the orchestrator log) stay the
+durable data sink — the TUI is a view, not a record.
 
 Exit codes: 0 on done{*}; 1 on failed{*}; non-zero infrastructure
 errors (lock contention, disk full, malformed config) print to stderr
@@ -148,7 +151,16 @@ func runRun(ctx context.Context, opts *Options) error {
 	}
 
 	if shouldUseTUI(opts.F.IOStreams, opts) {
-		ui := tui.New(opts.F.IOStreams)
+		// Seed the metrics panel with the configured caps so it renders
+		// immediately, before the loop's first iteration produces a Snapshot.
+		// These caps match what notifyObserver copies, so the first real
+		// metricsMsg overwrites the seed seamlessly.
+		seed := loop.Snapshot{
+			MaxIterations:    cfg.Loop.MaxIterations,
+			MaxCostUSD:       cfg.Budget.MaxCostUSD,
+			MaxWallclockSecs: cfg.Budget.MaxWallclockSecs,
+		}
+		ui := tui.New(opts.F.IOStreams, seed)
 		return orchestrate(ctx, ui, loop.Run, lopts, opts.F.IOStreams.ErrOut)
 	}
 
@@ -194,10 +206,11 @@ type runResult struct {
 
 // orchestrate inverts control for the live-UI path (ralph-g3s.1): loop.Run
 // runs in a goroutine while the TUI renders in the foreground. The ordering is
-// quit -> cancel -> wait: when the UI returns (user q/Ctrl-C, or the loop's
-// Done signal) we cancel the context, then wait for the loop to unwind and
-// report, then map the exit code. The loop's IO and Observer come from the UI
-// so its output streams into the pane.
+// quit -> cancel -> wait: the UI returns only when the user quits (q/Ctrl-C) —
+// a finished run stays on screen for review until then — so we cancel the
+// context (a no-op if the loop already returned), wait for the loop to unwind
+// and report, then map the exit code. The loop's IO and Observer come from the
+// UI so its output streams into the pane.
 func orchestrate(ctx context.Context, ui liveUI, run loopFn, lopts loop.Options, realErr io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

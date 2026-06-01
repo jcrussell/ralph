@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jcrussell/ralph/internal/loop"
 	"github.com/jcrussell/ralph/pkg/iostreams"
 )
 
@@ -59,7 +60,7 @@ func TestObserverSendsMetricsMsg(t *testing.T) {
 // program exposes for loop.Options.Observer satisfies loop.Observer.
 func TestProgramObserverImplementsLoopObserver(t *testing.T) {
 	ios, _ := iostreams.Test()
-	pg := New(ios, tea.WithoutRenderer(), tea.WithInput(&bytes.Buffer{}))
+	pg := New(ios, loop.Snapshot{}, tea.WithoutRenderer(), tea.WithInput(&bytes.Buffer{}))
 	// Observer()'s return type is loop.Observer by its signature; assert it is
 	// non-nil so loop.Run never receives a nil sink.
 	if pg.Observer() == nil {
@@ -73,25 +74,35 @@ func TestProgramObserverImplementsLoopObserver(t *testing.T) {
 	}
 }
 
-// TestDoneQuitsProgram verifies the loop-done path: Done() Sends a terminal
-// signal that quits the program so Run unblocks.
-func TestDoneQuitsProgram(t *testing.T) {
+// TestDoneThenQuitUnblocksRun verifies the loop-done path: Done() marks the run
+// finished but does NOT quit (the run stays on screen for review); Run unblocks
+// only on a subsequent user quit keypress.
+func TestDoneThenQuitUnblocksRun(t *testing.T) {
 	ios, _ := iostreams.Test()
-	pg := New(ios, tea.WithoutRenderer(), tea.WithInput(&bytes.Buffer{}))
+	pg := New(ios, loop.Snapshot{}, tea.WithoutRenderer(), tea.WithInput(&bytes.Buffer{}))
 
 	errc := runDone(pg)
 	pg.p.Send(tea.WindowSizeMsg{Width: 100, Height: 24})
 	pg.Done()
+
+	// Done alone must not unblock Run — the program keeps rendering.
+	select {
+	case <-errc:
+		t.Fatal("Run returned after Done(); it must stay alive until the user quits")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	pg.p.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 	waitQuit(t, errc)
 }
 
 // TestProgramRendersMetricsToErrOut is the integration assertion: with a real
 // renderer pointed at the injected ErrOut, a Snapshot pushed through the
 // Observer bridge renders into the panel, and nothing lands on Out (stdout's
-// stand-in). Quit is driven by Done() so Run unblocks deterministically.
+// stand-in). Quit is driven by a Ctrl-C keypress (Done() no longer quits).
 func TestProgramRendersMetricsToErrOut(t *testing.T) {
 	ios, bufs := iostreams.Test()
-	pg := New(ios, tea.WithInput(&bytes.Buffer{}))
+	pg := New(ios, loop.Snapshot{}, tea.WithInput(&bytes.Buffer{}))
 
 	errc := runDone(pg)
 	pg.p.Send(tea.WindowSizeMsg{Width: 120, Height: 24})
@@ -99,7 +110,7 @@ func TestProgramRendersMetricsToErrOut(t *testing.T) {
 	// Let the renderer flush at least one frame containing the metrics before
 	// quitting; the final flush on quit captures the latest View regardless.
 	time.Sleep(50 * time.Millisecond)
-	pg.Done()
+	pg.p.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 	waitQuit(t, errc)
 
 	if got := bufs.ErrOut.String(); !strings.Contains(got, "iter 5/20") {

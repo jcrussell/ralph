@@ -112,6 +112,25 @@ func TestRenderOmitsBeadLineWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestRenderOmitsNarrativeForSeed(t *testing.T) {
+	// The pre-first-iteration seed (iter 0, empty record) carries only caps; the
+	// narrative line must be omitted so it renders just the two metric lines and
+	// no redundant "iter 0000".
+	got := nonTTY().Render(loop.Snapshot{MaxIterations: 30}, 0)
+
+	for _, w := range []string{"iter 0/30", "cost"} {
+		if !strings.Contains(got, w) {
+			t.Errorf("seed render missing %q:\n%s", w, got)
+		}
+	}
+	if strings.Contains(got, "iter 0000") {
+		t.Errorf("seed render should omit the narrative line, got:\n%s", got)
+	}
+	if n := len(strings.Split(got, "\n")); n != 2 {
+		t.Errorf("seed render should be exactly 2 lines, got %d:\n%s", n, got)
+	}
+}
+
 func TestRenderTruncatesAtNarrowWidth(t *testing.T) {
 	const width = 12
 	got := nonTTY().Render(fullSnapshot(), width)
