@@ -106,7 +106,7 @@ func (f *Formatter) Render(s loop.Snapshot, width int) string {
 // separator. When the joined plain text fits within width (or width is
 // unbounded) it renders with color; otherwise it falls back to plain
 // truncated text so a clip never cuts through an ANSI escape.
-func (f *Formatter) line(width int, segs []seg) string {
+func (*Formatter) line(width int, segs []seg) string {
 	nonEmpty := segs[:0:0]
 	for _, s := range segs {
 		if s.text != "" {
