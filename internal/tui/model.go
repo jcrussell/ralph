@@ -140,6 +140,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.expanded = !m.expanded
 			m.relayout()
 			return m, nil
+		case "left", "right":
+			m.jumpIteration(msg.String() == "right")
+			return m, nil
 		default:
 			var cmd tea.Cmd
 			m.vp, cmd = m.vp.Update(msg)
@@ -218,7 +221,20 @@ func (m model) View() string {
 		}
 	}
 	sections = append(sections, m.vp.View(), m.sepView(), m.helpView())
-	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+	return stripTrailingSpaces(lipgloss.JoinVertical(lipgloss.Left, sections...))
+}
+
+// stripTrailingSpaces removes the right-edge padding lipgloss.JoinVertical adds
+// to align every block to the widest one (here the full-width separator).
+// Content lines then render at their natural width; the ─ rules are all box
+// glyphs with nothing to trim. Keeps copied frames clean and avoids spurious
+// wraps when a padded line would overflow a slightly-stale width.
+func stripTrailingSpaces(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " ")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // degradedView is the tiny-window fallback: the metrics panel clipped to
@@ -258,7 +274,7 @@ func (m model) helpView() string {
 	if m.expanded {
 		expand = "e collapse"
 	}
-	help := "↑/↓ scroll · " + expand + " · q quit"
+	help := "↑/↓ scroll · ←/→ iter · " + expand + " · q quit"
 	if m.done {
 		help = "run complete · " + help
 	}
@@ -272,6 +288,65 @@ func (m model) helpView() string {
 // ↑/↓ glyphs the panel and help already use).
 func (m model) sepView() string {
 	return m.r.NewStyle().Faint(true).Render(strings.Repeat("─", m.width))
+}
+
+// jumpIteration moves the log viewport to the start of the previous (forward
+// false) or next (forward true) iteration's logs. Boundaries come from the
+// loop's "iter NNNN" summary lines in the pane (iterStartLines). With no
+// completed iteration yet it is a no-op; forward past the last boundary snaps to
+// the live tail, backward past the first to the top. The viewport's YOffset
+// indexes content lines 1:1 with the log ring (it does not soft-wrap), so a ring
+// line index is a valid YOffset; SetYOffset clamps to range.
+func (m *model) jumpIteration(forward bool) {
+	starts := m.iterStartLines()
+	cur := m.vp.YOffset
+	if forward {
+		for _, s := range starts {
+			if s > cur {
+				m.vp.SetYOffset(s)
+				return
+			}
+		}
+		m.vp.GotoBottom()
+		return
+	}
+	for i := len(starts) - 1; i >= 0; i-- {
+		if starts[i] < cur {
+			m.vp.SetYOffset(starts[i])
+			return
+		}
+	}
+	m.vp.GotoTop()
+}
+
+// iterStartLines returns the log-pane line indices where each iteration's logs
+// begin: index 0 (the first iteration) plus the line after every "iter NNNN"
+// summary marker the loop emits at each iteration's end. Ascending. Recomputed
+// per keypress so it stays correct as the bounded ring evicts old lines.
+func (m model) iterStartLines() []int {
+	starts := []int{0}
+	for i, ln := range m.logs.lines {
+		if i+1 < len(m.logs.lines) && isIterMarker(ln) {
+			starts = append(starts, i+1)
+		}
+	}
+	return starts
+}
+
+// isIterMarker reports whether line is one of the loop's per-iteration summary
+// lines — "iter NNNN  …" with a zero-padded count and two trailing spaces, as
+// emitIterLine writes (internal/loop). The prefix is plain ASCII (color, if any,
+// lands inside the narrative text), so a raw prefix match is reliable.
+func isIterMarker(line string) bool {
+	rest, ok := strings.CutPrefix(line, "iter ")
+	if !ok {
+		return false
+	}
+	d := 0
+	for d < len(rest) && rest[d] >= '0' && rest[d] <= '9' {
+		d++
+	}
+	return d >= 4 && strings.HasPrefix(rest[d:], "  ") // %04d + two spaces
 }
 
 // lineCount counts the lines in s (0 for empty).

@@ -293,3 +293,137 @@ func TestPanesAreSeparated(t *testing.T) {
 		t.Errorf("View should contain two full-width %d-col rules (panel/log + log/help), got %d:\n%s", w, n, m.View())
 	}
 }
+
+func TestViewHasNoTrailingWhitespace(t *testing.T) {
+	m := sized(t, 100, 24)
+	m, _ = step(t, m, metricsMsg{s: fullSnapshot()})
+	m, _ = step(t, m, logLineMsg{line: "short log line"})
+
+	for i, ln := range strings.Split(m.View(), "\n") {
+		if ln != strings.TrimRight(ln, " ") {
+			t.Errorf("View line %d has trailing whitespace: %q", i, ln)
+		}
+	}
+}
+
+func TestIsIterMarker(t *testing.T) {
+	cases := []struct {
+		line string
+		want bool
+	}{
+		{"iter 0001  clean → clean", true},
+		{"iter 0042  ", true},
+		{"iter 12  too few digits", false}, // %04d is always >=4 digits
+		{"iter 0001 single space", false},  // emitIterLine writes two spaces
+		{"iteration 0001  x", false},
+		{"some runner output", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := isIterMarker(c.line); got != c.want {
+			t.Errorf("isIterMarker(%q) = %v, want %v", c.line, got, c.want)
+		}
+	}
+}
+
+// seedIterLogs pushes 32 log lines with iteration-summary markers at slice
+// indices 10 and 21, so iterStartLines() == [0, 11, 22]. The window is sized so
+// every boundary is reachable: with fullSnapshot the panel is 5 lines, relayout
+// reserves 1+1+5+1=8, so vp.Height = 16-8 = 8 and maxYOffset = 32-8 = 24 >= 22.
+func seedIterLogs(t *testing.T) model {
+	t.Helper()
+	m := sized(t, 80, 16)
+	m, _ = step(t, m, metricsMsg{s: fullSnapshot()})
+	for i := 0; i < 32; i++ {
+		var line string
+		switch i {
+		case 10:
+			line = "iter 0001  first summary"
+		case 21:
+			line = "iter 0002  second summary"
+		default:
+			line = "log-" + strconv.Itoa(i)
+		}
+		m, _ = step(t, m, logLineMsg{line: line})
+	}
+	if got := m.iterStartLines(); len(got) != 3 || got[0] != 0 || got[1] != 11 || got[2] != 22 {
+		t.Fatalf("iterStartLines() = %v, want [0 11 22]", got)
+	}
+	if m.vp.Height != 8 {
+		t.Fatalf("vp.Height = %d, want 8 (panel layout changed — fix the window size)", m.vp.Height)
+	}
+	return m
+}
+
+func TestJumpIteration(t *testing.T) {
+	m := seedIterLogs(t)
+	m.vp.SetYOffset(0)
+
+	(&m).jumpIteration(true)
+	if m.vp.YOffset != 11 {
+		t.Fatalf("forward from top: YOffset = %d, want 11", m.vp.YOffset)
+	}
+	(&m).jumpIteration(true)
+	if m.vp.YOffset != 22 {
+		t.Fatalf("forward again: YOffset = %d, want 22", m.vp.YOffset)
+	}
+	(&m).jumpIteration(true)
+	if !m.vp.AtBottom() {
+		t.Fatalf("forward past last boundary should snap to bottom, YOffset = %d", m.vp.YOffset)
+	}
+
+	// Now walk back up from the bottom.
+	(&m).jumpIteration(false)
+	if m.vp.YOffset != 22 {
+		t.Fatalf("backward from bottom: YOffset = %d, want 22", m.vp.YOffset)
+	}
+	(&m).jumpIteration(false)
+	if m.vp.YOffset != 11 {
+		t.Fatalf("backward again: YOffset = %d, want 11", m.vp.YOffset)
+	}
+	(&m).jumpIteration(false)
+	if m.vp.YOffset != 0 {
+		t.Fatalf("backward to first boundary: YOffset = %d, want 0", m.vp.YOffset)
+	}
+}
+
+func TestJumpIterationNoMarkersIsNoop(t *testing.T) {
+	m := sized(t, 80, 16)
+	m, _ = step(t, m, metricsMsg{s: fullSnapshot()})
+	for i := 0; i < 20; i++ {
+		m, _ = step(t, m, logLineMsg{line: "plain-" + strconv.Itoa(i)})
+	}
+	m.vp.SetYOffset(3)
+	(&m).jumpIteration(true) // no markers -> snaps to live tail
+	if !m.vp.AtBottom() {
+		t.Errorf("forward with no markers should go to bottom, YOffset = %d", m.vp.YOffset)
+	}
+	m.vp.SetYOffset(3)
+	(&m).jumpIteration(false) // no boundary above 3 except 0
+	if m.vp.YOffset != 0 {
+		t.Errorf("backward with no markers should go to top, YOffset = %d", m.vp.YOffset)
+	}
+}
+
+func TestArrowKeysJumpIterations(t *testing.T) {
+	m := seedIterLogs(t)
+	m.vp.SetYOffset(0)
+
+	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyRight})
+	if m.vp.YOffset != 11 {
+		t.Errorf("→ should jump to next iteration (11), got %d", m.vp.YOffset)
+	}
+	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyLeft})
+	if m.vp.YOffset != 0 {
+		t.Errorf("← should jump to previous iteration (0), got %d", m.vp.YOffset)
+	}
+
+	// h/l are the viewport's horizontal-scroll aliases; with horizontalStep==0
+	// they are no-ops here and must NOT trigger an iteration jump.
+	before := m.vp.YOffset
+	m, _ = step(t, m, runeKey('l'))
+	m, _ = step(t, m, runeKey('h'))
+	if m.vp.YOffset != before {
+		t.Errorf("h/l must not change the vertical offset, got %d want %d", m.vp.YOffset, before)
+	}
+}
