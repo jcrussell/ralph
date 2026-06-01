@@ -65,6 +65,44 @@ Hard caps that force `failed{budget}`. `0` = unlimited.
 |---------------|--------|----------|---------|
 | `base_branch` | string | `"main"` | Base branch for review-mode merge-filing flows. Used by `internal/git.ResolveBase` when nothing else is specified. |
 
+## Live TUI (`ralph run`)
+
+The interactive terminal UI is not a config key — it has no `[tui]` section and
+no `config.toml` toggle. It is gated entirely on the terminal and one flag, so
+it stays out of the config layers above.
+
+**Activation.** `ralph run` shows the live UI automatically when **both** stdin
+and stderr are TTYs. Off a TTY — CI, pipes, output redirects — it falls back to
+the synchronous one-line-per-iteration narrative. There is no way to force the
+UI on when stderr is not a terminal.
+
+**`--no-tui`.** Pass `--no-tui` to disable the UI for one invocation even on a
+TTY; run then streams the narrative instead. This flag is the only switch — the
+off-TTY fallback and the `--no-tui` path are the same code path, and it is
+byte-identical to the pre-TUI behavior.
+
+**Layout.** A metrics panel (iteration N/max, FSM state, cumulative cost vs
+budget cap, elapsed vs wallclock cap, last gate result, consecutive-dirty
+count, last-iteration cost/duration/commits) sits above a scrollable log pane
+fed by the loop's interleaved output. The pane follows the tail unless you
+scroll up. On a window too small to split, the layout degrades to a clipped
+metrics block. Color honors `NO_COLOR` and the stderr TTY.
+
+**Keys.**
+
+| Key             | Action |
+|-----------------|--------|
+| `↑` / `↓`       | Scroll the log pane. |
+| `e` or `Tab`    | Expand / collapse the log pane (hides the metrics panel for full-height logs). |
+| `q` or `Ctrl-C` | Quit: cancel the loop, wait for the current iteration to unwind, then exit. |
+
+**Files are the durable data sink.** The TUI is a view, not a record. The
+metrics and log lines it shows are also written to the artifact files under
+`.ralph/` (`summary.jsonl`, the orchestrator log) regardless of whether the UI
+is active. Nothing is lost by running `--no-tui` or off a TTY; inspect the
+files (or `ralph logs` / `ralph status` / `ralph timeline`) for the durable
+history.
+
 ## See also
 
 - `internal/config/config.go` — the Go struct definitions and the layered load.

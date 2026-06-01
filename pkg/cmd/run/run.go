@@ -67,6 +67,17 @@ graceful exit or failed{*} on budget exhaustion / auth / runner-
 terminal failure. The user-facing iteration narrative is written by
 the loop itself; this command adds no chatter of its own.
 
+Display: on an interactive terminal (both stdin and stderr are TTYs)
+run shows a live UI — a metrics panel (iteration, FSM state, cost vs
+budget, elapsed, last gate result) above a scrollable log pane fed by
+the loop's output. Keys: up/down scroll, e or tab expand/collapse the
+log pane, q or Ctrl-C quit (cancel the loop, then wait for it to
+unwind). Off a TTY (CI, pipes, redirects) or with --no-tui, run streams
+the one-line-per-iteration narrative instead; that path is byte-
+identical to the pre-TUI behavior. Either way the artifact files under
+.ralph/ (summary.jsonl, the orchestrator log) stay the durable data
+sink — the TUI is a view, not a record.
+
 Exit codes: 0 on done{*}; 1 on failed{*}; non-zero infrastructure
 errors (lock contention, disk full, malformed config) print to stderr
 and exit 1.`,
@@ -80,7 +91,10 @@ and exit 1.`,
   ralph run --once --dry-run
 
   # cap iterations at 5 for this invocation without editing config.toml
-  ralph run --max-iterations=5`,
+  ralph run --max-iterations=5
+
+  # disable the live TUI and stream the iteration narrative instead
+  ralph run --no-tui`,
 		RunE: func(c *cobra.Command, args []string) error {
 			if err := opts.Validate(); err != nil {
 				return err
