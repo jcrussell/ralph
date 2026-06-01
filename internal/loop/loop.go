@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -122,45 +123,13 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 	}
 	defer func() { _ = sum.Close() }()
 
-	// Load FSM (or Fresh()) and apply review-mode setup.
-	f, err := fsm.Load(opts.Repo)
+	// Load FSM (or Fresh()), apply --fresh / done auto-reset / review-mode
+	// setup, and refuse a pre-existing failed{*} terminal. Done before
+	// runs.Begin so no zombie run dir is created. Resource-acquisition
+	// defers above stay in Run; this block is pure FSM preparation.
+	f, err := loadAndPrepareFSM(opts, opts.IO.ErrOut)
 	if err != nil {
-		return fsm.Outcome{}, fmt.Errorf("loop: load fsm: %w", err)
-	}
-	// --fresh resets persisted state to start before any other handling,
-	// so it composes with ReviewMode (review --fresh re-enters review
-	// mode from a fresh FSM). Save immediately so an early crash doesn't
-	// leave the stale terminal state on disk.
-	switch {
-	case opts.Fresh:
-		f = fsm.Fresh()
-		if serr := f.Save(opts.Repo); serr != nil {
-			return fsm.Outcome{}, fmt.Errorf("loop: reset fsm: %w", serr)
-		}
-	case f.State == fsm.StateDone:
-		// Graceful done{*} is prior-run history, not in-flight state.
-		// Auto-reset so the next `ralph run` just works; notice on stderr
-		// keeps the transition visible. failed{*} still falls through to
-		// the explicit refusal below.
-		_, _ = fmt.Fprintf(opts.IO.ErrOut, "ralph: prior run ended at %s; resetting fsm.json\n", f.Outcome)
-		f = fsm.Fresh()
-		if serr := f.Save(opts.Repo); serr != nil {
-			return fsm.Outcome{}, fmt.Errorf("loop: reset fsm: %w", serr)
-		}
-	}
-	if opts.ReviewMode {
-		f.ReviewMode = true
-		f.ReviewBranch = opts.ReviewBranch
-		f.ReviewBase = opts.ReviewBase
-	}
-	// Refuse to silently no-op against a pre-existing failed{*} terminal
-	// FSM (done{*} is auto-reset above). Done before runs.Begin so no
-	// zombie run dir is created.
-	if f.State.Terminal() {
-		_, _ = fmt.Fprintf(opts.IO.ErrOut,
-			"ralph: fsm is in terminal state %s; pass --fresh to reset, or inspect .ralph/state/fsm.json\n",
-			f.Outcome)
-		return fsm.Outcome{}, ErrTerminalState
+		return fsm.Outcome{}, err
 	}
 
 	// Open the latest open run when resuming a mid-loop FSM, otherwise
@@ -247,6 +216,51 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 		}
 	}
 	return rc.fsm.Outcome, nil
+}
+
+// loadAndPrepareFSM loads the persisted FSM and applies the pre-run
+// adjustments Run needs before beginning a run: --fresh resets to a Fresh()
+// state; a graceful done{*} terminal is auto-reset (prior-run history, not
+// in-flight state); review-mode fields are stamped on; and a pre-existing
+// failed{*} terminal is refused with ErrTerminalState. --fresh is handled
+// first so it composes with ReviewMode (review --fresh re-enters review mode
+// from a fresh FSM). Resets are saved immediately so an early crash doesn't
+// leave stale terminal state on disk. Notices are written to errOut. This is
+// the pure FSM-preparation block — it holds no resources, so callers keep the
+// lock/log/summary acquisition defers in Run.
+func loadAndPrepareFSM(opts Options, errOut io.Writer) (*fsm.FSM, error) {
+	f, err := fsm.Load(opts.Repo)
+	if err != nil {
+		return nil, fmt.Errorf("loop: load fsm: %w", err)
+	}
+	switch {
+	case opts.Fresh:
+		f = fsm.Fresh()
+		if serr := f.Save(opts.Repo); serr != nil {
+			return nil, fmt.Errorf("loop: reset fsm: %w", serr)
+		}
+	case f.State == fsm.StateDone:
+		// Auto-reset so the next `ralph run` just works; notice on stderr
+		// keeps the transition visible. failed{*} still falls through to
+		// the explicit refusal below.
+		_, _ = fmt.Fprintf(errOut, "ralph: prior run ended at %s; resetting fsm.json\n", f.Outcome)
+		f = fsm.Fresh()
+		if serr := f.Save(opts.Repo); serr != nil {
+			return nil, fmt.Errorf("loop: reset fsm: %w", serr)
+		}
+	}
+	if opts.ReviewMode {
+		f.ReviewMode = true
+		f.ReviewBranch = opts.ReviewBranch
+		f.ReviewBase = opts.ReviewBase
+	}
+	if f.State.Terminal() {
+		_, _ = fmt.Fprintf(errOut,
+			"ralph: fsm is in terminal state %s; pass --fresh to reset, or inspect .ralph/state/fsm.json\n",
+			f.Outcome)
+		return nil, ErrTerminalState
+	}
+	return f, nil
 }
 
 // handleStartState routes out of the virtual start state. No runner,
