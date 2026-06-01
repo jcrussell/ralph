@@ -51,6 +51,13 @@ type logLineMsg struct{ line string }
 // tickMsg drives the once-a-second elapsed bump between iterations.
 type tickMsg struct{}
 
+// doneMsg signals that loop.Run has reached a terminal outcome. The program
+// orchestration (bead ralph-g3s.7) Sends it when the loop goroutine returns;
+// the model quits so the program's Run unblocks and the orchestration can
+// cancel-and-wait, then map the exit code (the quit -> cancel -> wait
+// ordering of ralph-g3s.1).
+type doneMsg struct{}
+
 // model is the package-private Bubble Tea model. It satisfies tea.Model
 // with value receivers (the bubbletea convention); Update returns the
 // mutated copy.
@@ -148,6 +155,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.liveElapsed += tickInterval
 		}
 		return m, tick()
+
+	case doneMsg:
+		m.quitting = true
+		return m, tea.Quit
 	}
 	return m, nil
 }
