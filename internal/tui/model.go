@@ -43,8 +43,9 @@ const (
 // authoritative as of that iteration.
 type metricsMsg struct{ s loop.Snapshot }
 
-// logLineMsg carries one already-split log line into the pane. A bounded,
-// ANSI-safe ring buffer replaces the naive slice in bead 5.
+// logLineMsg carries one already-split log line into the pane. It lands in
+// the bounded, ANSI-tolerant logRing (logring.go), which caps scrollback so
+// a long run cannot OOM the TUI.
 type logLineMsg struct{ line string }
 
 // tickMsg drives the once-a-second elapsed bump between iterations.
@@ -64,7 +65,7 @@ type model struct {
 	hasSnap     bool
 	liveElapsed time.Duration
 
-	logs []string
+	logs *logRing
 
 	width, height int
 	ready         bool
@@ -88,6 +89,7 @@ func newModel(ios *iostreams.IOStreams) model {
 		vp:           viewport.New(0, 0),
 		r:            r,
 		colorEnabled: colorEnabled,
+		logs:         newLogRing(),
 	}
 }
 
@@ -134,8 +136,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case logLineMsg:
 		atBottom := m.vp.AtBottom()
-		m.logs = append(m.logs, msg.line)
-		m.vp.SetContent(strings.Join(m.logs, "\n"))
+		m.logs.push(msg.line)
+		m.vp.SetContent(m.logs.content())
 		if atBottom {
 			m.vp.GotoBottom() // follow the tail unless the user scrolled up
 		}

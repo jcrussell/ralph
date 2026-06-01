@@ -74,8 +74,8 @@ func TestLogLineMsgAppendsAndShows(t *testing.T) {
 	m, _ = step(t, m, logLineMsg{line: "hello-from-runner"})
 	m, _ = step(t, m, logLineMsg{line: "second-line"})
 
-	if len(m.logs) != 2 {
-		t.Fatalf("logs = %d, want 2", len(m.logs))
+	if m.logs.count() != 2 {
+		t.Fatalf("logs = %d, want 2", m.logs.count())
 	}
 	if !strings.Contains(m.View(), "hello-from-runner") {
 		t.Errorf("View should show appended log line:\n%s", m.View())
