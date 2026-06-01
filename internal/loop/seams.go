@@ -89,6 +89,11 @@ type Snapshot struct {
 
 	// Elapsed is the wallclock since Run started, per the loop's Clock.
 	Elapsed time.Duration
+
+	// ReadyBeads is the count of ready issues (bd ready, honoring the
+	// configured exclude_types) as of this iteration — the same queue the
+	// done{queue_empty} check drains. -1 means "not yet sampled".
+	ReadyBeads int
 }
 
 // noopObserver is the nil-default Observer: it drops every Snapshot so an

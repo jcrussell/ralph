@@ -13,9 +13,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jcrussell/ralph/internal/bd"
 	"github.com/jcrussell/ralph/internal/config"
 	"github.com/jcrussell/ralph/internal/fsm"
 	"github.com/jcrussell/ralph/internal/loop"
+	"github.com/jcrussell/ralph/internal/ralphcmd/build"
 	"github.com/jcrussell/ralph/internal/tui"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 	"github.com/jcrussell/ralph/pkg/iostreams"
@@ -159,8 +161,18 @@ func runRun(ctx context.Context, opts *Options) error {
 			MaxIterations:    cfg.Loop.MaxIterations,
 			MaxCostUSD:       cfg.Budget.MaxCostUSD,
 			MaxWallclockSecs: cfg.Budget.MaxWallclockSecs,
+			ReadyBeads:       -1, // overwritten by the sample below, or shown as "… ready"
 		}
-		ui := tui.New(opts.F.IOStreams, seed)
+		// Seed the header's ready count before the first iteration (which can
+		// take minutes). Build the bd client exactly as the loop does
+		// (loop.go) so the configured exclude_types filter is honored, matching
+		// the loop's own per-iteration ready-queue query.
+		bdc := bd.New("", repo, bd.WithExcludeTypes(cfg.Beads.ExcludeTypes...))
+		if n, err := fsm.BDReadyCount(ctx, bdc, ""); err == nil {
+			seed.ReadyBeads = n
+		}
+		hdr := tui.Header{Version: build.Info().Version, Dir: repo}
+		ui := tui.New(opts.F.IOStreams, seed, hdr)
 		return orchestrate(ctx, ui, loop.Run, lopts, opts.F.IOStreams.ErrOut)
 	}
 

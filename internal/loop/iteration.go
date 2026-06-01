@@ -273,6 +273,16 @@ func routeAndPersist(ctx context.Context, rc *runContext, prev fsm.Outcome, befo
 	afterBD := snapshotBD(ctx, rc)
 	diff := bd.DiffSnapshots(beforeBD, afterBD)
 
+	// Sample the ready-queue depth for the live UI's header. This is the
+	// `ready` half of the done{queue_empty} routing below (which also requires
+	// no in-progress issues), honoring the same exclude_types filter; the
+	// header's terminal badge keys off the authoritative FSM state, not this
+	// count. afterBD can't be reused: `bd ready` respects blockers/dependencies
+	// a status map doesn't express. Best-effort — on error keep the last value.
+	if n, rerr := fsm.BDReadyCount(ctx, rc.bdClient, ""); rerr == nil {
+		rc.lastReadyBeads = n
+	}
+
 	// Route to the next state.
 	runnerFailure := classifyToReason(mode, rc.deadStreak, rc.cfg.Backoff.DeadSessionThreshold)
 	next, err := fsm.SelectNextState(ctx, fsm.RouteInput{
@@ -460,6 +470,7 @@ func notifyObserver(rc *runContext, rec IterRecord) {
 		MaxCostUSD:              rc.cfg.Budget.MaxCostUSD,
 		MaxWallclockSecs:        rc.cfg.Budget.MaxWallclockSecs,
 		Elapsed:                 rc.clock.Now().Sub(rc.started),
+		ReadyBeads:              rc.lastReadyBeads,
 	})
 }
 

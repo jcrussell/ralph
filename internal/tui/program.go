@@ -55,20 +55,21 @@ type Program struct {
 //
 // initial seeds the metrics panel so it renders at t0 (before the loop's first
 // iteration) with the configured caps and zeroed counters; the first metricsMsg
-// from the loop overwrites it (newModel).
+// from the loop overwrites it (newModel). hdr carries the static header
+// identity (version, cwd) the model renders above the panel.
 //
 // extra ProgramOptions are appended after the base set (output, input, no
 // signal handler) and so override them — tests pass tea.WithoutRenderer() and
 // a scripted tea.WithInput() to exercise the program headlessly. Production
 // callers pass none and get os.Stdin input rendered to ErrOut.
-func New(ios *iostreams.IOStreams, initial loop.Snapshot, extra ...tea.ProgramOption) *Program {
+func New(ios *iostreams.IOStreams, initial loop.Snapshot, hdr Header, extra ...tea.ProgramOption) *Program {
 	opts := append([]tea.ProgramOption{
 		tea.WithOutput(ios.ErrOut),
 		tea.WithInput(os.Stdin), //nolint:forbidigo // bubbletea reads keys from the real stdin; the TUI render target stays ErrOut (ralph-g3s.1)
 		tea.WithoutSignalHandler(),
 	}, extra...)
 
-	p := tea.NewProgram(newModel(ios, initial), opts...)
+	p := tea.NewProgram(newModel(ios, initial, hdr), opts...)
 	inner, lw := newLogIOStreams(p)
 	return &Program{
 		p:   p,

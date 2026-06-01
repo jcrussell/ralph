@@ -15,8 +15,11 @@ package tui
 // metricsMsg reset the local offset.
 
 import (
+	"fmt"
+	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -33,10 +36,19 @@ import (
 const (
 	minWidth     = 24
 	minHeight    = 6
+	headerHeight = 1
 	helpHeight   = 1
 	sepHeight    = 1 // a divider rule is one terminal row
 	tickInterval = time.Second
 )
+
+// Header holds the static identity shown in the run header: the tool version
+// and the working directory. The dynamic fields (ready-bead count, terminal
+// state) come from the per-iteration Snapshot, not here.
+type Header struct {
+	Version string // build.Info().Version, e.g. "0.3.1" or "dev"
+	Dir     string // repo root / cwd the run is operating on
+}
 
 // metricsMsg carries a fresh per-iteration Snapshot into the model. The
 // future Observer (bead 7) wraps each loop.Snapshot and Sends it; it
@@ -65,9 +77,10 @@ type doneMsg struct{}
 // with value receivers (the bubbletea convention); Update returns the
 // mutated copy.
 type model struct {
-	f  *Formatter
-	vp viewport.Model
-	r  *lipgloss.Renderer
+	f   *Formatter
+	vp  viewport.Model
+	r   *lipgloss.Renderer
+	hdr Header
 
 	colorEnabled bool
 
@@ -93,8 +106,9 @@ type model struct {
 // initial seeds the metrics panel so it renders at t0 (before the loop's
 // first iteration) with the configured caps and zeroed counters; the first
 // metricsMsg overwrites it. Seeding hasSnap also starts the elapsed ticker
-// from construction.
-func newModel(ios *iostreams.IOStreams, initial loop.Snapshot) model {
+// from construction. hdr carries the static header identity (version, cwd)
+// rendered above the panel.
+func newModel(ios *iostreams.IOStreams, initial loop.Snapshot, hdr Header) model {
 	colorEnabled := ios.IsStderrTTY() && iostreams.EnvAllowsColor()
 	r := lipgloss.NewRenderer(ios.ErrOut)
 	if !colorEnabled {
@@ -104,6 +118,7 @@ func newModel(ios *iostreams.IOStreams, initial loop.Snapshot) model {
 		f:            NewFormatter(ios),
 		vp:           viewport.New(0, 0),
 		r:            r,
+		hdr:          hdr,
 		colorEnabled: colorEnabled,
 		logs:         newLogRing(),
 		snap:         initial,
@@ -188,7 +203,8 @@ func (m *model) relayout() {
 	if !m.ready {
 		return
 	}
-	reserved := helpHeight + sepHeight // help line + its divider
+	reserved := headerHeight + sepHeight // header line + its divider (always shown)
+	reserved += helpHeight + sepHeight   // help line + its divider
 	if !m.expanded {
 		if p := m.panelView(); p != "" {
 			reserved += lineCount(p) + sepHeight // panel + its divider
@@ -214,7 +230,8 @@ func (m model) View() string {
 		return m.degradedView()
 	}
 
-	sections := make([]string, 0, 5)
+	sections := make([]string, 0, 7)
+	sections = append(sections, m.headerView(), m.sepView())
 	if !m.expanded {
 		if p := m.panelView(); p != "" {
 			sections = append(sections, p, m.sepView())
@@ -263,6 +280,91 @@ func (m model) panelView() string {
 	s := m.snap
 	s.Elapsed = m.liveElapsed
 	return m.f.Render(s, m.width)
+}
+
+// headerView renders the top identity line: "ralph <version>  ·  <dir>  ·
+// <N> ready", plus a colored terminal badge once the run has finished. The
+// badge is driven by the authoritative FSM state in the latest Snapshot, not
+// by the ready count alone, so a transient 0-ready mid-run shows no badge. Like
+// the panel's lines, color is applied only when the plain text fits the width;
+// otherwise it falls back to truncated plain text so a clip never severs an
+// ANSI escape. Color degrades to plain under the renderer's ascii profile,
+// exactly like helpView/sepView.
+func (m model) headerView() string {
+	bold := func(s string) string { return m.r.NewStyle().Bold(true).Render(s) }
+
+	segs := []seg{
+		{text: "ralph " + m.hdr.Version, color: bold},
+		{text: abbrevHome(m.hdr.Dir)},
+		{text: readyField(m.snap.ReadyBeads)},
+	}
+	if m.done {
+		segs = append(segs, m.doneBadge())
+	}
+
+	// Drop empty segments (e.g. an unset dir) so no dangling separator shows,
+	// then apply the fit-or-truncate rule the metrics panel uses.
+	nonEmpty := segs[:0:0]
+	for _, s := range segs {
+		if s.text != "" {
+			nonEmpty = append(nonEmpty, s)
+		}
+	}
+	plain := joinSegs(nonEmpty, false)
+	if m.width <= 0 || utf8.RuneCountInString(plain) <= m.width {
+		return joinSegs(nonEmpty, true)
+	}
+	return truncatePlain(plain, m.width)
+}
+
+// readyField renders the ready-bead count, or "… ready" before the loop has
+// sampled it (ReadyBeads < 0).
+func readyField(n int) string {
+	if n < 0 {
+		return "… ready"
+	}
+	return fmt.Sprintf("%d ready", n)
+}
+
+// doneBadge renders the terminal-state badge shown once the run has finished.
+// done{*} is green, failed{*} red, anything else (e.g. a mid-run quit) a faint
+// "stopped"; the reason, when present, is parenthesized.
+func (m model) doneBadge() seg {
+	st := string(m.snap.State)
+	reason := ""
+	if m.snap.Reason != "" {
+		reason = " (" + string(m.snap.Reason) + ")"
+	}
+	fg := func(c string) func(string) string {
+		return func(s string) string { return m.r.NewStyle().Foreground(lipgloss.Color(c)).Render(s) }
+	}
+	switch {
+	case strings.HasPrefix(st, "done"):
+		return seg{text: "✓ done" + reason, color: fg("2")}
+	case strings.HasPrefix(st, "failed"):
+		return seg{text: "✗ failed" + reason, color: fg("1")}
+	default:
+		return seg{text: "■ stopped", color: func(s string) string { return m.r.NewStyle().Faint(true).Render(s) }}
+	}
+}
+
+// abbrevHome shortens a leading $HOME to "~" for a compact header. A dir
+// outside home, or an undeterminable home, is returned unchanged.
+func abbrevHome(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return dir
+	}
+	if dir == home || dir == home+string(os.PathSeparator) {
+		return "~"
+	}
+	if strings.HasPrefix(dir, home+string(os.PathSeparator)) {
+		return "~" + dir[len(home):]
+	}
+	return dir
 }
 
 // helpView renders the key hints, faint when color is enabled. Once the run

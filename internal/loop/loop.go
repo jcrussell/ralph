@@ -89,6 +89,11 @@ type runContext struct {
 	// iteration's gate-hook stdout file (when a gate ran). composePrompt
 	// reads its tail to populate {{.GateOutput}} for the next iteration.
 	lastGateStdoutFile string
+
+	// lastReadyBeads is the most recent `bd ready` count, sampled in
+	// routeAndPersist and surfaced to the Observer's Snapshot. -1 until the
+	// first sample so the live UI can render "not yet sampled".
+	lastReadyBeads int
 }
 
 // Run drives the FSM until a terminal outcome (done or failed). Run
@@ -193,6 +198,16 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 		clock:    opts.Clock,
 		observer: opts.Observer,
 		started:  started,
+
+		lastReadyBeads: -1, // not yet sampled
+	}
+
+	// Sample the ready-queue depth once at startup so the live UI's header
+	// shows a real count from the first Snapshot — even if the first tick is
+	// skipped or quota-waited (those paths don't re-sample). Best-effort:
+	// routeAndPersist refreshes it each normal iteration.
+	if n, err := fsm.BDReadyCount(ctx, rc.bdClient, ""); err == nil {
+		rc.lastReadyBeads = n
 	}
 
 	// Handle the virtual start state inline: route immediately without

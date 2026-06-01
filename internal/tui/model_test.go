@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jcrussell/ralph/internal/fsm"
 	"github.com/jcrussell/ralph/internal/loop"
 	"github.com/jcrussell/ralph/pkg/iostreams"
 )
@@ -37,7 +39,7 @@ func newTestModel(t *testing.T) model {
 	t.Helper()
 	t.Setenv("NO_COLOR", "")
 	ios, _ := iostreams.Test()
-	return newModel(ios, loop.Snapshot{})
+	return newModel(ios, loop.Snapshot{}, Header{})
 }
 
 // sized returns a model that has received an initial WindowSizeMsg.
@@ -156,7 +158,7 @@ func TestTinyWindowDegradesGracefully(t *testing.T) {
 func TestNoColorYieldsNoANSI(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	ios, _ := iostreams.Test()
-	m := newModel(ios, loop.Snapshot{})
+	m := newModel(ios, loop.Snapshot{}, Header{})
 	if m.colorEnabled {
 		t.Fatalf("non-TTY + NO_COLOR should disable color")
 	}
@@ -220,7 +222,7 @@ func seededModel(t *testing.T, seed loop.Snapshot) model {
 	t.Helper()
 	t.Setenv("NO_COLOR", "")
 	ios, _ := iostreams.Test()
-	return newModel(ios, seed)
+	return newModel(ios, seed, Header{})
 }
 
 func TestInitialPanelRendersCapsAtT0(t *testing.T) {
@@ -283,14 +285,111 @@ func TestHelpTextChangesAfterDone(t *testing.T) {
 	}
 }
 
+// headerModel builds a sized model with the given header, then folds in a
+// snapshot carrying the given ready count and FSM state/reason. done marks the
+// run finished (so the terminal badge shows).
+func headerModel(t *testing.T, hdr Header, ready int, state, reason string, done bool) model {
+	t.Helper()
+	t.Setenv("NO_COLOR", "")
+	ios, _ := iostreams.Test()
+	m, _ := step(t, newModel(ios, loop.Snapshot{}, hdr), tea.WindowSizeMsg{Width: 120, Height: 24})
+	m, _ = step(t, m, metricsMsg{s: loop.Snapshot{
+		Iter:       1,
+		State:      fsm.State(state),
+		Reason:     fsm.Reason(reason),
+		ReadyBeads: ready,
+	}})
+	if done {
+		m, _ = step(t, m, doneMsg{})
+	}
+	return m
+}
+
+func TestHeaderRendersIdentityAndReady(t *testing.T) {
+	m := headerModel(t, Header{Version: "1.2.3", Dir: "/srv/proj"}, 4, "clean", "", false)
+	view := m.View()
+	for _, w := range []string{"ralph 1.2.3", "/srv/proj", "4 ready"} {
+		if !strings.Contains(view, w) {
+			t.Errorf("header missing %q:\n%s", w, view)
+		}
+	}
+	// No terminal badge while the run is live.
+	if strings.Contains(view, "done") || strings.Contains(view, "failed") {
+		t.Errorf("running header should carry no terminal badge:\n%s", view)
+	}
+}
+
+func TestHeaderReadyUnsampled(t *testing.T) {
+	m := headerModel(t, Header{Version: "dev", Dir: "/p"}, -1, "clean", "", false)
+	if !strings.Contains(m.View(), "… ready") {
+		t.Errorf("unsampled ready count should render '… ready':\n%s", m.View())
+	}
+}
+
+func TestHeaderDoneBadge(t *testing.T) {
+	m := headerModel(t, Header{Version: "dev", Dir: "/p"}, 0, "done", "queue_empty", true)
+	if !strings.Contains(m.View(), "✓ done (queue_empty)") {
+		t.Errorf("finished header should show the done badge:\n%s", m.View())
+	}
+}
+
+func TestHeaderFailedBadge(t *testing.T) {
+	m := headerModel(t, Header{Version: "dev", Dir: "/p"}, 3, "failed", "budget", true)
+	if !strings.Contains(m.View(), "✗ failed (budget)") {
+		t.Errorf("finished-with-failure header should show the failed badge:\n%s", m.View())
+	}
+}
+
+func TestHeaderStoppedBadge(t *testing.T) {
+	// done with a non-terminal FSM state (e.g. ctx-cancel before a terminal
+	// outcome) renders the neutral "stopped" badge, not done/failed.
+	m := headerModel(t, Header{Version: "dev", Dir: "/p"}, 2, "clean", "ready", true)
+	view := m.View()
+	if !strings.Contains(view, "■ stopped") {
+		t.Errorf("non-terminal finish should show the stopped badge:\n%s", view)
+	}
+	if strings.Contains(view, "✓ done") || strings.Contains(view, "✗ failed") {
+		t.Errorf("stopped finish must not claim done/failed:\n%s", view)
+	}
+}
+
+func TestFinishedHeaderNoANSIWhenColorOff(t *testing.T) {
+	// The done/failed badge styles (Foreground/Faint) must degrade to plain
+	// text under the renderer's ascii profile (non-TTY here), so a finished
+	// header emits no escape sequences.
+	for _, tc := range []struct{ state, reason string }{
+		{"done", "queue_empty"},
+		{"failed", "budget"},
+		{"clean", "ready"}, // stopped branch
+	} {
+		m := headerModel(t, Header{Version: "1.0", Dir: "/p"}, 0, tc.state, tc.reason, true)
+		if strings.Contains(m.View(), "\x1b") {
+			t.Errorf("finished header for state %q leaked ANSI under NO_COLOR:\n%q", tc.state, m.View())
+		}
+	}
+}
+
+func TestAbbrevHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("no home dir resolvable")
+	}
+	if got := abbrevHome(home + "/repos/ralph"); got != "~/repos/ralph" {
+		t.Errorf("abbrevHome under home = %q, want %q", got, "~/repos/ralph")
+	}
+	if got := abbrevHome("/etc/elsewhere"); got != "/etc/elsewhere" {
+		t.Errorf("abbrevHome outside home should pass through, got %q", got)
+	}
+}
+
 func TestPanesAreSeparated(t *testing.T) {
 	const w = 100
 	m := sized(t, w, 24)
 	m, _ = step(t, m, metricsMsg{s: fullSnapshot()})
 
 	rule := strings.Repeat("─", w)
-	if n := strings.Count(m.View(), rule); n != 2 {
-		t.Errorf("View should contain two full-width %d-col rules (panel/log + log/help), got %d:\n%s", w, n, m.View())
+	if n := strings.Count(m.View(), rule); n != 3 {
+		t.Errorf("View should contain three full-width %d-col rules (header/panel + panel/log + log/help), got %d:\n%s", w, n, m.View())
 	}
 }
 
@@ -329,10 +428,11 @@ func TestIsIterMarker(t *testing.T) {
 // seedIterLogs pushes 32 log lines with iteration-summary markers at slice
 // indices 10 and 21, so iterStartLines() == [0, 11, 22]. The window is sized so
 // every boundary is reachable: with fullSnapshot the panel is 5 lines, relayout
-// reserves 1+1+5+1=8, so vp.Height = 16-8 = 8 and maxYOffset = 32-8 = 24 >= 22.
+// reserves header+sep (1+1) + panel+sep (5+1) + help+sep (1+1) = 10, so
+// vp.Height = 18-10 = 8 and maxYOffset = 32-8 = 24 >= 22.
 func seedIterLogs(t *testing.T) model {
 	t.Helper()
-	m := sized(t, 80, 16)
+	m := sized(t, 80, 18)
 	m, _ = step(t, m, metricsMsg{s: fullSnapshot()})
 	for i := 0; i < 32; i++ {
 		var line string
