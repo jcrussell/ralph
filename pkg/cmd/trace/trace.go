@@ -92,6 +92,12 @@ func run(_ context.Context, opts *Options) error {
 
 // Render writes the trace for iter to w. It accepts fs.FS so tests
 // inject fstest.MapFS without touching disk (byob-interfaces.3).
+//
+// Render keys on the iteration number alone and renders the
+// lexicographically first matching stem. When several iterations share
+// a number (an fsm reset replays low numbers), callers that already
+// know the exact stem — e.g. `ralph explore`, which lists by stem —
+// should call RenderStem directly to avoid the ambiguity.
 func Render(rootFS fs.FS, iter, tailLines int, w io.Writer) error {
 	prefix := fmt.Sprintf("iter-%04d-", iter)
 
@@ -103,8 +109,16 @@ func Render(rootFS fs.FS, iter, tailLines int, w io.Writer) error {
 		return fmt.Errorf("trace: no iter-%04d-*.json under logs/", iter)
 	}
 	stem := strings.TrimSuffix(jsonFile, ".json") // "iter-NNNN-<ts>"
+	return RenderStem(rootFS, stem, tailLines, w)
+}
 
-	if err := dumpJSON(rootFS, jsonFile, w); err != nil {
+// RenderStem writes the trace for an exact iteration stem
+// ("iter-NNNN-<ts>") to w, reading its .json snapshot and the sibling
+// prompt / stdout / stderr / gate artifacts from rootFS. It is the
+// stem-keyed core of Render; callers holding a precise stem use it to
+// render exactly that iteration even when iteration numbers collide.
+func RenderStem(rootFS fs.FS, stem string, tailLines int, w io.Writer) error {
+	if err := dumpJSON(rootFS, stem+".json", w); err != nil {
 		return err
 	}
 	if err := dumpSection(rootFS, stem+"-prompt.txt", "RENDERED PROMPT", 0, w); err != nil {

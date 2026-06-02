@@ -120,3 +120,26 @@ func TestRenderTailLines(t *testing.T) {
 		t.Errorf("--tail-lines=3 should not include L1-L3:\n%s", out)
 	}
 }
+
+func TestRenderStemExactDisambiguation(t *testing.T) {
+	// Two iterations share number 0001 (an fsm reset replays it). Render
+	// by number picks the lexicographically first; RenderStem must let a
+	// caller select the exact one.
+	fs := fstest.MapFS{
+		"iter-0001-20260101T000000Z.json":       {Data: []byte(`{"iter":1,"narrative":"older run"}`)},
+		"iter-0001-20260101T000000Z-prompt.txt": {Data: []byte("older prompt\n")},
+		"iter-0001-20260601T000000Z.json":       {Data: []byte(`{"iter":1,"narrative":"newer run"}`)},
+		"iter-0001-20260601T000000Z-prompt.txt": {Data: []byte("newer prompt\n")},
+	}
+	var buf bytes.Buffer
+	if err := RenderStem(fs, "iter-0001-20260601T000000Z", 0, &buf); err != nil {
+		t.Fatalf("RenderStem: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "newer run") || !strings.Contains(out, "newer prompt") {
+		t.Errorf("RenderStem did not render the requested stem:\n%s", out)
+	}
+	if strings.Contains(out, "older run") || strings.Contains(out, "older prompt") {
+		t.Errorf("RenderStem leaked the other stem:\n%s", out)
+	}
+}
