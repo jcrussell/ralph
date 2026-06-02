@@ -27,7 +27,7 @@ func testRC(t *testing.T, repo string) (*runContext, *iostreams.TestBuffers) {
 		cfg:   config.Defaults(),
 		repo:  repo,
 		io:    ios,
-		log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		log:   slog.New(slog.DiscardHandler),
 		fsm:   f,
 		clock: newFakeClock(),
 	}

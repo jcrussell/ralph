@@ -184,7 +184,7 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 			CumulativeCostUSD:       f.CumulativeCostUSD,
 			CumulativeWallclockSecs: f.CumulativeWallclockSecs,
 		}); err != nil {
-			logger.Error("runs.Finalize failed", "err", err)
+			logger.ErrorContext(ctx, "runs.Finalize failed", "err", err)
 		}
 	}()
 
