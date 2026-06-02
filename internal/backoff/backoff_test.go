@@ -286,6 +286,21 @@ func TestParseRateLimitReset(t *testing.T) {
 			stderr: "resets 4am",
 			want:   0,
 		},
+		{
+			name:   "hour out of range = no match (falls through to exponential)",
+			stderr: "resets 13am (UTC)",
+			want:   0,
+		},
+		{
+			name:   "minutes out of range = no match",
+			stderr: "resets 4:70am (UTC)",
+			want:   0,
+		},
+		{
+			name:   "garbage two-digit fields = no match",
+			stderr: "resets 25:70am (UTC)",
+			want:   0,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

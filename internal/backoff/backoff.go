@@ -206,6 +206,13 @@ func ParseRateLimitReset(stderr string, now time.Time) time.Duration {
 			return 0
 		}
 	}
+	// The regex accepts up to two digits per field, so reject out-of-range
+	// 12-hour clock values rather than letting time.Date silently normalize
+	// them into a different instant. A malformed hint returns 0 so the
+	// caller falls through to exponential backoff.
+	if hour < 1 || hour > 12 || min > 59 {
+		return 0
+	}
 	switch strings.ToLower(m[3]) {
 	case "pm":
 		if hour != 12 {
