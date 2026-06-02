@@ -403,13 +403,13 @@ func (m model) doneBadge() seg {
 // quotaBadge renders the header badge shown while the loop sleeps on a quota
 // cap. It counts down to the resume; once the countdown bottoms out (the loop
 // hasn't sent its next snapshot yet) it shows a bare "resuming…". Yellow,
-// degrading to plain under the ascii profile like doneBadge. The leading glyph
-// is single-width (▮) so the header's rune-count fit check in headerView stays
-// accurate — an emoji renders two cells but counts as one rune.
+// degrading to plain under the ascii profile like doneBadge. Plain text only —
+// every rune is single-width so the header's rune-count fit check in headerView
+// stays accurate.
 func (m model) quotaBadge() seg {
-	text := "▮ sleeping (quota) — resuming…"
+	text := "sleeping (quota) — resuming…"
 	if m.quotaRemaining > 0 {
-		text = "▮ sleeping (quota) — resuming in " + dur(m.quotaRemaining)
+		text = "sleeping (quota) — resuming in " + dur(m.quotaRemaining)
 	}
 	yellow := func(s string) string { return m.r.NewStyle().Foreground(lipgloss.Color("3")).Render(s) }
 	return seg{text: text, color: yellow}
