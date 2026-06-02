@@ -95,22 +95,32 @@ TTY; run then streams the narrative instead. This flag is the only switch — th
 off-TTY fallback and the `--no-tui` path are the same code path, and it is
 byte-identical to the pre-TUI behavior.
 
-**Layout.** A metrics panel (iteration N/max, FSM state, run totals — cumulative
-cost vs budget cap, elapsed vs wallclock cap, and run-total commit count — last
-gate result, consecutive-dirty count, last-iteration cost/duration/commits) sits
-above a scrollable log pane fed by the loop's interleaved output. The run totals
-live on the persisted FSM, so they hold steady across a quota wait rather than
-reading as a reset (the last-iteration row legitimately shows `0` during a
-wait). The pane follows the tail unless you scroll up; its scrollback depth is
+**Layout.** Three stacked blocks sit above a scrollable log pane, each delimited
+by a horizontal rule:
+
+1. **Header** — `ralph <version>  ·  <cwd>`, plus a colored terminal-state badge
+   once the run finishes (or a `sleeping (quota)` countdown badge while waiting).
+2. **Cumulative block** — whole-run totals: iteration N/max, cumulative cost vs
+   budget cap, elapsed and wallclock vs cap, the run-total commit count, and the
+   ready-queue depth (`N ready`). These live on the persisted FSM (or the run
+   clock), so they hold steady across a quota wait rather than reading as a reset.
+3. **Session block** — the current/last iteration: FSM state, last gate result,
+   this-iteration runner mode/cost/duration/commits, a consecutive-dirty warning,
+   any bead deltas, and the one-line narrative. The per-iteration cost/commits
+   here legitimately show `0` during a quota wait (the surviving totals are in the
+   cumulative block). This block is hidden before the first iteration completes.
+
+The log pane follows the tail unless you scroll up; its scrollback depth is
 bounded by the `[ui]` caps above. On a window too small to split, the layout
-degrades to a clipped metrics block. Color honors `NO_COLOR` and the stderr TTY.
+degrades to the metric blocks clipped to fit. Color honors `NO_COLOR` and the
+stderr TTY.
 
 **Keys.**
 
 | Key             | Action |
 |-----------------|--------|
 | `↑` / `↓`       | Scroll the log pane. |
-| `e` or `Tab`    | Expand / collapse the log pane (hides the metrics panel for full-height logs). |
+| `e` or `Tab`    | Expand / collapse the log pane (hides both metric blocks for full-height logs). |
 | `q` or `Ctrl-C` | Quit: cancel the loop, wait for the current iteration to unwind, then exit. |
 
 **Files are the durable data sink.** The TUI is a view, not a record. The

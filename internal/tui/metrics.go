@@ -50,75 +50,83 @@ type seg struct {
 // fieldSep separates fields within a panel line.
 const fieldSep = "  ·  "
 
-// Render renders the metrics panel for s, wrapping each line to width.
-// width <= 0 disables truncation (full content). The result has no
-// trailing newline; the caller owns line termination and update cadence.
+// RenderCumulative renders the whole-run totals block: iteration count vs cap,
+// cumulative cost/elapsed/wall vs caps, the run-total commit count, and the
+// ready-queue depth. One row, always present once a snapshot exists. These all
+// live on the persisted FSM (or the run clock), so they survive quota waits and
+// restarts — keeping them in their own block means a wait never reads as a reset.
 //
-// Lines are emitted top-to-bottom: status, budget/time, last-iteration,
-// bead deltas (omitted when empty), and the one-line narrative (reused
-// from internal/narrative). A line whose plain width exceeds the target
-// is rendered without color and truncated with an ellipsis, so a clipped
-// edge never severs an ANSI escape.
-func (f *Formatter) Render(s loop.Snapshot, width int) string {
-	var lines []string
-
-	// The metrics rows (status, budget, and the optional runner row) share a
-	// column grid so their field separators line up vertically. padCols pads
-	// the leading cells of each row to the per-column max width; the rows are
-	// then emitted through f.line, which handles color and width truncation.
-	status := []seg{
+// width <= 0 disables truncation. The result has no trailing newline; the caller
+// owns line termination. A line whose plain width exceeds the target is rendered
+// without color and truncated with an ellipsis, so a clip never severs an escape.
+func (f *Formatter) RenderCumulative(s loop.Snapshot, width int) string {
+	row := []seg{
 		{text: "iter " + iterField(s.Iter, s.MaxIterations), color: f.cs.Bold},
-		{text: stateText(s), color: f.stateColor(s)},
-		{text: "gate " + gateText(s.LastGateResult), color: f.gateColor(s.LastGateResult)},
-	}
-
-	// The budget row carries the run totals — cumulative cost, elapsed, wall,
-	// and commit count. These live on the persisted FSM and so survive quota
-	// waits and restarts; the commit total is the run-level counterpart to the
-	// per-iteration "runner" row's commits, which legitimately reads 0 on a
-	// quota-wait tick. Keeping the run total here means a wait never looks like
-	// a reset.
-	budget := []seg{
 		{text: "cost " + moneyCap(s.CumulativeCostUSD, s.MaxCostUSD)},
 		{text: "elapsed " + dur(s.Elapsed)},
 		{text: "wall " + durCap(secs(s.CumulativeWallclockSecs), s.MaxWallclockSecs)},
 		{text: fmt.Sprintf("%d commits", s.CumulativeCommits)},
+		{text: readyField(s.ReadyBeads)},
 	}
-	if s.ConsecutiveDirty > 0 {
-		budget = append(budget, seg{text: fmt.Sprintf("dirty×%d", s.ConsecutiveDirty), color: f.cs.Yellow})
+	return strings.Join(f.renderRows(width, [][]seg{row}), "\n")
+}
+
+// RenderSession renders the current/last-iteration block: the FSM state + last
+// gate, the runner stats for the tick (when the runner ran), a dirty-streak
+// warning, an optional bead-delta line, and the one-line narrative. The per-
+// iteration commit/cost values here legitimately read 0 on a quota-wait tick —
+// the surviving run totals live in the cumulative block.
+//
+// Returns "" for the pre-first-iteration seed (nothing iteration-specific to
+// show — iter 0, empty record), so the caller drops the block and its separator.
+// The predicate is the same one the narrative line has always used.
+func (f *Formatter) RenderSession(s loop.Snapshot, width int) string {
+	if s.Iter == 0 && s.Record.Narrative == "" && s.Record.State == "" {
+		return ""
 	}
 
-	rows := [][]seg{status, budget}
-
+	// state + last gate, then the runner stats for this tick when it ran.
+	statusRow := []seg{
+		{text: stateText(s), color: f.stateColor(s)},
+		{text: "gate " + gateText(s.LastGateResult), color: f.gateColor(s.LastGateResult)},
+	}
 	if r := s.Record; r.RunnerMode != "" || r.CostUSD > 0 || r.DurationSecs > 0 || r.Commits > 0 {
 		mode := r.RunnerMode
 		if mode == "" {
 			mode = "—"
 		}
-		rows = append(rows, []seg{
-			{text: "runner " + mode},
-			{text: money(r.CostUSD)},
-			{text: fmt.Sprintf("%.1fs", r.DurationSecs)},
-			{text: fmt.Sprintf("%d commits", r.Commits)},
-		})
+		statusRow = append(statusRow,
+			seg{text: "runner " + mode},
+			seg{text: money(r.CostUSD)},
+			seg{text: fmt.Sprintf("%.1fs", r.DurationSecs)},
+			seg{text: fmt.Sprintf("%d commits", r.Commits)},
+		)
+	}
+	if s.ConsecutiveDirty > 0 {
+		statusRow = append(statusRow, seg{text: fmt.Sprintf("dirty×%d", s.ConsecutiveDirty), color: f.cs.Yellow})
 	}
 
-	for _, row := range padCols(rows) {
-		lines = append(lines, f.line(width, row))
-	}
-
+	lines := f.renderRows(width, [][]seg{statusRow})
 	if d := beadDelta(s); d != "" {
 		lines = append(lines, f.line(width, []seg{{text: "beads: " + d}}))
 	}
-
-	// The narrative line is omitted for the pre-first-iteration seed (iter 0,
-	// empty record), which would otherwise render a redundant "iter 0000".
-	if s.Iter > 0 || s.Record.Narrative != "" || s.Record.State != "" {
-		lines = append(lines, truncatePlain(
-			narrative.FormatNarrative(s.Iter, s.Record.Narrative, s.Record.State), width))
-	}
+	lines = append(lines, truncatePlain(
+		narrative.FormatNarrative(s.Iter, s.Record.Narrative, s.Record.State), width))
 
 	return strings.Join(lines, "\n")
+}
+
+// renderRows aligns rows into a shared column grid (padCols pads leading cells to
+// the per-column max so field separators line up) and renders each to a width-
+// bounded line via f.line. Shared by the block renderers so the emit path lives
+// in one place.
+func (f *Formatter) renderRows(width int, rows [][]seg) []string {
+	padded := padCols(rows)
+	lines := make([]string, 0, len(padded))
+	for _, row := range padded {
+		lines = append(lines, f.line(width, row))
+	}
+	return lines
 }
 
 // line renders one panel line from its segments, joined by fieldSep.
@@ -204,6 +212,15 @@ func iterField(iter, max int) string {
 		return fmt.Sprintf("%d/%d", iter, max)
 	}
 	return strconv.Itoa(iter)
+}
+
+// readyField renders the ready-bead count for the cumulative block, or "… ready"
+// before the loop has sampled it (ReadyBeads < 0).
+func readyField(n int) string {
+	if n < 0 {
+		return "… ready"
+	}
+	return fmt.Sprintf("%d ready", n)
 }
 
 // stateText renders the FSM state, appending the reason in parentheses

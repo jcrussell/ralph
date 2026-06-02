@@ -15,7 +15,6 @@ package tui
 // metricsMsg reset the local offset.
 
 import (
-	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -226,8 +225,13 @@ func (m *model) relayout() {
 	reserved := headerHeight + sepHeight // header line + its divider (always shown)
 	reserved += helpHeight + sepHeight   // help line + its divider
 	if !m.expanded {
-		if p := m.panelView(); p != "" {
-			reserved += lineCount(p) + sepHeight // panel + its divider
+		// Mirror View's gating exactly (same cumulativeView/sessionView calls) so
+		// the reserved height and the rendered sections can never disagree.
+		if cv := m.cumulativeView(); cv != "" {
+			reserved += lineCount(cv) + sepHeight // cumulative block + its divider
+		}
+		if sv := m.sessionView(); sv != "" {
+			reserved += lineCount(sv) + sepHeight // session block + its divider
 		}
 	}
 	h := m.height - reserved
@@ -250,11 +254,17 @@ func (m model) View() string {
 		return m.degradedView()
 	}
 
-	sections := make([]string, 0, 7)
+	sections := make([]string, 0, 9)
 	sections = append(sections, m.headerView(), m.sepView())
 	if !m.expanded {
-		if p := m.panelView(); p != "" {
-			sections = append(sections, p, m.sepView())
+		// Two metric blocks, each followed by its own rule: cumulative run totals,
+		// then the current/last-iteration session block (dropped, with its rule,
+		// at the t0 seed when sessionView is empty).
+		if cv := m.cumulativeView(); cv != "" {
+			sections = append(sections, cv, m.sepView())
+		}
+		if sv := m.sessionView(); sv != "" {
+			sections = append(sections, sv, m.sepView())
 		}
 	}
 	sections = append(sections, m.vp.View(), m.sepView(), m.helpView())
@@ -274,12 +284,20 @@ func stripTrailingSpaces(s string) string {
 	return strings.Join(lines, "\n")
 }
 
-// degradedView is the tiny-window fallback: the metrics panel clipped to
-// the available width (panelView already wraps to width) and height,
-// dropping the scroll pane entirely. With no snapshot yet it shows the
-// bare tool name.
+// degradedView is the tiny-window fallback: the two metric blocks joined and
+// clipped to the available width (each block already wraps to width) and height,
+// dropping the scroll pane and separators entirely. Joining preserves the normal
+// ordering (cumulative totals first, then current-iteration status), so a tiny
+// window still leads with the same line it would at full size. With no snapshot
+// yet it shows the bare tool name.
 func (m model) degradedView() string {
-	content := m.panelView()
+	content := m.cumulativeView()
+	if sv := m.sessionView(); sv != "" {
+		if content != "" {
+			content += "\n"
+		}
+		content += sv
+	}
 	if content == "" {
 		return truncatePlain("ralph run", m.width)
 	}
@@ -290,23 +308,44 @@ func (m model) degradedView() string {
 	return strings.Join(lines, "\n")
 }
 
-// panelView renders the metrics panel at the current width, substituting
-// the live (tick-advanced) elapsed for the Snapshot's iteration-stamped
-// value. It returns "" until the first metricsMsg arrives.
-func (m model) panelView() string {
+// metricsSnap returns the latest snapshot with the live (tick-advanced) elapsed
+// substituted for the Snapshot's iteration-stamped value, and ok=false until the
+// first metricsMsg arrives. Both metric blocks render from it, so the live-
+// elapsed substitution and the has-snapshot guard live in one place.
+func (m model) metricsSnap() (loop.Snapshot, bool) {
 	if !m.hasSnap {
-		return ""
+		return loop.Snapshot{}, false
 	}
 	s := m.snap
 	s.Elapsed = m.liveElapsed
-	return m.f.Render(s, m.width)
+	return s, true
 }
 
-// headerView renders the top identity line: "ralph <version>  ·  <dir>  ·
-// <N> ready", plus a colored terminal badge once the run has finished. The
-// badge is driven by the authoritative FSM state in the latest Snapshot, not
-// by the ready count alone, so a transient 0-ready mid-run shows no badge. Like
-// the panel's lines, color is applied only when the plain text fits the width;
+// cumulativeView renders the whole-run totals block. Empty before the first
+// snapshot.
+func (m model) cumulativeView() string {
+	s, ok := m.metricsSnap()
+	if !ok {
+		return ""
+	}
+	return m.f.RenderCumulative(s, m.width)
+}
+
+// sessionView renders the current/last-iteration block. Empty before the first
+// snapshot and at the pre-first-iteration seed (RenderSession returns "" there).
+func (m model) sessionView() string {
+	s, ok := m.metricsSnap()
+	if !ok {
+		return ""
+	}
+	return m.f.RenderSession(s, m.width)
+}
+
+// headerView renders the top identity line: "ralph <version>  ·  <dir>", plus a
+// colored terminal badge once the run has finished (or a quota-sleep badge while
+// waiting). The ready-bead count moved into the cumulative block; the badge is
+// driven by the authoritative FSM state in the latest Snapshot. Like the panel's
+// lines, color is applied only when the plain text fits the width;
 // otherwise it falls back to truncated plain text so a clip never severs an
 // ANSI escape. Color degrades to plain under the renderer's ascii profile,
 // exactly like helpView/sepView.
@@ -316,7 +355,6 @@ func (m model) headerView() string {
 	segs := []seg{
 		{text: "ralph " + m.hdr.Version, color: bold},
 		{text: abbrevHome(m.hdr.Dir)},
-		{text: readyField(m.snap.ReadyBeads)},
 	}
 	switch {
 	case m.done:
@@ -338,15 +376,6 @@ func (m model) headerView() string {
 		return joinSegs(nonEmpty, true)
 	}
 	return truncatePlain(plain, m.width)
-}
-
-// readyField renders the ready-bead count, or "… ready" before the loop has
-// sampled it (ReadyBeads < 0).
-func readyField(n int) string {
-	if n < 0 {
-		return "… ready"
-	}
-	return fmt.Sprintf("%d ready", n)
 }
 
 // doneBadge renders the terminal-state badge shown once the run has finished.

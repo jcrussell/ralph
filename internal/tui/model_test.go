@@ -102,24 +102,26 @@ func TestQuitKeyReturnsQuit(t *testing.T) {
 func TestExpandTogglesPanel(t *testing.T) {
 	m := sized(t, 100, 24)
 	m, _ = step(t, m, metricsMsg{s: fullSnapshot()})
-	if !strings.Contains(m.View(), "iter 5/20") {
-		t.Fatalf("collapsed View should show metrics panel")
+	// Probe one token from each metric block: the cumulative ("iter 5/20") and
+	// the session ("gate pass"). 'e' must collapse BOTH.
+	if v := m.View(); !strings.Contains(v, "iter 5/20") || !strings.Contains(v, "gate pass") {
+		t.Fatalf("collapsed View should show both metric blocks:\n%s", v)
 	}
 
 	m, _ = step(t, m, runeKey('e'))
 	if !m.expanded {
 		t.Fatalf("'e' should set expanded")
 	}
-	if strings.Contains(m.View(), "iter 5/20") {
-		t.Errorf("expanded View should hide the metrics panel:\n%s", m.View())
+	if v := m.View(); strings.Contains(v, "iter 5/20") || strings.Contains(v, "gate pass") {
+		t.Errorf("expanded View should hide both metric blocks:\n%s", v)
 	}
 
 	m, _ = step(t, m, runeKey('e'))
 	if m.expanded {
 		t.Fatalf("'e' should toggle expanded back off")
 	}
-	if !strings.Contains(m.View(), "iter 5/20") {
-		t.Errorf("re-collapsed View should show the metrics panel again")
+	if v := m.View(); !strings.Contains(v, "iter 5/20") || !strings.Contains(v, "gate pass") {
+		t.Errorf("re-collapsed View should show both metric blocks again:\n%s", v)
 	}
 }
 
@@ -226,18 +228,26 @@ func seededModel(t *testing.T, seed loop.Snapshot) model {
 }
 
 func TestInitialPanelRendersCapsAtT0(t *testing.T) {
+	const w = 100
 	m := seededModel(t, loop.Snapshot{MaxIterations: 20, MaxCostUSD: 5})
-	m, _ = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
+	m, _ = step(t, m, tea.WindowSizeMsg{Width: w, Height: 24})
 
 	view := m.View()
-	for _, w := range []string{"iter 0/20", "cost $0.00/$5.00", "elapsed 0s"} {
-		if !strings.Contains(view, w) {
-			t.Errorf("seed View missing %q before any metricsMsg\n--- view ---\n%s", w, view)
+	// Caps now live in the cumulative block; it renders from t0.
+	for _, want := range []string{"iter 0/20", "cost $0.00/$5.00", "elapsed 0s"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("seed View missing %q before any metricsMsg\n--- view ---\n%s", want, view)
 		}
 	}
 	// The empty seed must not render the redundant narrative "iter 0000" line.
 	if strings.Contains(view, "iter 0000") {
 		t.Errorf("seed View should omit the narrative line, got:\n%s", view)
+	}
+	// No session block at t0 → only THREE rules (header/cumulative, cumulative/log,
+	// log/help), one fewer than a populated snapshot (TestPanesAreSeparated).
+	rule := strings.Repeat("─", w)
+	if n := strings.Count(view, rule); n != 3 {
+		t.Errorf("seed View should have three rules (no session block), got %d:\n%s", n, view)
 	}
 }
 
@@ -387,9 +397,13 @@ func TestPanesAreSeparated(t *testing.T) {
 	m := sized(t, w, 24)
 	m, _ = step(t, m, metricsMsg{s: fullSnapshot()})
 
+	// With a populated snapshot both metric blocks render, so there are FOUR
+	// rules: header/cumulative, cumulative/session, session/log, log/help. (At
+	// the t0 seed the session block is absent, leaving three — see
+	// TestInitialPanelRendersCapsAtT0.)
 	rule := strings.Repeat("─", w)
-	if n := strings.Count(m.View(), rule); n != 3 {
-		t.Errorf("View should contain three full-width %d-col rules (header/panel + panel/log + log/help), got %d:\n%s", w, n, m.View())
+	if n := strings.Count(m.View(), rule); n != 4 {
+		t.Errorf("View should contain four full-width %d-col rules (header/cum + cum/session + session/log + log/help), got %d:\n%s", w, n, m.View())
 	}
 }
 
@@ -427,9 +441,10 @@ func TestIsIterMarker(t *testing.T) {
 
 // seedIterLogs pushes 32 log lines with iteration-summary markers at slice
 // indices 10 and 21, so iterStartLines() == [0, 11, 22]. The window is sized so
-// every boundary is reachable: with fullSnapshot the panel is 5 lines, relayout
-// reserves header+sep (1+1) + panel+sep (5+1) + help+sep (1+1) = 10, so
-// vp.Height = 18-10 = 8 and maxYOffset = 32-8 = 24 >= 22.
+// every boundary is reachable. With fullSnapshot the two metric blocks total 4
+// content lines (cumulative 1 + session 3: status/beads/narrative); relayout
+// reserves header+sep (1+1) + cumulative+sep (1+1) + session+sep (3+1) +
+// help+sep (1+1) = 10, so vp.Height = 18-10 = 8 and maxYOffset = 32-8 = 24 >= 22.
 func seedIterLogs(t *testing.T) model {
 	t.Helper()
 	m := sized(t, 80, 18)
