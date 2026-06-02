@@ -3,11 +3,21 @@
 # example.com/pkg@latest` on a laptop.
 version: 2
 updates:
+  # Group each ecosystem's weekly bumps into a single PR so reviews batch
+  # one "deps" diff a week instead of one PR per module/action.
   - package-ecosystem: gomod
     directory: /
     schedule:
       interval: weekly
+    groups:
+      gomod:
+        patterns:
+          - "*"
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      actions:
+        patterns:
+          - "*"

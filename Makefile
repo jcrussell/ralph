@@ -15,6 +15,10 @@ LDFLAGS := -X github.com/jcrussell/ralph/internal/ralphcmd/build.Version=$(VERSI
 # would prepend to every `go` invocation, double-applying -trimpath.
 GO_BUILD_FLAGS := -trimpath
 
+# Single source of truth for the lint floor, shared with CI (.github/workflows/ci.yml
+# reads the same file). byob-security.1: pinned, never `latest`.
+GOLANGCI_VERSION := $(shell cat .golangci-version)
+
 .PHONY: build
 build:
 	CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o bin/$(BIN) $(PKG)
@@ -33,7 +37,7 @@ vet:
 
 .PHONY: lint
 lint:
-	golangci-lint run ./...
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION) run ./...
 
 .PHONY: vuln
 vuln:

@@ -35,17 +35,22 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: '1.25'
+          go-version: '1.26'
       - name: tidy diff check
         run: |
           go mod tidy
           git diff --exit-code go.mod go.sum
       - name: vet
         run: make vet
+      # .golangci-version is the single source of truth shared with `make lint`
+      # so CI and laptops can't drift onto different golangci-lint versions.
+      - name: read golangci-lint floor
+        id: lintver
+        run: echo "version=$(cat .golangci-version)" >> "$GITHUB_OUTPUT"
       - name: lint
         uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
         with:
-          version: v2.11.4
+          version: ${{ steps.lintver.outputs.version }}
       - name: test
         run: make test
 
@@ -57,8 +62,24 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: '1.25'
+          go-version: '1.26'
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
           govulncheck ./...
+
+  # Validate .goreleaser.yml on every push/PR so config breakage surfaces here
+  # instead of at `git tag` time when the release workflow is the first to run it.
+  release-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: '1.26'
+      - uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7.2.2
+        with:
+          version: v2.14.1
+          args: check
