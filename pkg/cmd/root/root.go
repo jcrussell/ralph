@@ -13,7 +13,9 @@ import (
 	ralphlog "github.com/jcrussell/ralph/internal/log"
 	"github.com/jcrussell/ralph/internal/ralphcmd/build"
 	"github.com/jcrussell/ralph/pkg/cmd/doctor"
+	"github.com/jcrussell/ralph/pkg/cmd/explore"
 	fsmcmd "github.com/jcrussell/ralph/pkg/cmd/fsm"
+	"github.com/jcrussell/ralph/pkg/cmd/gc"
 	"github.com/jcrussell/ralph/pkg/cmd/hook"
 	"github.com/jcrussell/ralph/pkg/cmd/initcmd"
 	"github.com/jcrussell/ralph/pkg/cmd/logs"
@@ -157,7 +159,9 @@ docs/concepts/configuration.md for the .ralph/config.toml schema.`,
 	}
 
 	addTo(doctor.NewCmdDoctor(f, nil), "setup")
+	addTo(explore.NewCmdExplore(f, nil), "obs")
 	addTo(fsmcmd.NewCmdFSM(f, nil, nil), "obs")
+	addTo(gc.NewCmdGC(f, nil), "obs")
 	addTo(hook.NewCmdHook(f, nil), "setup")
 	addTo(initcmd.NewCmdInit(f, nil), "setup")
 	addTo(logs.NewCmdLogs(f, nil), "obs")

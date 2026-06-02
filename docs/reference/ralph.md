@@ -43,7 +43,9 @@ docs/concepts/configuration.md for the .ralph/config.toml schema.
 ### SEE ALSO
 
 * [ralph doctor](ralph_doctor.md)	 - Check ralph's runtime environment
+* [ralph explore](ralph_explore.md)	 - Browse runs, incidents, and iteration artifacts under .ralph/state
 * [ralph fsm](ralph_fsm.md)	 - Inspect the orchestrator state machine
+* [ralph gc](ralph_gc.md)	 - Prune old runs, iteration artifacts, and incidents from .ralph/state
 * [ralph hook](ralph_hook.md)	 - Inspect and run ralph hooks
 * [ralph init](ralph_init.md)	 - Scaffold .ralph/ in the current repo
 * [ralph logs](ralph_logs.md)	 - Stream the per-iteration log
