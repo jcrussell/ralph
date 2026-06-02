@@ -14,6 +14,7 @@ func TestColorSchemeDisabledIsIdentity(t *testing.T) {
 		"Yellow": cs.Yellow,
 		"Cyan":   cs.Cyan,
 		"Bold":   cs.Bold,
+		"Faint":  cs.Faint,
 	}
 	for name, fn := range cases {
 		if got := fn("hello"); got != "hello" {
@@ -36,6 +37,7 @@ func TestColorSchemeEnabledWrapsAnsi(t *testing.T) {
 		"Yellow": {cs.Yellow, "\x1b[33m"},
 		"Cyan":   {cs.Cyan, "\x1b[36m"},
 		"Bold":   {cs.Bold, "\x1b[1m"},
+		"Faint":  {cs.Faint, "\x1b[2m"},
 	}
 	for name, tc := range cases {
 		got := tc.fn("hi")

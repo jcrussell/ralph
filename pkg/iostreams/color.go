@@ -23,6 +23,7 @@ func EnvAllowsColor() bool {
 const (
 	ansiReset  = "\x1b[0m"
 	ansiBold   = "\x1b[1m"
+	ansiFaint  = "\x1b[2m"
 	ansiRed    = "\x1b[31m"
 	ansiGreen  = "\x1b[32m"
 	ansiYellow = "\x1b[33m"
@@ -53,3 +54,6 @@ func (c *ColorScheme) Cyan(s string) string { return c.wrap(ansiCyan, s) }
 
 // Bold wraps s in bold when enabled, otherwise returns s.
 func (c *ColorScheme) Bold(s string) string { return c.wrap(ansiBold, s) }
+
+// Faint wraps s in the dim/faint SGR when enabled, otherwise returns s.
+func (c *ColorScheme) Faint(s string) string { return c.wrap(ansiFaint, s) }

@@ -847,6 +847,28 @@ func TestRun_EmitsIterLineOnErrOut(t *testing.T) {
 	}
 }
 
+// Each iteration writes a boundary separator to ErrOut before the runner
+// streams, so iterations don't blur together. Test streams have color
+// disabled, so the plain ASCII fallback is expected.
+func TestRun_EmitsIterSeparatorOnErrOut(t *testing.T) {
+	repo := scaffoldRepo(t)
+	ios, bufs := iostreams.Test()
+	opts := baseOpts(t, repo)
+	opts.IO = ios
+	opts.Once = true
+	opts.DryRun = true
+	opts.BD = &fakeBD{ReadyByLabel: map[string][]bd.Issue{"": {{ID: "x"}}}}
+	opts.Runner = &fakeRunner{}
+	opts.Clock = newFakeClock()
+
+	if _, err := Run(context.Background(), opts); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := bufs.ErrOut.String(); !strings.Contains(got, "--- iter 0001 ---") {
+		t.Errorf("ErrOut missing iteration separator\nwant substring: %q\ngot:\n%s", "--- iter 0001 ---", got)
+	}
+}
+
 // A skipped iteration (pre-iteration hook exits non-zero) also emits
 // its iter line so the user sees the counter advance.
 func TestRun_EmitsIterLineOnSkippedIteration(t *testing.T) {

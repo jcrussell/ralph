@@ -96,6 +96,10 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 		return prev, fmt.Errorf("loop: mkdir logs: %w", err)
 	}
 
+	// Mark the iteration boundary before the runner streams its output so
+	// the live stream doesn't blur one iteration into the next.
+	emitIterSeparator(rc, rc.fsm.Iter)
+
 	beforeBD := snapshotBD(ctx, rc)
 	beforeHead, _ := git.HeadSHA(ctx, rc.repo)
 
@@ -479,11 +483,33 @@ func emitIterLine(rc *runContext, rec IterRecord) {
 	}
 	cs := rc.io.ErrColorScheme()
 	text := rec.Narrative
+	prefix := fmt.Sprintf("iter %04d", rec.Iter)
 	if cs != nil && cs.Enabled() {
 		text = strings.Replace(text, "gate green", "gate "+cs.Green("green"), 1)
 		text = strings.Replace(text, "gate red", "gate "+cs.Red("red"), 1)
+		prefix = cs.Cyan(prefix)
 	}
-	_, _ = fmt.Fprintf(rc.io.ErrOut, "iter %04d  %s\n", rec.Iter, text)
+	_, _ = fmt.Fprintf(rc.io.ErrOut, "%s  %s\n", prefix, text)
+}
+
+// emitIterSeparator writes a faint rule to ErrOut at the top of each
+// iteration so the runner's streamed stdout/stderr (the systemd "Running
+// as unit" line, the result JSON) and the prior iteration's summary don't
+// blur together. On a color-enabled stderr it's a faint cyan box-drawing
+// rule; otherwise a plain ASCII fallback so piped logs stay readable. Like
+// emitIterLine, no-ops when ErrOut is unset (e.g. tests, the TUI before it
+// attaches). The bytes are chatter on ErrOut only — no artifact carries them.
+func emitIterSeparator(rc *runContext, iter int) {
+	if rc.io == nil || rc.io.ErrOut == nil {
+		return
+	}
+	cs := rc.io.ErrColorScheme()
+	if cs != nil && cs.Enabled() {
+		rule := fmt.Sprintf("──────── iter %04d ────────────────────────────────", iter)
+		_, _ = fmt.Fprintln(rc.io.ErrOut, cs.Faint(rule))
+		return
+	}
+	_, _ = fmt.Fprintf(rc.io.ErrOut, "--- iter %04d ---\n", iter)
 }
 
 // notifyObserver hands the Observer a Snapshot built from the iteration's
