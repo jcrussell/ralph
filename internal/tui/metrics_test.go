@@ -131,6 +131,61 @@ func TestRenderOmitsNarrativeForSeed(t *testing.T) {
 	}
 }
 
+// sepOffsets returns the rune offsets of each fieldSep separator glyph in a
+// plain (uncolored) line, used to check that columns line up across rows.
+func sepOffsets(line string) []int {
+	var offs []int
+	for i, r := range []rune(line) {
+		if r == '·' {
+			offs = append(offs, i)
+		}
+	}
+	return offs
+}
+
+func TestRenderColumnsAlign(t *testing.T) {
+	// The seed snapshot renders just the status and budget lines. Their column
+	// separators must sit at the same offsets so the panel reads as a grid.
+	got := nonTTY().Render(loop.Snapshot{MaxIterations: 100}, 0)
+	lines := strings.Split(got, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want 2 lines, got %d:\n%s", len(lines), got)
+	}
+	a, b := sepOffsets(lines[0]), sepOffsets(lines[1])
+	if len(a) == 0 {
+		t.Fatalf("no separators found in %q", lines[0])
+	}
+	if !slicesEqual(a, b) {
+		t.Errorf("separator offsets differ:\n  %q -> %v\n  %q -> %v", lines[0], a, lines[1], b)
+	}
+}
+
+func TestRenderColumnsAlignWithLongState(t *testing.T) {
+	// A long state field widens column 1; the budget line must pad to match so
+	// the separators still line up.
+	s := loop.Snapshot{MaxIterations: 100, State: "clean", Reason: "queue_empty"}
+	got := nonTTY().Render(s, 0)
+	lines := strings.Split(got, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want 2 lines, got %d:\n%s", len(lines), got)
+	}
+	if a, b := sepOffsets(lines[0]), sepOffsets(lines[1]); !slicesEqual(a, b) {
+		t.Errorf("separator offsets differ with long state:\n  %q -> %v\n  %q -> %v", lines[0], a, lines[1], b)
+	}
+}
+
+func slicesEqual(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestRenderTruncatesAtNarrowWidth(t *testing.T) {
 	const width = 12
 	got := nonTTY().Render(fullSnapshot(), width)

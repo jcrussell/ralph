@@ -402,6 +402,30 @@ func TestCreateRejectsEmptyID(t *testing.T) {
 	}
 }
 
+// TestReadyRequestsUnlimited points a Client at a fake "bd" that records
+// its arguments, and asserts Ready passes "-n 0" so the ready-queue count
+// is not silently capped at bd's default --limit.
+func TestReadyRequestsUnlimited(t *testing.T) {
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "bd")
+	argsFile := filepath.Join(dir, "args.txt")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + argsFile + "\nprintf '[]\\n'\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := New(fake, dir)
+	if _, err := c.Ready(context.Background(), ""); err != nil {
+		t.Fatalf("Ready: %v", err)
+	}
+	got, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	if !strings.Contains(string(got), "-n 0") {
+		t.Errorf("Ready args = %q, want to contain %q", strings.TrimSpace(string(got)), "-n 0")
+	}
+}
+
 func contains(s []string, want string) bool {
 	for _, v := range s {
 		if v == want {

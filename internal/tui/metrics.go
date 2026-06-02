@@ -62,11 +62,15 @@ const fieldSep = "  ·  "
 func (f *Formatter) Render(s loop.Snapshot, width int) string {
 	var lines []string
 
-	lines = append(lines, f.line(width, []seg{
+	// The metrics rows (status, budget, and the optional runner row) share a
+	// column grid so their field separators line up vertically. padCols pads
+	// the leading cells of each row to the per-column max width; the rows are
+	// then emitted through f.line, which handles color and width truncation.
+	status := []seg{
 		{text: "iter " + iterField(s.Iter, s.MaxIterations), color: f.cs.Bold},
 		{text: stateText(s), color: f.stateColor(s)},
 		{text: "gate " + gateText(s.LastGateResult), color: f.gateColor(s.LastGateResult)},
-	}))
+	}
 
 	budget := []seg{
 		{text: "cost " + moneyCap(s.CumulativeCostUSD, s.MaxCostUSD)},
@@ -76,19 +80,24 @@ func (f *Formatter) Render(s loop.Snapshot, width int) string {
 	if s.ConsecutiveDirty > 0 {
 		budget = append(budget, seg{text: fmt.Sprintf("dirty×%d", s.ConsecutiveDirty), color: f.cs.Yellow})
 	}
-	lines = append(lines, f.line(width, budget))
+
+	rows := [][]seg{status, budget}
 
 	if r := s.Record; r.RunnerMode != "" || r.CostUSD > 0 || r.DurationSecs > 0 || r.Commits > 0 {
 		mode := r.RunnerMode
 		if mode == "" {
 			mode = "—"
 		}
-		lines = append(lines, f.line(width, []seg{
+		rows = append(rows, []seg{
 			{text: "runner " + mode},
 			{text: money(r.CostUSD)},
 			{text: fmt.Sprintf("%.1fs", r.DurationSecs)},
 			{text: fmt.Sprintf("%d commits", r.Commits)},
-		}))
+		})
+	}
+
+	for _, row := range padCols(rows) {
+		lines = append(lines, f.line(width, row))
 	}
 
 	if d := beadDelta(s); d != "" {
@@ -139,6 +148,46 @@ func joinSegs(segs []seg, color bool) string {
 		}
 	}
 	return b.String()
+}
+
+// padCols returns rows whose leading cells are space-padded to the
+// per-column maximum plain-rune width, so each column starts at the same
+// offset on every row and the fieldSep separators line up vertically. The
+// last cell of each row is never padded: trailing whitespace is undesirable
+// (and the right edge needs no alignment). Padding is applied to plain text
+// before any color, so ANSI escapes never count toward width. Colors carry
+// through unchanged.
+func padCols(rows [][]seg) [][]seg {
+	widths := map[int]int{}
+	for _, r := range rows {
+		for i, s := range r {
+			if w := utf8.RuneCountInString(s.text); w > widths[i] {
+				widths[i] = w
+			}
+		}
+	}
+	out := make([][]seg, len(rows))
+	for ri, r := range rows {
+		padded := make([]seg, len(r))
+		for i, s := range r {
+			txt := s.text
+			if i < len(r)-1 {
+				txt = padRight(txt, widths[i])
+			}
+			padded[i] = seg{text: txt, color: s.color}
+		}
+		out[ri] = padded
+	}
+	return out
+}
+
+// padRight pads s with trailing spaces to n runes, returning s unchanged
+// when it already meets or exceeds the width.
+func padRight(s string, n int) string {
+	if pad := n - utf8.RuneCountInString(s); pad > 0 {
+		return s + strings.Repeat(" ", pad)
+	}
+	return s
 }
 
 // iterField renders the iteration counter, with a denominator only when a

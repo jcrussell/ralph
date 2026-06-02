@@ -71,7 +71,7 @@ type Issue struct {
 // single label (empty label = unscoped). Types passed via
 // WithExcludeTypes are dropped server-side.
 func (c *Client) Ready(ctx context.Context, label string) ([]Issue, error) {
-	args := []string{"ready", "--json"}
+	args := []string{"ready", "--json", "-n", "0"}
 	if label != "" {
 		args = append(args, "-l", label)
 	}
