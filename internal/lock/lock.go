@@ -86,6 +86,23 @@ func (l *Lock) Release() error {
 // PID returns the PID written to the lockfile.
 func (l *Lock) PID() int { return l.pid }
 
+// ActivePID reports the PID recorded in the lockfile at path and
+// whether that process is currently alive. A missing lockfile returns
+// (0, false, nil) — there is simply no run holding the lock. A
+// malformed lockfile surfaces the read error. Callers (e.g. `ralph gc`)
+// use this to avoid touching state an in-progress orchestrator owns
+// without taking the lock themselves.
+func ActivePID(path string) (pid int, alive bool, err error) {
+	pid, err = readPID(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return pid, processAlive(pid), nil
+}
+
 // tryCreate writes the PID to a temp file in the same directory and
 // then atomically links it into place. Link fails with fs.ErrExist if
 // path already exists — propagate that for the caller's stale-check

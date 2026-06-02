@@ -138,3 +138,45 @@ func pickDeadPID(t *testing.T) int {
 	t.Skip("could not find a dead PID to seed the stale-lock test")
 	return -1
 }
+
+func TestActivePID(t *testing.T) {
+	dir := t.TempDir()
+
+	// Missing lockfile: (0, false, nil).
+	missing := filepath.Join(dir, "pid.lock")
+	if pid, alive, err := ActivePID(missing); err != nil || pid != 0 || alive {
+		t.Errorf("ActivePID(missing) = (%d, %v, %v), want (0, false, nil)", pid, alive, err)
+	}
+
+	// Live lock held by this process.
+	l, err := Acquire(missing)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer func() { _ = l.Release() }()
+	pid, alive, err := ActivePID(missing)
+	if err != nil {
+		t.Fatalf("ActivePID(live): %v", err)
+	}
+	if pid != os.Getpid() || !alive {
+		t.Errorf("ActivePID(live) = (%d, %v), want (%d, true)", pid, alive, os.Getpid())
+	}
+
+	// Dead pid: alive=false (pid 1 owned by init; use an impossibly high pid).
+	deadPath := filepath.Join(dir, "dead.lock")
+	if werr := os.WriteFile(deadPath, []byte("2147483646\n"), 0o600); werr != nil {
+		t.Fatalf("write dead lock: %v", werr)
+	}
+	if _, alive, err := ActivePID(deadPath); err != nil || alive {
+		t.Errorf("ActivePID(dead) alive=%v err=%v, want alive=false err=nil", alive, err)
+	}
+
+	// Malformed lockfile surfaces an error.
+	badPath := filepath.Join(dir, "bad.lock")
+	if werr := os.WriteFile(badPath, []byte("not-a-pid\n"), 0o600); werr != nil {
+		t.Fatalf("write bad lock: %v", werr)
+	}
+	if _, _, err := ActivePID(badPath); err == nil {
+		t.Errorf("ActivePID(malformed): nil err, want failure")
+	}
+}
