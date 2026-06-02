@@ -30,6 +30,10 @@ type fakeRunner struct {
 	Cwds     []string
 	Sessions []*runner.Session
 	Errs     []error
+	// OnRun, when set, is invoked on each Run call with the call index (0-based)
+	// and the opts. Tests use it to mutate the repo (e.g. make a commit) the way
+	// a real runner iteration would, so the downstream commit count is exercised.
+	OnRun func(call int, opts runner.RunOpts)
 }
 
 func (f *fakeRunner) Run(_ context.Context, opts runner.RunOpts) (*runner.Session, error) {
@@ -62,7 +66,30 @@ func (f *fakeRunner) Run(_ context.Context, opts runner.RunOpts) (*runner.Sessio
 	if opts.StderrPath != "" {
 		_ = os.WriteFile(opts.StderrPath, []byte(sess.Stderr), 0o600)
 	}
+	if f.OnRun != nil {
+		f.OnRun(idx, opts)
+	}
 	return sess, nil
+}
+
+// commitFile stages and commits a file in repo, the way a runner iteration that
+// did work would leave HEAD advanced by one commit. Used to exercise the
+// per-iteration commit count and its run-total accumulation.
+func commitFile(t *testing.T, repo, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+	for _, args := range [][]string{
+		{"add", name},
+		{"commit", "-q", "-m", "work " + name},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
 }
 
 // fakeBD lets tests pin Ready/List output by (label) and List(status,label),

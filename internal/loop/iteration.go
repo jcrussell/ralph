@@ -312,6 +312,12 @@ func routeAndPersist(ctx context.Context, rc *runContext, prev fsm.Outcome, befo
 
 	// Persist FSM with the new outcome.
 	rc.fsm.Outcome = next
+	// Accumulate the run-total commit count alongside the new outcome so it
+	// rides the same Save below. Mirrors CumulativeCostUSD: a per-run total on
+	// the persisted FSM (survives restarts), reset only by a fresh start. The
+	// quota-wait path never reaches here, so a wait tick adds nothing — the
+	// total holds steady across the wait instead of reading as a reset.
+	rc.fsm.CumulativeCommits += commits
 	if gate.Result != "" {
 		rc.fsm.LastGateResult = gate.Result
 	}
@@ -485,6 +491,7 @@ func notifyObserver(rc *runContext, rec IterRecord) {
 		Reason:                  rc.fsm.Reason,
 		CumulativeCostUSD:       rc.fsm.CumulativeCostUSD,
 		CumulativeWallclockSecs: rc.fsm.CumulativeWallclockSecs,
+		CumulativeCommits:       rc.fsm.CumulativeCommits,
 		ConsecutiveDirty:        rc.fsm.ConsecutiveDirty,
 		LastGateResult:          rc.fsm.LastGateResult,
 		MaxIterations:           rc.cfg.Loop.MaxIterations,

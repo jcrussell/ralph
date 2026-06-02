@@ -60,7 +60,7 @@ func TestObserverSendsMetricsMsg(t *testing.T) {
 // program exposes for loop.Options.Observer satisfies loop.Observer.
 func TestProgramObserverImplementsLoopObserver(t *testing.T) {
 	ios, _ := iostreams.Test()
-	pg := New(ios, loop.Snapshot{}, Header{}, tea.WithoutRenderer(), tea.WithInput(&bytes.Buffer{}))
+	pg := New(ios, loop.Snapshot{}, Header{}, DefaultLogCaps(), tea.WithoutRenderer(), tea.WithInput(&bytes.Buffer{}))
 	// Observer()'s return type is loop.Observer by its signature; assert it is
 	// non-nil so loop.Run never receives a nil sink.
 	if pg.Observer() == nil {
@@ -79,7 +79,7 @@ func TestProgramObserverImplementsLoopObserver(t *testing.T) {
 // only on a subsequent user quit keypress.
 func TestDoneThenQuitUnblocksRun(t *testing.T) {
 	ios, _ := iostreams.Test()
-	pg := New(ios, loop.Snapshot{}, Header{}, tea.WithoutRenderer(), tea.WithInput(&bytes.Buffer{}))
+	pg := New(ios, loop.Snapshot{}, Header{}, DefaultLogCaps(), tea.WithoutRenderer(), tea.WithInput(&bytes.Buffer{}))
 
 	errc := runDone(pg)
 	pg.p.Send(tea.WindowSizeMsg{Width: 100, Height: 24})
@@ -102,7 +102,7 @@ func TestDoneThenQuitUnblocksRun(t *testing.T) {
 // stand-in). Quit is driven by a Ctrl-C keypress (Done() no longer quits).
 func TestProgramRendersMetricsToErrOut(t *testing.T) {
 	ios, bufs := iostreams.Test()
-	pg := New(ios, loop.Snapshot{}, Header{}, tea.WithInput(&bytes.Buffer{}))
+	pg := New(ios, loop.Snapshot{}, Header{}, DefaultLogCaps(), tea.WithInput(&bytes.Buffer{}))
 
 	errc := runDone(pg)
 	pg.p.Send(tea.WindowSizeMsg{Width: 120, Height: 24})

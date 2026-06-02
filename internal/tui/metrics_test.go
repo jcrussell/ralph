@@ -22,6 +22,7 @@ func fullSnapshot() loop.Snapshot {
 		Reason:                  fsm.Reason("ready"),
 		CumulativeCostUSD:       1.23,
 		CumulativeWallclockSecs: 123,
+		CumulativeCommits:       8,
 		ConsecutiveDirty:        2,
 		LastGateResult:          narrative.GatePassed,
 		MaxIterations:           20,
@@ -61,11 +62,12 @@ func TestRenderAllFields(t *testing.T) {
 		"cost $1.23/$5.00", // cumulative cost + cap
 		"elapsed 2m3s",     // elapsed
 		"wall 2m3s/10m0s",  // cumulative wallclock + cap
+		"8 commits",        // run-total commits (budget row)
 		"dirty×2",          // consecutive dirty
 		"runner claude",    // last runner mode
 		"$0.42",            // last-iteration cost
 		"12.3s",            // last-iteration duration
-		"3 commits",        // last-iteration commits
+		"3 commits",        // last-iteration commits (runner row)
 		"2 created",        // bd diff totals
 		"1 closed",
 		"iter 0005", // narrative line (FormatNarrative)
@@ -93,6 +95,22 @@ func TestRenderOmitsCapsWhenUnset(t *testing.T) {
 	}
 	if strings.Contains(got, "cost $1.23/") {
 		t.Errorf("cost should have no cap suffix, got:\n%s", got)
+	}
+}
+
+// TestRenderRunTotalCommitsSurviveQuotaWait pins the ralph-n09 fix: on a
+// quota-wait tick the per-iteration record carries 0 commits (the runner row
+// reads "0 commits"), but the run-total on the budget row reflects the
+// cumulative count and does NOT read as a reset.
+func TestRenderRunTotalCommitsSurviveQuotaWait(t *testing.T) {
+	s := fullSnapshot()
+	s.CumulativeCommits = 8
+	// Simulate the quota-wait row: no per-iteration cost/commits.
+	s.Record = loop.IterRecord{RunnerMode: "quota", Skipped: "quota-wait"}
+
+	got := nonTTY().Render(s, 0)
+	if !strings.Contains(got, "8 commits") {
+		t.Errorf("budget row should keep the run-total %q during a quota wait, got:\n%s", "8 commits", got)
 	}
 }
 
@@ -144,8 +162,10 @@ func sepOffsets(line string) []int {
 }
 
 func TestRenderColumnsAlign(t *testing.T) {
-	// The seed snapshot renders just the status and budget lines. Their column
-	// separators must sit at the same offsets so the panel reads as a grid.
+	// The seed snapshot renders just the status and budget lines. The budget row
+	// carries one extra column (the run-total commit count) the status row lacks,
+	// so the rows have different separator counts; their shared columns must still
+	// sit at the same offsets so the panel reads as a grid.
 	got := nonTTY().Render(loop.Snapshot{MaxIterations: 100}, 0)
 	lines := strings.Split(got, "\n")
 	if len(lines) != 2 {
@@ -155,30 +175,36 @@ func TestRenderColumnsAlign(t *testing.T) {
 	if len(a) == 0 {
 		t.Fatalf("no separators found in %q", lines[0])
 	}
-	if !slicesEqual(a, b) {
-		t.Errorf("separator offsets differ:\n  %q -> %v\n  %q -> %v", lines[0], a, lines[1], b)
+	if !prefixAligned(a, b) {
+		t.Errorf("shared column offsets differ:\n  %q -> %v\n  %q -> %v", lines[0], a, lines[1], b)
 	}
 }
 
 func TestRenderColumnsAlignWithLongState(t *testing.T) {
 	// A long state field widens column 1; the budget line must pad to match so
-	// the separators still line up.
+	// the shared separators still line up.
 	s := loop.Snapshot{MaxIterations: 100, State: "clean", Reason: "queue_empty"}
 	got := nonTTY().Render(s, 0)
 	lines := strings.Split(got, "\n")
 	if len(lines) != 2 {
 		t.Fatalf("want 2 lines, got %d:\n%s", len(lines), got)
 	}
-	if a, b := sepOffsets(lines[0]), sepOffsets(lines[1]); !slicesEqual(a, b) {
-		t.Errorf("separator offsets differ with long state:\n  %q -> %v\n  %q -> %v", lines[0], a, lines[1], b)
+	if a, b := sepOffsets(lines[0]), sepOffsets(lines[1]); !prefixAligned(a, b) {
+		t.Errorf("shared column offsets differ with long state:\n  %q -> %v\n  %q -> %v", lines[0], a, lines[1], b)
 	}
 }
 
-func slicesEqual(a, b []int) bool {
-	if len(a) != len(b) {
-		return false
+// prefixAligned reports whether two separator-offset lists agree over their
+// shared columns: the first min(len(a), len(b)) offsets are equal. Rows may
+// have different column counts (e.g. the budget row's extra commit total), so a
+// trailing separator the shorter row lacks is fine as long as the columns they
+// do share line up.
+func prefixAligned(a, b []int) bool {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
 	}
-	for i := range a {
+	for i := 0; i < n; i++ {
 		if a[i] != b[i] {
 			return false
 		}

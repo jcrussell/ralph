@@ -30,6 +30,7 @@ type Config struct {
 	Budget  BudgetConfig  `toml:"budget"`
 	Review  ReviewConfig  `toml:"review"`
 	Beads   BeadsConfig   `toml:"beads"`
+	UI      UIConfig      `toml:"ui"`
 }
 
 // LoopConfig holds the [loop] section.
@@ -97,6 +98,19 @@ type BeadsConfig struct {
 	ExcludeTypes []string `toml:"exclude_types"`
 }
 
+// UIConfig holds the [ui] section — presentation knobs for the live
+// `ralph run` TUI. They never affect orchestration, only what the operator
+// sees.
+type UIConfig struct {
+	// LogScrollbackLines and LogScrollbackBytes cap the live log pane's
+	// in-memory scrollback ring. The pane keeps the most recent lines up to
+	// BOTH caps, evicting oldest-first, so a long run stays bounded while
+	// still letting the operator page back far. LogScrollbackBytes is a
+	// human-friendly size (e.g. "16M"), parsed like memory_limit_bytes.
+	LogScrollbackLines int    `toml:"log_scrollback_lines"`
+	LogScrollbackBytes string `toml:"log_scrollback_bytes"`
+}
+
 // Defaults returns a Config populated with the values documented in
 // the master plan's [config.toml] block.
 func Defaults() *Config {
@@ -135,6 +149,10 @@ func Defaults() *Config {
 			BaseBranch: "main",
 		},
 		Beads: BeadsConfig{},
+		UI: UIConfig{
+			LogScrollbackLines: 50000,
+			LogScrollbackBytes: "16M",
+		},
 	}
 }
 
@@ -224,6 +242,26 @@ func (c *Config) Validate() error {
 	}
 	if err := c.Beads.Validate(); err != nil {
 		return fmt.Errorf("beads: %w", err)
+	}
+	if err := c.UI.Validate(); err != nil {
+		return fmt.Errorf("ui: %w", err)
+	}
+	return nil
+}
+
+// Validate checks UIConfig invariants. The byte cap reuses ParseBytes (as
+// memory_limit_bytes does) and must resolve to a positive size; both caps
+// must be positive so the pane retains a usable amount of scrollback.
+func (u *UIConfig) Validate() error {
+	if u.LogScrollbackLines <= 0 {
+		return fmt.Errorf("log_scrollback_lines must be > 0, got %d", u.LogScrollbackLines)
+	}
+	n, err := ParseBytes(u.LogScrollbackBytes)
+	if err != nil {
+		return fmt.Errorf("log_scrollback_bytes: %w", err)
+	}
+	if n <= 0 {
+		return fmt.Errorf("log_scrollback_bytes must be > 0, got %q", u.LogScrollbackBytes)
 	}
 	return nil
 }

@@ -172,7 +172,15 @@ func runRun(ctx context.Context, opts *Options) error {
 			seed.ReadyBeads = n
 		}
 		hdr := tui.Header{Version: build.Info().Version, Dir: repo}
-		ui := tui.New(opts.F.IOStreams, seed, hdr)
+		// Bound the log pane's scrollback from config. The byte size was already
+		// validated at load (Config.Validate), so a parse error here is not
+		// expected; fall back to the default cap rather than fail the run.
+		caps := tui.DefaultLogCaps()
+		caps.MaxLines = cfg.UI.LogScrollbackLines
+		if b, err := config.ParseBytes(cfg.UI.LogScrollbackBytes); err == nil && b > 0 {
+			caps.MaxBytes = int(b)
+		}
+		ui := tui.New(opts.F.IOStreams, seed, hdr, caps)
 		return orchestrate(ctx, ui, loop.Run, lopts, opts.F.IOStreams.ErrOut)
 	}
 

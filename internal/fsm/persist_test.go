@@ -45,6 +45,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		ReviewBase:              "main",
 		CumulativeCostUSD:       1.25,
 		CumulativeWallclockSecs: 600,
+		CumulativeCommits:       9,
 		LastGateResult:          "passed",
 		ConsecutiveGateFail:     3,
 	}
@@ -57,6 +58,33 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if diff := cmp.Diff(in, out); diff != "" {
 		t.Errorf("round-trip mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// TestLoadBackCompatMissingCumulativeCommits pins that an fsm.json written by
+// an older ralph (before the cumulative_commits field existed) loads cleanly
+// with the new counter zeroed — the additive-field, no-schema-bump contract.
+func TestLoadBackCompatMissingCumulativeCommits(t *testing.T) {
+	repo := t.TempDir()
+	path := Path(repo)
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// A minimal valid fsm.json with NO cumulative_commits key.
+	old := `{"version":1,"state":"clean","iter":4,"cumulative_cost_usd":3.5,"cumulative_wallclock_secs":120}`
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	out, err := Load(repo)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if out.CumulativeCommits != 0 {
+		t.Errorf("CumulativeCommits = %d, want 0 for a pre-field file", out.CumulativeCommits)
+	}
+	// The fields that were present must still load.
+	if out.Iter != 4 || out.CumulativeCostUSD != 3.5 {
+		t.Errorf("existing fields not preserved: iter=%d cost=%v", out.Iter, out.CumulativeCostUSD)
 	}
 }
 

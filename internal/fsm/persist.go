@@ -34,6 +34,7 @@ type FSM struct {
 	ReviewBase              string  `json:"review_base,omitempty"`
 	CumulativeCostUSD       float64 `json:"cumulative_cost_usd"`
 	CumulativeWallclockSecs int     `json:"cumulative_wallclock_secs"`
+	CumulativeCommits       int     `json:"cumulative_commits"`
 	LastGateResult          string  `json:"last_gate_result,omitempty"`
 	ConsecutiveGateFail     int     `json:"consecutive_gate_fail"`
 }

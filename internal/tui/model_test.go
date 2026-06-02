@@ -39,7 +39,7 @@ func newTestModel(t *testing.T) model {
 	t.Helper()
 	t.Setenv("NO_COLOR", "")
 	ios, _ := iostreams.Test()
-	return newModel(ios, loop.Snapshot{}, Header{})
+	return newModel(ios, loop.Snapshot{}, Header{}, DefaultLogCaps())
 }
 
 // sized returns a model that has received an initial WindowSizeMsg.
@@ -158,7 +158,7 @@ func TestTinyWindowDegradesGracefully(t *testing.T) {
 func TestNoColorYieldsNoANSI(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	ios, _ := iostreams.Test()
-	m := newModel(ios, loop.Snapshot{}, Header{})
+	m := newModel(ios, loop.Snapshot{}, Header{}, DefaultLogCaps())
 	if m.colorEnabled {
 		t.Fatalf("non-TTY + NO_COLOR should disable color")
 	}
@@ -222,7 +222,7 @@ func seededModel(t *testing.T, seed loop.Snapshot) model {
 	t.Helper()
 	t.Setenv("NO_COLOR", "")
 	ios, _ := iostreams.Test()
-	return newModel(ios, seed, Header{})
+	return newModel(ios, seed, Header{}, DefaultLogCaps())
 }
 
 func TestInitialPanelRendersCapsAtT0(t *testing.T) {
@@ -292,7 +292,7 @@ func headerModel(t *testing.T, hdr Header, ready int, state, reason string, done
 	t.Helper()
 	t.Setenv("NO_COLOR", "")
 	ios, _ := iostreams.Test()
-	m, _ := step(t, newModel(ios, loop.Snapshot{}, hdr), tea.WindowSizeMsg{Width: 120, Height: 24})
+	m, _ := step(t, newModel(ios, loop.Snapshot{}, hdr, DefaultLogCaps()), tea.WindowSizeMsg{Width: 120, Height: 24})
 	m, _ = step(t, m, metricsMsg{s: loop.Snapshot{
 		Iter:       1,
 		State:      fsm.State(state),

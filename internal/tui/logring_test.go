@@ -62,6 +62,25 @@ func TestLogRingKeepsAtLeastOneOversizeLine(t *testing.T) {
 	}
 }
 
+// TestNewLogRingHonorsCaps verifies the constructor applies the injected caps
+// (so config can raise scrollback) and that a non-positive cap falls back to
+// the production default rather than yielding a ring that evicts to one line.
+func TestNewLogRingHonorsCaps(t *testing.T) {
+	r := newLogRing(LogCaps{MaxLines: 7, MaxBytes: 1234})
+	if r.maxLines != 7 || r.maxBytes != 1234 {
+		t.Errorf("caps not applied: maxLines=%d maxBytes=%d, want 7/1234", r.maxLines, r.maxBytes)
+	}
+
+	// A zero LogCaps falls back to the (raised) defaults.
+	def := newLogRing(LogCaps{})
+	if def.maxLines != defaultMaxLogLines || def.maxBytes != defaultMaxLogBytes {
+		t.Errorf("zero caps should fall back to defaults, got maxLines=%d maxBytes=%d", def.maxLines, def.maxBytes)
+	}
+	if got := DefaultLogCaps(); got.MaxLines != defaultMaxLogLines || got.MaxBytes != defaultMaxLogBytes {
+		t.Errorf("DefaultLogCaps() = %+v, want %d/%d", got, defaultMaxLogLines, defaultMaxLogBytes)
+	}
+}
+
 // TestLogRingStoresANSIVerbatim verifies escape sequences survive the ring
 // unmodified, and that the width math the pane relies on (lipgloss, the same
 // ANSI-aware machinery bubbles/viewport truncates with) counts only visible
@@ -69,7 +88,7 @@ func TestLogRingKeepsAtLeastOneOversizeLine(t *testing.T) {
 // severed. The byte cap, by contrast, counts raw bytes including escapes.
 func TestLogRingStoresANSIVerbatim(t *testing.T) {
 	const colored = "\x1b[31mERROR\x1b[0m boom"
-	r := newLogRing()
+	r := newLogRing(DefaultLogCaps())
 	r.push(colored)
 
 	if got := r.content(); got != colored {

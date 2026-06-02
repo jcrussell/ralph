@@ -77,6 +77,7 @@ type Snapshot struct {
 	Reason                  fsm.Reason
 	CumulativeCostUSD       float64
 	CumulativeWallclockSecs int
+	CumulativeCommits       int
 	ConsecutiveDirty        int
 	LastGateResult          string
 

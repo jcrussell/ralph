@@ -65,11 +65,25 @@ Hard caps that force `failed{budget}`. `0` = unlimited.
 |---------------|--------|----------|---------|
 | `base_branch` | string | `"main"` | Base branch for review-mode merge-filing flows. Used by `internal/git.ResolveBase` when nothing else is specified. |
 
+## `[ui]`
+
+Presentation knobs for the live `ralph run` TUI. They affect only what the
+operator sees, never orchestration.
+
+| Key                    | Type   | Default   | Meaning |
+|------------------------|--------|-----------|---------|
+| `log_scrollback_lines` | int    | `50000`   | Max lines retained in the live log pane's in-memory scrollback ring. Must be `> 0`. The pane keeps the most recent lines up to this cap, evicting oldest-first. |
+| `log_scrollback_bytes` | string | `"16M"`   | Byte cap on the same ring, parsed like `memory_limit_bytes` (suffixes `K`/`M`/`G`/`T`, 1024 multipliers; trailing `B` accepted). Must resolve to `> 0`. The pane retains lines up to **both** caps, so whichever is hit first bounds scrollback. |
+
+Raising these lets a long run page further back at the cost of more memory; the
+ring is bounded by whichever cap is reached first, so memory stays predictable.
+
 ## Live TUI (`ralph run`)
 
-The interactive terminal UI is not a config key — it has no `[tui]` section and
-no `config.toml` toggle. It is gated entirely on the terminal and one flag, so
-it stays out of the config layers above.
+The interactive terminal UI's **activation** is not a config key — there is no
+`config.toml` toggle to turn it on or off. It is gated entirely on the terminal
+and one flag (below), so activation stays out of the config layers above. Its
+log-pane scrollback caps *are* configurable via the `[ui]` section above.
 
 **Activation.** `ralph run` shows the live UI automatically when **both** stdin
 and stderr are TTYs. Off a TTY — CI, pipes, output redirects — it falls back to
@@ -81,12 +95,15 @@ TTY; run then streams the narrative instead. This flag is the only switch — th
 off-TTY fallback and the `--no-tui` path are the same code path, and it is
 byte-identical to the pre-TUI behavior.
 
-**Layout.** A metrics panel (iteration N/max, FSM state, cumulative cost vs
-budget cap, elapsed vs wallclock cap, last gate result, consecutive-dirty
-count, last-iteration cost/duration/commits) sits above a scrollable log pane
-fed by the loop's interleaved output. The pane follows the tail unless you
-scroll up. On a window too small to split, the layout degrades to a clipped
-metrics block. Color honors `NO_COLOR` and the stderr TTY.
+**Layout.** A metrics panel (iteration N/max, FSM state, run totals — cumulative
+cost vs budget cap, elapsed vs wallclock cap, and run-total commit count — last
+gate result, consecutive-dirty count, last-iteration cost/duration/commits) sits
+above a scrollable log pane fed by the loop's interleaved output. The run totals
+live on the persisted FSM, so they hold steady across a quota wait rather than
+reading as a reset (the last-iteration row legitimately shows `0` during a
+wait). The pane follows the tail unless you scroll up; its scrollback depth is
+bounded by the `[ui]` caps above. On a window too small to split, the layout
+degrades to a clipped metrics block. Color honors `NO_COLOR` and the stderr TTY.
 
 **Keys.**
 

@@ -20,12 +20,31 @@ package tui
 
 import "strings"
 
-// Default caps for the production ring. ~5000 lines or 1 MiB of scrollback
-// is generous for a human skimming a run while staying trivially bounded.
+// Default caps for the production ring. ~50k lines or 16 MiB of scrollback
+// holds many iterations of a long run (a human hit the old 5k/1 MiB ceiling
+// around 50 iterations) while staying trivially bounded. These are the
+// fallback when config supplies nothing; config can raise or lower them
+// (LogScrollbackLines / LogScrollbackBytes, internal/config) — see DefaultLogCaps.
 const (
-	defaultMaxLogLines = 5000
-	defaultMaxLogBytes = 1 << 20 // 1 MiB
+	defaultMaxLogLines = 50000
+	defaultMaxLogBytes = 16 << 20 // 16 MiB
 )
+
+// LogCaps bounds the live log pane's in-memory scrollback ring. It crosses
+// the package boundary (New/newModel) as a small value so the TUI never
+// imports config internals — run.go derives it from the resolved config and
+// hands it in, mirroring how the seed loop.Snapshot carries the metric caps.
+type LogCaps struct {
+	MaxLines int
+	MaxBytes int
+}
+
+// DefaultLogCaps returns the production fallback caps. Callers without a
+// config source (and tests) use it so a zero LogCaps never yields a ring
+// that evicts every line.
+func DefaultLogCaps() LogCaps {
+	return LogCaps{MaxLines: defaultMaxLogLines, MaxBytes: defaultMaxLogBytes}
+}
 
 // logRing is a bounded FIFO of log lines. The zero value is unusable;
 // build one with newLogRing (or, in tests, a struct literal with explicit
@@ -38,9 +57,17 @@ type logRing struct {
 	maxBytes int
 }
 
-// newLogRing builds a ring with the production defaults.
-func newLogRing() *logRing {
-	return &logRing{maxLines: defaultMaxLogLines, maxBytes: defaultMaxLogBytes}
+// newLogRing builds a ring with the given caps. Non-positive caps fall back
+// to the production defaults so a misconfigured or zero-valued cap can never
+// produce a ring that evicts down to a single line.
+func newLogRing(caps LogCaps) *logRing {
+	if caps.MaxLines <= 0 {
+		caps.MaxLines = defaultMaxLogLines
+	}
+	if caps.MaxBytes <= 0 {
+		caps.MaxBytes = defaultMaxLogBytes
+	}
+	return &logRing{maxLines: caps.MaxLines, maxBytes: caps.MaxBytes}
 }
 
 // push appends one line and evicts the oldest lines until both caps hold.

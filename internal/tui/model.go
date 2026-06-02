@@ -113,8 +113,10 @@ type model struct {
 // first iteration) with the configured caps and zeroed counters; the first
 // metricsMsg overwrites it. Seeding hasSnap also starts the elapsed ticker
 // from construction. hdr carries the static header identity (version, cwd)
-// rendered above the panel.
-func newModel(ios *iostreams.IOStreams, initial loop.Snapshot, hdr Header) model {
+// rendered above the panel. caps bounds the scrollback ring (config-driven,
+// with a default fallback) so a long run can page back further than the old
+// fixed ceiling without letting the pane grow without bound.
+func newModel(ios *iostreams.IOStreams, initial loop.Snapshot, hdr Header, caps LogCaps) model {
 	colorEnabled := ios.IsStderrTTY() && iostreams.EnvAllowsColor()
 	r := lipgloss.NewRenderer(ios.ErrOut)
 	if !colorEnabled {
@@ -126,7 +128,7 @@ func newModel(ios *iostreams.IOStreams, initial loop.Snapshot, hdr Header) model
 		r:            r,
 		hdr:          hdr,
 		colorEnabled: colorEnabled,
-		logs:         newLogRing(),
+		logs:         newLogRing(caps),
 		snap:         initial,
 		hasSnap:      true,
 		liveElapsed:  initial.Elapsed, // 0 for the seed; tick advances from here

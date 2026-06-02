@@ -287,6 +287,49 @@ func TestRun_CumulativesUpdate(t *testing.T) {
 	}
 }
 
+// Run-total commit count accumulates on the FSM across iterations (ralph-n09).
+// Each iteration's runner makes one commit; the persisted CumulativeCommits is
+// the sum, and the per-iteration snapshots show it growing monotonically.
+func TestRun_CumulativeCommitsAccumulate(t *testing.T) {
+	repo := scaffoldRepo(t)
+	opts := baseOpts(t, repo)
+	opts.Cfg.Loop.MaxIterations = 2
+	opts.BD = readyOne()
+	opts.Clock = newFakeClock()
+	fr := &fakeRunner{}
+	fr.OnRun = func(call int, _ runner.RunOpts) {
+		commitFile(t, repo, fmt.Sprintf("work-%d.txt", call), "x")
+	}
+	opts.Runner = fr
+	obs := &fakeObserver{}
+	opts.Observer = obs
+
+	if _, err := Run(context.Background(), opts); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if f := fsmAt(t, repo); f.CumulativeCommits != 2 {
+		t.Errorf("CumulativeCommits = %d, want 2 (one commit per iteration)", f.CumulativeCommits)
+	}
+
+	snaps := obs.Snapshots
+	if len(snaps) != 2 {
+		t.Fatalf("Observe calls = %d, want 2", len(snaps))
+	}
+	if snaps[0].CumulativeCommits != 1 {
+		t.Errorf("snap[0].CumulativeCommits = %d, want 1", snaps[0].CumulativeCommits)
+	}
+	if snaps[1].CumulativeCommits != 2 {
+		t.Errorf("snap[1].CumulativeCommits = %d, want 2", snaps[1].CumulativeCommits)
+	}
+	// Each per-iteration record reflects just that iteration's single commit —
+	// the run total is the accumulation, not the per-iteration value.
+	if snaps[0].Record.Commits != 1 || snaps[1].Record.Commits != 1 {
+		t.Errorf("per-iteration Record.Commits = %d, %d, want 1, 1",
+			snaps[0].Record.Commits, snaps[1].Record.Commits)
+	}
+}
+
 // Gate hook is skipped when --skip-gate is set, regardless of cfg.
 func TestRun_GateSkippedByFlag(t *testing.T) {
 	repo := scaffoldRepo(t)

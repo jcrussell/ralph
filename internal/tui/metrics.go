@@ -72,10 +72,17 @@ func (f *Formatter) Render(s loop.Snapshot, width int) string {
 		{text: "gate " + gateText(s.LastGateResult), color: f.gateColor(s.LastGateResult)},
 	}
 
+	// The budget row carries the run totals — cumulative cost, elapsed, wall,
+	// and commit count. These live on the persisted FSM and so survive quota
+	// waits and restarts; the commit total is the run-level counterpart to the
+	// per-iteration "runner" row's commits, which legitimately reads 0 on a
+	// quota-wait tick. Keeping the run total here means a wait never looks like
+	// a reset.
 	budget := []seg{
 		{text: "cost " + moneyCap(s.CumulativeCostUSD, s.MaxCostUSD)},
 		{text: "elapsed " + dur(s.Elapsed)},
 		{text: "wall " + durCap(secs(s.CumulativeWallclockSecs), s.MaxWallclockSecs)},
+		{text: fmt.Sprintf("%d commits", s.CumulativeCommits)},
 	}
 	if s.ConsecutiveDirty > 0 {
 		budget = append(budget, seg{text: fmt.Sprintf("dirty×%d", s.ConsecutiveDirty), color: f.cs.Yellow})

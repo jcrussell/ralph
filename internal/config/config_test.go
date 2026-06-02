@@ -31,6 +31,12 @@ func TestDefaultsMatchPlan(t *testing.T) {
 	if d.Review.BaseBranch != "main" {
 		t.Errorf("Review.BaseBranch = %q, want main", d.Review.BaseBranch)
 	}
+	if d.UI.LogScrollbackLines != 50000 {
+		t.Errorf("UI.LogScrollbackLines = %d, want 50000", d.UI.LogScrollbackLines)
+	}
+	if d.UI.LogScrollbackBytes != "16M" {
+		t.Errorf("UI.LogScrollbackBytes = %q, want 16M", d.UI.LogScrollbackBytes)
+	}
 }
 
 func TestLoadMissingFilesUsesDefaults(t *testing.T) {
@@ -209,6 +215,10 @@ func TestValidateRejectsBadValues(t *testing.T) {
 		{"beads exclude_types whitespace entry", func(c *Config) { c.Beads.ExcludeTypes = []string{"  "} }, "exclude_types"},
 		{"beads exclude_types comma-separated", func(c *Config) { c.Beads.ExcludeTypes = []string{"byob,foo"} }, "comma-separated"},
 		{"beads exclude_types embedded space", func(c *Config) { c.Beads.ExcludeTypes = []string{"by ob"} }, "single type"},
+		{"ui log_scrollback_lines zero", func(c *Config) { c.UI.LogScrollbackLines = 0 }, "log_scrollback_lines"},
+		{"ui log_scrollback_lines negative", func(c *Config) { c.UI.LogScrollbackLines = -1 }, "log_scrollback_lines"},
+		{"ui log_scrollback_bytes garbage", func(c *Config) { c.UI.LogScrollbackBytes = "abc" }, "log_scrollback_bytes"},
+		{"ui log_scrollback_bytes empty", func(c *Config) { c.UI.LogScrollbackBytes = "" }, "log_scrollback_bytes"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -331,5 +341,35 @@ func TestConfigMemoryLimitBytes(t *testing.T) {
 	}
 	if want := int64(7) << 30; got != want {
 		t.Errorf("MemoryLimitBytes() = %d, want %d", got, want)
+	}
+}
+
+// A repo [ui] section overrides the scrollback caps; absent keys keep the
+// default (only log_scrollback_lines is set here, so bytes stays "16M").
+func TestLoadUIScrollbackOverride(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	repo := t.TempDir()
+
+	repoDir := filepath.Join(repo, ".ralph")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repoTOML := `[ui]
+log_scrollback_lines = 12345
+`
+	if err := os.WriteFile(filepath.Join(repoDir, "config.toml"), []byte(repoTOML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(repo)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.UI.LogScrollbackLines != 12345 {
+		t.Errorf("UI.LogScrollbackLines = %d, want 12345 (overridden)", cfg.UI.LogScrollbackLines)
+	}
+	if cfg.UI.LogScrollbackBytes != "16M" {
+		t.Errorf("UI.LogScrollbackBytes = %q, want 16M (default preserved)", cfg.UI.LogScrollbackBytes)
 	}
 }
