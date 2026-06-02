@@ -2,6 +2,7 @@ package cmdutil
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -34,7 +35,14 @@ func ParseDuration(spec string) (time.Duration, error) {
 		if err != nil {
 			return 0, fmt.Errorf("invalid duration %q (want e.g. 30d, 2w, 72h)", spec)
 		}
-		d = time.Duration(n * float64(mult))
+		// Guard the float→int64 conversion: Go leaves an out-of-range
+		// result implementation-defined, so a huge spec like "1e10d" could
+		// otherwise wrap to a bogus value that slips past the d<=0 check.
+		ns := n * float64(mult)
+		if math.IsNaN(ns) || ns < 1 || ns > math.MaxInt64 {
+			return 0, fmt.Errorf("duration out of range %q (want e.g. 30d, 2w, 72h)", spec)
+		}
+		d = time.Duration(ns)
 	default:
 		var err error
 		d, err = time.ParseDuration(s)

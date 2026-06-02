@@ -31,7 +31,12 @@ func TestParseDuration(t *testing.T) {
 }
 
 func TestParseDurationInvalid(t *testing.T) {
-	for _, spec := range []string{"", "  ", "abc", "d", "w", "-5d", "0d", "0h", "30x", "30dd"} {
+	for _, spec := range []string{
+		"", "  ", "abc", "d", "w", "-5d", "0d", "0h", "30x", "30dd",
+		"1e10d",  // overflows int64 ns; must be rejected, not wrapped
+		"-1e10d", // negative overflow
+		"1e308w", // far past MaxInt64 even before the week multiplier
+	} {
 		if _, err := ParseDuration(spec); err == nil {
 			t.Errorf("ParseDuration(%q): nil err, want failure", spec)
 		}
