@@ -239,6 +239,15 @@ type Diff struct {
 	Blocked    []string // transitioned to blocked
 }
 
+// IsEmpty reports whether the diff carries no transitions at all — no
+// beads created, closed, opened, deferred, moved to in_progress, or
+// blocked. The loop uses it to recognize a no-op iteration (combined
+// with zero commits and an unchanged state).
+func (d Diff) IsEmpty() bool {
+	return len(d.Created) == 0 && len(d.Closed) == 0 && len(d.Opened) == 0 &&
+		len(d.Deferred) == 0 && len(d.InProgress) == 0 && len(d.Blocked) == 0
+}
+
 // DiffSnapshots computes the deltas going from before to after.
 func DiffSnapshots(before, after *Snapshot) Diff {
 	d := Diff{}

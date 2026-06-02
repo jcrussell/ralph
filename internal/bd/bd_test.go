@@ -258,6 +258,25 @@ func TestDiffNilSnapshots(t *testing.T) {
 	}
 }
 
+func TestDiffIsEmpty(t *testing.T) {
+	if !(Diff{}).IsEmpty() {
+		t.Errorf("zero Diff.IsEmpty() = false, want true")
+	}
+	cases := map[string]Diff{
+		"created":     {Created: []string{"a"}},
+		"closed":      {Closed: []string{"a"}},
+		"opened":      {Opened: []string{"a"}},
+		"deferred":    {Deferred: []string{"a"}},
+		"in_progress": {InProgress: []string{"a"}},
+		"blocked":     {Blocked: []string{"a"}},
+	}
+	for name, d := range cases {
+		if d.IsEmpty() {
+			t.Errorf("%s: IsEmpty() = true, want false", name)
+		}
+	}
+}
+
 // TestDiffSnapshotsTransitions exercises the switch directly against
 // every status pair we care about, including the cases that previously
 // fell through (in_progress→blocked, deferred/blocked→open, etc.).

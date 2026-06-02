@@ -294,9 +294,21 @@ func routeAndPersist(ctx context.Context, rc *runContext, prev fsm.Outcome, befo
 		BD:            rc.bdClient,
 		Repo:          rc.repo,
 		RunnerFailure: runnerFailure,
+		NoopStreak:    rc.consecNoops,
 	})
 	if err != nil {
 		return prev, fmt.Errorf("loop: select next state: %w", err)
+	}
+
+	// Track the consecutive no-op streak for the idle-exit route above. A
+	// no-op is a clean tick that moved nothing: runner OK, zero commits,
+	// empty bd diff, and the state held. Any productive tick resets it.
+	// Read on the *next* iteration's SelectNextState call, so the exit
+	// fires one iteration after the streak crosses MaxNoopIters.
+	if mode == runner.ModeOK && commits == 0 && next.State == prev.State && diff.IsEmpty() {
+		rc.consecNoops++
+	} else {
+		rc.consecNoops = 0
 	}
 
 	// Update counters *before* assigning the new state.

@@ -26,17 +26,18 @@ const (
 )
 
 // Reason annotates terminal states. done carries one of {queue_empty,
-// iter_cap}; failed carries one of {budget, auth, runner_terminal}.
+// iter_cap, idle}; failed carries one of {budget, auth, runner_terminal}.
 // Non-terminal states carry ReasonNone.
 type Reason string
 
 // Terminal-state reasons. ReasonNone is used by non-terminal states;
-// ReasonQueueEmpty/ReasonIterCap pair with StateDone; ReasonBudget,
+// ReasonQueueEmpty/ReasonIterCap/ReasonIdle pair with StateDone; ReasonBudget,
 // ReasonAuth, and ReasonRunnerTerminal pair with StateFailed.
 const (
 	ReasonNone           Reason = ""
 	ReasonQueueEmpty     Reason = "queue_empty"
 	ReasonIterCap        Reason = "iter_cap"
+	ReasonIdle           Reason = "idle"
 	ReasonBudget         Reason = "budget"
 	ReasonAuth           Reason = "auth"
 	ReasonRunnerTerminal Reason = "runner_terminal"
@@ -82,7 +83,7 @@ func (s State) Valid() bool {
 func (s State) ValidReasons() []Reason {
 	switch s {
 	case StateDone:
-		return []Reason{ReasonQueueEmpty, ReasonIterCap}
+		return []Reason{ReasonQueueEmpty, ReasonIterCap, ReasonIdle}
 	case StateFailed:
 		return []Reason{ReasonBudget, ReasonAuth, ReasonRunnerTerminal}
 	default:

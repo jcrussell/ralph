@@ -38,10 +38,10 @@ Render this against a real run with `ralph fsm graph` — that overlays observed
 | `dirty`          | loop     | Working tree dirty; assess & finish or accumulate streak.                                   |
 | `revert`         | one-shot | Auto-revert triggered (3 consecutive dirty iterations); `git checkout -- .` + `bd defer`. Suppressed in review mode. |
 | `review`         | loop     | Review-mode loop; agent decides ingest / fix / address-gate / file-merge per iteration.    |
-| `done{Reason}`   | terminal | Exit 0. Reasons: `QueueEmpty` (nothing left to do), `IterCap` (max iterations reached).    |
+| `done{Reason}`   | terminal | Exit 0. Reasons: `QueueEmpty` (nothing left to do), `IterCap` (max iterations reached), `Idle` (too many consecutive no-op iterations). |
 | `failed{Reason}` | terminal | Exit 1. Reasons: `Budget`, `Auth`, `RunnerTerminal`. Runs `hooks/failure`.                 |
 
-There is no `idle` state. A state with no prompt and no hook is just a function call wearing a hat — routing is centralized in `selectNextState`.
+There is no `idle` *state* — `done{idle}` is a terminal reason, not a state. A state with no prompt and no hook is just a function call wearing a hat — routing is centralized in `selectNextState`.
 
 ## Routing
 
@@ -56,6 +56,7 @@ After every iteration, `fsm.SelectNextState(ctx, in)` evaluates predicates in or
      else                                           -> review
 5. DirtyStreakExceeded                              -> revert
 6. GitDirty                                         -> dirty
+6.5 NoopStreak >= MaxNoopIters (>0)                 -> done{idle}
 7. bd_ready==0 && bd_in_progress==0 && GitClean     -> done{queue_empty}
 8. otherwise                                        -> clean
 ```

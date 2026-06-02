@@ -132,6 +132,7 @@ func TestApplyOverrides(t *testing.T) {
 			want: config.LoopConfig{
 				MaxIterations:      30,
 				SessionTimeoutSecs: 3600,
+				MaxNoopIters:       10,
 				MemoryLimit:        "7G",
 				SleepBetweenSecs:   5,
 				QuotaWaitSecs:      1800,
@@ -143,6 +144,7 @@ func TestApplyOverrides(t *testing.T) {
 			want: config.LoopConfig{
 				MaxIterations:      7,
 				SessionTimeoutSecs: 3600,
+				MaxNoopIters:       10,
 				MemoryLimit:        "7G",
 				SleepBetweenSecs:   5,
 				QuotaWaitSecs:      1800,
@@ -154,6 +156,7 @@ func TestApplyOverrides(t *testing.T) {
 			want: config.LoopConfig{
 				MaxIterations:      30,
 				SessionTimeoutSecs: 30,
+				MaxNoopIters:       10,
 				MemoryLimit:        "7G",
 				SleepBetweenSecs:   5,
 				QuotaWaitSecs:      1800,
@@ -165,6 +168,7 @@ func TestApplyOverrides(t *testing.T) {
 			want: config.LoopConfig{
 				MaxIterations:      30,
 				SessionTimeoutSecs: 3600,
+				MaxNoopIters:       10,
 				MemoryLimit:        "1G",
 				SleepBetweenSecs:   5,
 				QuotaWaitSecs:      1800,
@@ -176,6 +180,7 @@ func TestApplyOverrides(t *testing.T) {
 			want: config.LoopConfig{
 				MaxIterations:      5,
 				SessionTimeoutSecs: 60,
+				MaxNoopIters:       10,
 				MemoryLimit:        "2G",
 				SleepBetweenSecs:   5,
 				QuotaWaitSecs:      1800,
@@ -189,6 +194,7 @@ func TestApplyOverrides(t *testing.T) {
 			want: config.LoopConfig{
 				MaxIterations:      0,
 				SessionTimeoutSecs: 3600,
+				MaxNoopIters:       10,
 				MemoryLimit:        "7G",
 				SleepBetweenSecs:   5,
 				QuotaWaitSecs:      1800,
@@ -200,6 +206,7 @@ func TestApplyOverrides(t *testing.T) {
 			want: config.LoopConfig{
 				MaxIterations:      30,
 				SessionTimeoutSecs: 3600,
+				MaxNoopIters:       10,
 				MemoryLimit:        "7G",
 				SleepBetweenSecs:   5,
 				WaitOnQuota:        true,

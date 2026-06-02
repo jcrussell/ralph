@@ -16,6 +16,9 @@ func TestDefaultsMatchPlan(t *testing.T) {
 	if d.Loop.MemoryLimit != "7G" {
 		t.Errorf("Loop.MemoryLimit = %q, want 7G", d.Loop.MemoryLimit)
 	}
+	if d.Loop.MaxNoopIters != 10 {
+		t.Errorf("Loop.MaxNoopIters = %d, want 10", d.Loop.MaxNoopIters)
+	}
 	if d.Runner.Command != "claude" {
 		t.Errorf("Runner.Command = %q, want claude", d.Runner.Command)
 	}
@@ -202,6 +205,7 @@ func TestValidateRejectsBadValues(t *testing.T) {
 		{"loop sleep_between_secs negative", func(c *Config) { c.Loop.SleepBetweenSecs = -1 }, "sleep_between_secs"},
 		{"loop memory_limit_bytes garbage", func(c *Config) { c.Loop.MemoryLimit = "abc" }, "memory_limit_bytes"},
 		{"loop quota_wait_secs negative", func(c *Config) { c.Loop.QuotaWaitSecs = -1 }, "quota_wait_secs"},
+		{"loop max_noop_iters negative", func(c *Config) { c.Loop.MaxNoopIters = -1 }, "max_noop_iters"},
 		{"runner command empty", func(c *Config) { c.Runner.Command = "" }, "command is required"},
 		{"gate timeout_secs negative", func(c *Config) { c.Gate.TimeoutSecs = -1 }, "timeout_secs"},
 		{"gate run_when typo", func(c *Config) { c.Gate.RunWhen = "commits_only" }, "run_when"},

@@ -62,7 +62,7 @@ func TestStateValidReasons(t *testing.T) {
 	}{
 		{StateStart, 1, []Reason{ReasonNone}},
 		{StateClean, 1, []Reason{ReasonNone}},
-		{StateDone, 2, []Reason{ReasonQueueEmpty, ReasonIterCap}},
+		{StateDone, 3, []Reason{ReasonQueueEmpty, ReasonIterCap, ReasonIdle}},
 		{StateFailed, 3, []Reason{ReasonBudget, ReasonAuth, ReasonRunnerTerminal}},
 	}
 	for _, c := range cases {
@@ -88,6 +88,7 @@ func TestOutcomeString(t *testing.T) {
 		{Outcome{State: StateDirty}, "dirty"},
 		{Outcome{State: StateDone, Reason: ReasonQueueEmpty}, "done{queue_empty}"},
 		{Outcome{State: StateDone, Reason: ReasonIterCap}, "done{iter_cap}"},
+		{Outcome{State: StateDone, Reason: ReasonIdle}, "done{idle}"},
 		{Outcome{State: StateFailed, Reason: ReasonBudget}, "failed{budget}"},
 		{Outcome{State: StateFailed, Reason: ReasonAuth}, "failed{auth}"},
 		{Outcome{State: StateFailed, Reason: ReasonRunnerTerminal}, "failed{runner_terminal}"},

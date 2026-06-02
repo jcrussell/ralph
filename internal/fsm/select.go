@@ -21,6 +21,11 @@ type RouteInput struct {
 	BD            BDLister
 	Repo          string
 	RunnerFailure Reason
+	// NoopStreak is the loop's count of consecutive no-op iterations so
+	// far (runner OK, zero commits, empty bd diff, unchanged state). When
+	// it reaches Cfg.Loop.MaxNoopIters the route is done{idle}. Mirrors
+	// how the loop feeds deadStreak in via RunnerFailure.
+	NoopStreak int
 }
 
 // SelectNextState returns the next Outcome given the current FSM,
@@ -36,6 +41,7 @@ type RouteInput struct {
 //  4. review mode on            -> done{queue_empty} when empty + clean, else review
 //  5. dirty streak exceeded     -> revert (suppressed in review mode by step 4)
 //  6. git dirty                 -> dirty
+//     6.5 no-op streak exceeded    -> done{idle}
 //  7. queue empty + git clean   -> done{queue_empty}
 //  8. otherwise                 -> clean
 func SelectNextState(ctx context.Context, in RouteInput) (Outcome, error) {
@@ -95,6 +101,13 @@ func SelectNextState(ctx context.Context, in RouteInput) (Outcome, error) {
 	}
 	if !clean {
 		return Outcome{State: StateDirty}, nil
+	}
+
+	// 6.5 Idle: too many consecutive no-op iterations -> done{idle}.
+	// Placed after the dirty check so a dirty tree always takes precedence;
+	// a no-op streak only accrues on clean, zero-work iterations anyway.
+	if in.Cfg.Loop.MaxNoopIters > 0 && in.NoopStreak >= in.Cfg.Loop.MaxNoopIters {
+		return Outcome{State: StateDone, Reason: ReasonIdle}, nil
 	}
 
 	// 7. Queue drained + tree clean -> done{queue_empty}.

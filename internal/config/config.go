@@ -39,6 +39,11 @@ type LoopConfig struct {
 	SessionTimeoutSecs int    `toml:"session_timeout_secs"`
 	MemoryLimit        string `toml:"memory_limit_bytes"`
 	SleepBetweenSecs   int    `toml:"sleep_between_secs"`
+	// MaxNoopIters caps consecutive no-op iterations (runner OK, zero
+	// commits, empty bd diff, unchanged state) before the loop exits
+	// done{idle}. Guards against an endless spin when `bd ready` keeps
+	// reporting items the agent can't action. 0 disables the cap.
+	MaxNoopIters int `toml:"max_noop_iters"`
 	// WaitOnQuota opts into riding out a runner quota cap (the resettable
 	// 5-hour/weekly/monthly window, ModeQuota) by sleeping QuotaWaitSecs
 	// and resuming the same state instead of exiting failed{runner_terminal}.
@@ -118,6 +123,7 @@ func Defaults() *Config {
 		Loop: LoopConfig{
 			MaxIterations:      30,
 			SessionTimeoutSecs: 3600,
+			MaxNoopIters:       10,
 			MemoryLimit:        "7G",
 			SleepBetweenSecs:   5,
 			WaitOnQuota:        false,
@@ -276,6 +282,9 @@ func (l *LoopConfig) Validate() error {
 	}
 	if l.SleepBetweenSecs < 0 {
 		return fmt.Errorf("sleep_between_secs must be >= 0, got %d", l.SleepBetweenSecs)
+	}
+	if l.MaxNoopIters < 0 {
+		return fmt.Errorf("max_noop_iters must be >= 0, got %d", l.MaxNoopIters)
 	}
 	if l.QuotaWaitSecs < 0 {
 		return fmt.Errorf("quota_wait_secs must be >= 0, got %d", l.QuotaWaitSecs)

@@ -81,8 +81,12 @@ type runContext struct {
 	paths iterPaths
 
 	// Streaks the FSM doesn't track — owned by the loop.
-	consecFailures   int
-	deadStreak       int
+	consecFailures int
+	deadStreak     int
+	// consecNoops counts consecutive no-op iterations (runner OK, zero
+	// commits, empty bd diff, unchanged state). Fed into RouteInput so
+	// SelectNextState can exit done{idle} once it reaches MaxNoopIters.
+	consecNoops      int
 	lastEnteredState fsm.State
 	lastGateResult   string
 	// lastGateStdoutFile is the absolute path of the previous

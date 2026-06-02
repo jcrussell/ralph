@@ -299,6 +299,73 @@ func TestSelectNextStateClean(t *testing.T) {
 	}
 }
 
+func TestSelectNextStateNoopIdle(t *testing.T) {
+	ctx := context.Background()
+	repo := cleanRepo(t)
+	// Ready queue is non-empty (would otherwise route clean), so only the
+	// no-op streak can trigger the idle exit.
+	b := &stubBD{ready: map[string][]bd.Issue{"": {{ID: "a"}}}}
+	cfg := config.Defaults()
+	cfg.Loop.MaxNoopIters = 3
+
+	// At the cap -> done{idle}.
+	out, err := SelectNextState(ctx, RouteInput{
+		FSM: Fresh(), Cfg: cfg, Repo: repo, BD: b, NoopStreak: 3,
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if (out != Outcome{State: StateDone, Reason: ReasonIdle}) {
+		t.Errorf("at cap: out = %+v, want done{idle}", out)
+	}
+
+	// Below the cap -> keep going (clean, queue non-empty).
+	out, err = SelectNextState(ctx, RouteInput{
+		FSM: Fresh(), Cfg: cfg, Repo: repo, BD: b, NoopStreak: 2,
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out.State != StateClean {
+		t.Errorf("below cap: out = %+v, want clean", out)
+	}
+}
+
+func TestSelectNextStateNoopIdleDisabled(t *testing.T) {
+	// MaxNoopIters == 0 disables the idle exit even with a huge streak.
+	ctx := context.Background()
+	repo := cleanRepo(t)
+	b := &stubBD{ready: map[string][]bd.Issue{"": {{ID: "a"}}}}
+	cfg := config.Defaults()
+	cfg.Loop.MaxNoopIters = 0
+	out, err := SelectNextState(ctx, RouteInput{
+		FSM: Fresh(), Cfg: cfg, Repo: repo, BD: b, NoopStreak: 999,
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out.State != StateClean {
+		t.Errorf("disabled: out = %+v, want clean", out)
+	}
+}
+
+func TestSelectNextStateNoopIdleDirtyWins(t *testing.T) {
+	// A dirty tree takes precedence over the idle exit.
+	ctx := context.Background()
+	repo := dirtyRepo(t)
+	cfg := config.Defaults()
+	cfg.Loop.MaxNoopIters = 3
+	out, err := SelectNextState(ctx, RouteInput{
+		FSM: Fresh(), Cfg: cfg, Repo: repo, BD: &stubBD{}, NoopStreak: 5,
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out.State != StateDirty {
+		t.Errorf("out = %+v, want dirty (dirty beats idle)", out)
+	}
+}
+
 func TestSelectNextStateInProgressBlocksDone(t *testing.T) {
 	// Empty ready queue but in_progress holds work -> clean, not done.
 	ctx := context.Background()

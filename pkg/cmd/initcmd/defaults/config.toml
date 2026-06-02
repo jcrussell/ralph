@@ -17,6 +17,9 @@
 # memory_limit_bytes = "7G"
 # Sleep between iterations (sec).
 # sleep_between_secs = 5
+# Exit done{idle} after this many consecutive no-op iterations (runner OK,
+# zero commits, no bd changes, state unchanged). 0 disables the cap.
+# max_noop_iters = 10
 # Ride out a runner quota cap (resettable 5-hour/weekly/monthly window)
 # by sleeping and resuming instead of exiting failed{runner_terminal}.
 # wait_on_quota = false

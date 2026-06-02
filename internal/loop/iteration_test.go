@@ -330,6 +330,66 @@ func TestRun_CumulativeCommitsAccumulate(t *testing.T) {
 	}
 }
 
+// A run that does no work (no commits, no bd diff, state holds) exits
+// done{idle} once the consecutive no-op streak reaches MaxNoopIters,
+// even though the ready queue is never empty. The exit fires one
+// iteration after the streak crosses the cap, so cap=3 -> 4 rows.
+func TestRun_NoopStreakExitsIdle(t *testing.T) {
+	repo := scaffoldRepo(t)
+	opts := baseOpts(t, repo)
+	opts.Cfg.Loop.MaxNoopIters = 3
+	opts.Cfg.Loop.MaxIterations = 0 // unbounded; only the idle exit should stop us
+	opts.BD = readyOne()            // never empties -> never done{queue_empty}
+	opts.Runner = &fakeRunner{}
+	opts.Clock = newFakeClock()
+
+	out, err := Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if (out != fsm.Outcome{State: fsm.StateDone, Reason: fsm.ReasonIdle}) {
+		t.Fatalf("terminal outcome = %+v, want done{idle}", out)
+	}
+	recs := readSummary(t, repo)
+	if len(recs) != 4 {
+		t.Fatalf("summary rows = %d, want 4 (3 no-ops + idle exit)", len(recs))
+	}
+	last := recs[len(recs)-1]
+	if last.State != "done" || last.Reason != "idle" {
+		t.Errorf("last row = %s{%s}, want done{idle}", last.State, last.Reason)
+	}
+}
+
+// A productive iteration (a commit) resets the no-op streak. With cap=2
+// and a commit on the first iteration, the streak only starts accruing
+// from iteration 2, pushing the idle exit to row 4 instead of row 3.
+func TestRun_NoopStreakResetsOnProgress(t *testing.T) {
+	repo := scaffoldRepo(t)
+	opts := baseOpts(t, repo)
+	opts.Cfg.Loop.MaxNoopIters = 2
+	opts.Cfg.Loop.MaxIterations = 0
+	opts.BD = readyOne()
+	fr := &fakeRunner{}
+	fr.OnRun = func(call int, _ runner.RunOpts) {
+		if call == 0 {
+			commitFile(t, repo, "work-0.txt", "x")
+		}
+	}
+	opts.Runner = fr
+	opts.Clock = newFakeClock()
+
+	out, err := Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if (out != fsm.Outcome{State: fsm.StateDone, Reason: fsm.ReasonIdle}) {
+		t.Fatalf("terminal outcome = %+v, want done{idle}", out)
+	}
+	if recs := readSummary(t, repo); len(recs) != 4 {
+		t.Fatalf("summary rows = %d, want 4 (1 productive + 2 no-ops + idle exit)", len(recs))
+	}
+}
+
 // Gate hook is skipped when --skip-gate is set, regardless of cfg.
 func TestRun_GateSkippedByFlag(t *testing.T) {
 	repo := scaffoldRepo(t)
