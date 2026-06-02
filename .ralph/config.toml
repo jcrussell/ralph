@@ -17,6 +17,14 @@
 # memory_limit_bytes = "7G"
 # Sleep between iterations (sec).
 # sleep_between_secs = 5
+# Exit done{idle} after this many consecutive no-op iterations (runner OK,
+# zero commits, no bd changes, state unchanged). 0 disables the cap.
+# max_noop_iters = 10
+# Ride out a runner quota cap (resettable 5-hour/weekly/monthly window)
+# by sleeping and resuming instead of exiting failed{runner_terminal}.
+# wait_on_quota = false
+# Bounded sleep between quota retries (sec) when wait_on_quota is true.
+# quota_wait_secs = 1800
 
 [runner]
 # command = "claude"
@@ -58,3 +66,12 @@
 # decisions under a "byob" type so consumers can filter them out.
 # Empty (the default) = no filter.
 exclude_types = ["byob"]
+
+[ui]
+# Presentation knobs for the live `ralph run` TUI (no effect off-TTY or
+# with --no-tui).
+# Max lines retained in the live log pane's scrollback ring.
+# log_scrollback_lines = 50000
+# Byte cap on the live log pane's scrollback. K/M/G/T suffixes use 1024
+# multipliers.
+# log_scrollback_bytes = "16M"

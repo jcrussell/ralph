@@ -66,3 +66,12 @@
 # decisions under a "byob" type so consumers can filter them out.
 # Empty (the default) = no filter.
 # exclude_types = ["byob"]
+
+[ui]
+# Presentation knobs for the live `ralph run` TUI (no effect off-TTY or
+# with --no-tui).
+# Max lines retained in the live log pane's scrollback ring.
+# log_scrollback_lines = 50000
+# Byte cap on the live log pane's scrollback. K/M/G/T suffixes use 1024
+# multipliers.
+# log_scrollback_bytes = "16M"
