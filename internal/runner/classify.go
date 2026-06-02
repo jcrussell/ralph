@@ -67,6 +67,7 @@ const (
 	txtCreditBalance      = "credit balance"
 	txtInsufficientCredit = "insufficient credit"
 	txtUsageLimit         = "usage limit"
+	txtExtraUsage         = "out of extra usage"
 	txtQuotaExceeded      = "quota exceeded"
 	txtSessionLimit       = "session limit"
 	txtWeeklyLimit        = "weekly limit"
@@ -134,6 +135,7 @@ func Classify(s *Session) Mode {
 	case strings.Contains(low, txtCreditBalance) || strings.Contains(low, txtInsufficientCredit):
 		return ModeBudget
 	case strings.Contains(low, txtUsageLimit),
+		strings.Contains(low, txtExtraUsage),
 		strings.Contains(low, txtFiveHourLimit),
 		strings.Contains(low, txtWeeklyLimit),
 		strings.Contains(low, txtSessionLimit),
@@ -220,6 +222,7 @@ func matchAPIErrorText(s string) Mode {
 		strings.Contains(low, txtQuotaExceeded),
 		strings.Contains(low, "usage_limit"),
 		strings.Contains(low, txtUsageLimit),
+		strings.Contains(low, txtExtraUsage),
 		strings.Contains(low, "session_limit"),
 		strings.Contains(low, txtSessionLimit),
 		strings.Contains(low, "monthly usage"),

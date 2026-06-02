@@ -94,6 +94,81 @@ func TestRun_QuotaWaitsAndResumesWhenEnabled(t *testing.T) {
 	if last.RunnerMode != string(runner.ModeQuota) {
 		t.Errorf("last summary RunnerMode = %q, want quota", last.RunnerMode)
 	}
+	// QuotaWaitSecs carries the wait to the live TUI; the hint-less
+	// quotaSession takes the blind-poll fallback, so it equals QuotaWait(120).
+	if want := int(want.Round(time.Second).Seconds()); last.QuotaWaitSecs != want {
+		t.Errorf("last summary QuotaWaitSecs = %d, want %d", last.QuotaWaitSecs, want)
+	}
+}
+
+// When the quota envelope surfaces a "resets ...pm (UTC)" hint, the wait
+// sleeps until that parsed instant (capped at MaxQuotaWait) rather than the
+// blind-poll QuotaWaitSecs fallback.
+func TestRun_QuotaWaitHonorsResetHint(t *testing.T) {
+	repo := scaffoldRepo(t)
+	opts := baseOpts(t, repo)
+	opts.Once = true
+	opts.Cfg.Loop.WaitOnQuota = true
+	opts.Cfg.Loop.QuotaWaitSecs = 120
+	opts.BD = &fakeBD{ReadyByLabel: map[string][]bd.Issue{"": {{ID: "x"}}}}
+	sess := quotaSession()
+	sess.Envelope.Result = "You're out of extra usage · resets 3:30pm (UTC)"
+	opts.Runner = &fakeRunner{Sessions: []*runner.Session{sess}}
+	clk := newFakeClock()
+	opts.Clock = clk
+
+	if _, err := Run(context.Background(), opts); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The fake clock starts at 12:00 UTC, so "resets 3:30pm" is ~3h31m away
+	// (under MaxQuotaWait) — recorded on the quota-wait row and used as the
+	// sleep, clearly distinct from the 120s blind-poll fallback. (Exact
+	// seconds drift a few ticks because fakeClock.Now advances per call, so
+	// assert the range.)
+	recs := readSummary(t, repo)
+	last := recs[len(recs)-1]
+	if last.QuotaWaitSecs <= 3*3600 || last.QuotaWaitSecs >= 4*3600 {
+		t.Errorf("QuotaWaitSecs = %d, want ~3h31m (parsed reset, not the 120s fallback)", last.QuotaWaitSecs)
+	}
+	slept := false
+	for _, d := range clk.Sleeps {
+		if d == time.Duration(last.QuotaWaitSecs)*time.Second {
+			slept = true
+		}
+	}
+	if !slept {
+		t.Errorf("clock sleeps = %v, want a sleep matching QuotaWaitSecs=%d", clk.Sleeps, last.QuotaWaitSecs)
+	}
+}
+
+// A reset further out than MaxQuotaWait is clamped to MaxQuotaWait, so the
+// loop wakes to re-check rather than sleeping the full (possibly day-long)
+// window in one shot — exercises CapQuotaWait end-to-end through waitOnQuota.
+func TestRun_QuotaWaitCapsFarReset(t *testing.T) {
+	repo := scaffoldRepo(t)
+	opts := baseOpts(t, repo)
+	opts.Once = true
+	opts.Cfg.Loop.WaitOnQuota = true
+	opts.Cfg.Loop.QuotaWaitSecs = 120
+	opts.BD = &fakeBD{ReadyByLabel: map[string][]bd.Issue{"": {{ID: "x"}}}}
+	sess := quotaSession()
+	// Clock starts at 12:00 UTC, so 10:30pm is ~10h30m out — well past the
+	// 6h MaxQuotaWait cap.
+	sess.Envelope.Result = "You're out of extra usage · resets 10:30pm (UTC)"
+	opts.Runner = &fakeRunner{Sessions: []*runner.Session{sess}}
+	clk := newFakeClock()
+	opts.Clock = clk
+
+	if _, err := Run(context.Background(), opts); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	recs := readSummary(t, repo)
+	last := recs[len(recs)-1]
+	if want := int(backoff.MaxQuotaWait.Seconds()); last.QuotaWaitSecs != want {
+		t.Errorf("QuotaWaitSecs = %d, want MaxQuotaWait cap %d", last.QuotaWaitSecs, want)
+	}
 }
 
 // classifyToReason maps modes to fsm reasons per the contract:

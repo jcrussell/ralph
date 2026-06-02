@@ -43,9 +43,10 @@ type LoopConfig struct {
 	// and resuming the same state instead of exiting failed{runner_terminal}.
 	// Default false keeps quota terminal (fail fast, don't burn iterations).
 	WaitOnQuota bool `toml:"wait_on_quota"`
-	// QuotaWaitSecs is the bounded sleep between quota retries when
-	// WaitOnQuota is set. The upstream reset instant isn't in the error
-	// envelope, so this is a fixed poll interval, not a parsed reset.
+	// QuotaWaitSecs is the bounded blind-poll sleep between quota retries
+	// when WaitOnQuota is set and the error carries no reset hint. When the
+	// envelope does surface a "resets ...pm (UTC)" instant, the loop sleeps
+	// until then instead (capped at MaxQuotaWait), ignoring this interval.
 	QuotaWaitSecs int `toml:"quota_wait_secs"`
 }
 

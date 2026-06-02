@@ -46,6 +46,7 @@ type IterRecord struct {
 	BDDiff         *bd.Diff `json:"bd_diff,omitempty"`
 	PromptFile     string   `json:"prompt_file,omitempty"`
 	Skipped        string   `json:"skipped,omitempty"`
+	QuotaWaitSecs  int      `json:"quota_wait_secs,omitempty"`
 }
 
 // iterPaths bundles the per-iteration artifact paths. Computed
@@ -120,11 +121,13 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 	// failed{runner_terminal} (classifyToReason). When wait_on_quota is
 	// set, sleep a bounded, ctx-cancellable interval and resume the same
 	// state instead — the 5-hour/weekly/monthly window is expected to
-	// reset. Default stays terminate so we don't regress the fail-fast
-	// behavior. SIGINT/SIGTERM during the sleep cancels it and the loop's
-	// top-level ctx.Err() check exits cleanly on the next tick.
+	// reset. When the error surfaces a reset instant ("resets 10:30pm
+	// (UTC)") the wait sleeps until then; otherwise it polls. Default stays
+	// terminate so we don't regress the fail-fast behavior. SIGINT/SIGTERM
+	// during the sleep cancels it and the loop's top-level ctx.Err() check
+	// exits cleanly on the next tick.
 	if mode == runner.ModeQuota && rc.cfg.Loop.WaitOnQuota {
-		return waitOnQuota(ctx, rc, prev)
+		return waitOnQuota(ctx, rc, prev, sess)
 	}
 
 	// 5. Gate hook (post-runner, pre-routing) + commit count for the tick.
@@ -371,8 +374,25 @@ func sleepBackoff(ctx context.Context, rc *runContext, next fsm.Outcome, mode ru
 // to failed{runner_terminal}; see the call site in runIteration. State
 // is not advanced (prev == rc.fsm.Outcome), so no FSM save is needed —
 // the same iteration re-runs once the cap (hopefully) resets.
-func waitOnQuota(ctx context.Context, rc *runContext, prev fsm.Outcome) (fsm.Outcome, error) {
+//
+// When the runner surfaced a "resets ...pm (UTC)" hint (in the envelope
+// result or stderr) the wait sleeps until that instant, capped at
+// MaxQuotaWait; otherwise it falls back to the blind poll interval.
+func waitOnQuota(ctx context.Context, rc *runContext, prev fsm.Outcome, sess *runner.Session) (fsm.Outcome, error) {
 	d := backoff.QuotaWait(rc.cfg.Loop.QuotaWaitSecs)
+	if sess != nil {
+		hint := sess.Stderr
+		if sess.Envelope != nil {
+			hint = sess.Envelope.Result + "\n" + hint
+		}
+		if reset := backoff.ParseRateLimitReset(hint, rc.clock.Now().UTC()); reset > 0 {
+			d = backoff.CapQuotaWait(reset)
+		}
+	}
+	// Round to whole seconds so the log line, the quota-wait narrative, the
+	// recorded QuotaWaitSecs, and the TUI countdown all agree (a parsed
+	// reset otherwise carries sub-second precision from time.Now).
+	d = d.Round(time.Second)
 	rc.log.WarnContext(ctx, "quota cap hit; waiting before resuming",
 		"state", prev.State, "wait", d.String())
 	if err := recordQuotaWait(rc, prev, d); err != nil {
@@ -388,14 +408,15 @@ func waitOnQuota(ctx context.Context, rc *runContext, prev fsm.Outcome) (fsm.Out
 func recordQuotaWait(rc *runContext, prev fsm.Outcome, d time.Duration) error {
 	now := rc.clock.Now().UTC()
 	rec := IterRecord{
-		Iter:       rc.fsm.Iter,
-		IterID:     rc.paths.stem,
-		Timestamp:  now.Format(time.RFC3339),
-		State:      string(prev.State),
-		PrevState:  string(prev.State),
-		RunnerMode: string(runner.ModeQuota),
-		Narrative:  fmt.Sprintf("%s: quota cap — waiting %s before resuming", prev.State, d),
-		Skipped:    "quota-wait",
+		Iter:          rc.fsm.Iter,
+		IterID:        rc.paths.stem,
+		Timestamp:     now.Format(time.RFC3339),
+		State:         string(prev.State),
+		PrevState:     string(prev.State),
+		RunnerMode:    string(runner.ModeQuota),
+		Narrative:     fmt.Sprintf("%s: quota cap — waiting %s before resuming", prev.State, d),
+		Skipped:       "quota-wait",
+		QuotaWaitSecs: int(d.Round(time.Second).Seconds()),
 	}
 	if err := rc.sum.Write(rec); err != nil {
 		return fmt.Errorf("loop: write quota-wait: %w", err)

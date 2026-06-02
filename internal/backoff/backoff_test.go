@@ -216,6 +216,23 @@ func TestQuotaWait(t *testing.T) {
 	}
 }
 
+func TestCapQuotaWait(t *testing.T) {
+	cases := []struct {
+		name string
+		in   time.Duration
+		want time.Duration
+	}{
+		{"negative clamps to zero", -time.Second, 0},
+		{"under cap passes through", 90 * time.Minute, 90 * time.Minute},
+		{"over cap clamps to MaxQuotaWait", 25 * time.Hour, MaxQuotaWait},
+	}
+	for _, c := range cases {
+		if got := CapQuotaWait(c.in); got != c.want {
+			t.Errorf("%s: CapQuotaWait(%v) = %v, want %v", c.name, c.in, got, c.want)
+		}
+	}
+}
+
 func TestParseRateLimitReset(t *testing.T) {
 	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
 
@@ -253,6 +270,16 @@ func TestParseRateLimitReset(t *testing.T) {
 			name:   "case insensitive",
 			stderr: "RESETS 11AM (UTC)",
 			want:   time.Hour + time.Minute,
+		},
+		{
+			name:   "resets 10:30pm UTC (minutes, +12h30m)",
+			stderr: "resets 10:30pm (UTC)",
+			want:   12*time.Hour + 30*time.Minute + time.Minute,
+		},
+		{
+			name:   "out of extra usage envelope with minutes (+30m)",
+			stderr: "You're out of extra usage · resets 10:30am (UTC)",
+			want:   30*time.Minute + time.Minute,
 		},
 		{
 			name:   "no UTC marker = no match",

@@ -94,6 +94,11 @@ func TestClassifyEnvelopeResult(t *testing.T) {
 			ModeQuota,
 		},
 		{
+			"out of extra usage with reset hint (captured envelope)",
+			&Envelope{IsError: true, APIErrorStatus: float64(429), Result: "You're out of extra usage · resets 10:30pm (UTC)"},
+			ModeQuota,
+		},
+		{
 			"credit balance in result",
 			&Envelope{IsError: true, Result: "your credit balance is too low"},
 			ModeBudget,

@@ -19,7 +19,7 @@ The repo-level file is scaffolded by `ralph init` with every section present and
 | `memory_limit_bytes`     | string  | `"7G"`  | systemd-run memory cap for the runner cgroup. Suffixes `K`/`M`/`G`/`T` use 1024 multipliers; a trailing `B` is accepted. Empty or `"0"` disables the cap. |
 | `sleep_between_secs`     | int     | `5`     | Sleep between iterations. Backoff modes (rate-limit, OOM, timeout) override this with their own durations. |
 | `wait_on_quota`          | bool    | `false` | When `true`, a runner quota cap (the resettable 5-hour/weekly/monthly window, mode `quota`) sleeps `quota_wait_secs` and resumes the same state instead of exiting `failed{runner_terminal}`. Default `false` keeps quota terminal (fail fast). The `--wait-on-quota` flag enables it for one invocation. |
-| `quota_wait_secs`        | int     | `1800`  | Bounded sleep between quota retries when `wait_on_quota` is set. The upstream reset instant isn't in the error envelope, so this is a fixed poll interval (capped at the backoff `MaxBackoff` of 80 min). The sleep is interruptible by SIGINT/SIGTERM. |
+| `quota_wait_secs`        | int     | `1800`  | Bounded blind-poll sleep between quota retries when `wait_on_quota` is set and the error carries no reset hint (capped at the backoff `MaxBackoff` of 80 min). When the envelope surfaces a `resets 10:30pm (UTC)` instant, the loop sleeps until then instead (capped at `MaxQuotaWait`, 6 h), ignoring this interval. The sleep is interruptible by SIGINT/SIGTERM. While waiting, the live `ralph run` header shows a `sleeping (quota)` badge counting down to the resume. |
 
 ## `[runner]`
 

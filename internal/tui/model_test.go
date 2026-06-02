@@ -527,3 +527,74 @@ func TestArrowKeysJumpIterations(t *testing.T) {
 		t.Errorf("h/l must not change the vertical offset, got %d want %d", m.vp.YOffset, before)
 	}
 }
+
+// quotaWaitSnapshot returns a snapshot shaped like the loop's quota-wait row:
+// a "quota-wait" Skipped marker carrying the wait duration the badge counts
+// down from.
+func quotaWaitSnapshot(secs int) loop.Snapshot {
+	s := fullSnapshot()
+	s.Record.Skipped = "quota-wait"
+	s.Record.QuotaWaitSecs = secs
+	return s
+}
+
+// A quota-wait snapshot lights the header sleep badge with a countdown; a
+// subsequent ordinary snapshot clears it.
+func TestQuotaWaitBadgeShowsAndClears(t *testing.T) {
+	m := sized(t, 120, 24)
+	m, _ = step(t, m, metricsMsg{s: quotaWaitSnapshot(1800)})
+
+	if !m.quotaWaiting {
+		t.Fatal("quota-wait snapshot should set quotaWaiting")
+	}
+	view := m.View()
+	if !strings.Contains(view, "sleeping (quota)") {
+		t.Errorf("header should show the sleep badge:\n%s", view)
+	}
+	if !strings.Contains(view, "resuming in 30m0s") {
+		t.Errorf("badge should show the initial 30m countdown:\n%s", view)
+	}
+
+	// A normal iteration snapshot clears the badge.
+	m, _ = step(t, m, metricsMsg{s: fullSnapshot()})
+	if m.quotaWaiting {
+		t.Error("an ordinary snapshot should clear quotaWaiting")
+	}
+	if strings.Contains(m.View(), "sleeping (quota)") {
+		t.Errorf("badge should be gone after a normal snapshot:\n%s", m.View())
+	}
+}
+
+// The countdown decrements one second per elapsed tick while waiting.
+func TestQuotaWaitBadgeCountsDown(t *testing.T) {
+	m := sized(t, 120, 24)
+	m, _ = step(t, m, metricsMsg{s: quotaWaitSnapshot(120)})
+
+	for i := 0; i < 5; i++ {
+		m, _ = step(t, m, tickMsg{})
+	}
+	if got, want := m.quotaRemaining, 115*time.Second; got != want {
+		t.Errorf("quotaRemaining = %s after 5 ticks, want %s", got, want)
+	}
+	if !strings.Contains(m.View(), "resuming in 1m55s") {
+		t.Errorf("badge should reflect the decremented countdown:\n%s", m.View())
+	}
+}
+
+// Once the countdown bottoms out before the loop's next snapshot, the badge
+// shows a bare "resuming…" rather than "resuming in 0s".
+func TestQuotaWaitBadgeFloorsToResuming(t *testing.T) {
+	m := sized(t, 120, 24)
+	m, _ = step(t, m, metricsMsg{s: quotaWaitSnapshot(2)})
+
+	for i := 0; i < 5; i++ {
+		m, _ = step(t, m, tickMsg{})
+	}
+	if m.quotaRemaining != 0 {
+		t.Errorf("quotaRemaining = %s, want floored to 0", m.quotaRemaining)
+	}
+	view := m.View()
+	if !strings.Contains(view, "resuming…") || strings.Contains(view, "resuming in") {
+		t.Errorf("badge should show bare 'resuming…' at zero:\n%s", view)
+	}
+}

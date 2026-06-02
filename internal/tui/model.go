@@ -95,6 +95,12 @@ type model struct {
 	expanded      bool
 	quitting      bool
 	done          bool // loop.Run returned; keep rendering for review, quit only on q/ctrl+c
+
+	// quotaWaiting is set while the loop sleeps on a quota cap (the latest
+	// snapshot is a "quota-wait" row); quotaRemaining counts down to the
+	// resume, advanced by the elapsed tick like liveElapsed.
+	quotaWaiting   bool
+	quotaRemaining time.Duration
 }
 
 // newModel builds the model for the given streams. The live TUI renders
@@ -168,6 +174,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.snap = msg.s
 		m.hasSnap = true
 		m.liveElapsed = msg.s.Elapsed
+		// A quota-wait row puts the loop to sleep; seed the countdown so the
+		// header badge shows time-to-resume. Any other row clears it.
+		m.quotaWaiting = msg.s.Record.Skipped == "quota-wait"
+		if m.quotaWaiting {
+			m.quotaRemaining = time.Duration(msg.s.Record.QuotaWaitSecs) * time.Second
+		}
 		m.relayout() // panel height can change as fields populate
 		return m, nil
 
@@ -186,6 +198,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.hasSnap {
 			m.liveElapsed += tickInterval
+		}
+		if m.quotaWaiting && m.quotaRemaining > 0 {
+			m.quotaRemaining -= tickInterval
+			if m.quotaRemaining < 0 {
+				m.quotaRemaining = 0
+			}
 		}
 		return m, tick()
 
@@ -298,8 +316,11 @@ func (m model) headerView() string {
 		{text: abbrevHome(m.hdr.Dir)},
 		{text: readyField(m.snap.ReadyBeads)},
 	}
-	if m.done {
+	switch {
+	case m.done:
 		segs = append(segs, m.doneBadge())
+	case m.quotaWaiting:
+		segs = append(segs, m.quotaBadge())
 	}
 
 	// Drop empty segments (e.g. an unset dir) so no dangling separator shows,
@@ -346,6 +367,21 @@ func (m model) doneBadge() seg {
 	default:
 		return seg{text: "■ stopped", color: func(s string) string { return m.r.NewStyle().Faint(true).Render(s) }}
 	}
+}
+
+// quotaBadge renders the header badge shown while the loop sleeps on a quota
+// cap. It counts down to the resume; once the countdown bottoms out (the loop
+// hasn't sent its next snapshot yet) it shows a bare "resuming…". Yellow,
+// degrading to plain under the ascii profile like doneBadge. The leading glyph
+// is single-width (▮) so the header's rune-count fit check in headerView stays
+// accurate — an emoji renders two cells but counts as one rune.
+func (m model) quotaBadge() seg {
+	text := "▮ sleeping (quota) — resuming…"
+	if m.quotaRemaining > 0 {
+		text = "▮ sleeping (quota) — resuming in " + dur(m.quotaRemaining)
+	}
+	yellow := func(s string) string { return m.r.NewStyle().Foreground(lipgloss.Color("3")).Render(s) }
+	return seg{text: text, color: yellow}
 }
 
 // abbrevHome shortens a leading $HOME to "~" for a compact header. A dir

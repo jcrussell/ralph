@@ -32,6 +32,13 @@ const OKBackoff = 10 * time.Second
 // when wait-on-quota is enabled but no explicit interval is configured.
 const DefaultQuotaWait = 30 * time.Minute
 
+// MaxQuotaWait bounds a quota wait derived from a parsed reset instant.
+// Larger than MaxBackoff because a known reset time ("resets 10:30pm
+// (UTC)") is trustworthy to sleep straight through — and the sleep is
+// ctx-cancellable, so a long wait never locks the operator out — unlike a
+// blind poll, which stays short (MaxBackoff) so it re-checks sooner.
+const MaxQuotaWait = 6 * time.Hour
+
 // expCap is the maximum exponent applied to the base in rate-limit and
 // dead-session exponential backoff. Matches Python's min(n, 4).
 const expCap = 4
@@ -109,22 +116,35 @@ func Compute(in Input, cfg *config.BackoffConfig) time.Duration {
 	return OKBackoff
 }
 
-// QuotaWait returns the bounded sleep the loop uses between quota-cap
-// retries when wait-on-quota is enabled. ModeQuota is Terminal, so
-// Compute returns 0 for it; this is the dedicated wait path. secs<=0
-// falls back to DefaultQuotaWait and the result is capped at MaxBackoff.
+// QuotaWait returns the bounded blind-poll sleep the loop uses between
+// quota-cap retries when wait-on-quota is enabled and the error carries no
+// reset hint. ModeQuota is Terminal, so Compute returns 0 for it; this is
+// the dedicated wait path. secs<=0 falls back to DefaultQuotaWait and the
+// result is capped at MaxBackoff.
 //
-// The upstream 5-hour/weekly/monthly reset instant is not surfaced in
-// the error envelope the way rate-limit "resets Nam (UTC)" hints are, so
-// this is a fixed poll interval rather than a parsed reset: the loop
-// sleeps, retries, and sleeps again until the cap lifts or the operator
-// interrupts.
+// When the envelope DOES surface a reset instant (some quota errors render
+// "resets 10:30pm (UTC)" like rate limits do), the caller parses it via
+// ParseRateLimitReset and sleeps until then via CapQuotaWait instead — a
+// trusted single sleep rather than this short, repeated poll.
 func QuotaWait(secs int) time.Duration {
 	d := DefaultQuotaWait
 	if secs > 0 {
 		d = time.Duration(secs) * time.Second
 	}
 	return capDur(d)
+}
+
+// CapQuotaWait clamps a quota wait derived from a parsed reset instant to
+// [0, MaxQuotaWait]. Distinct from capDur (MaxBackoff) because a known
+// reset time is trusted for a long, single sleep; see MaxQuotaWait.
+func CapQuotaWait(d time.Duration) time.Duration {
+	if d < 0 {
+		return 0
+	}
+	if d > MaxQuotaWait {
+		return MaxQuotaWait
+	}
+	return d
 }
 
 // expBackoff returns base * 2^min(n, expCap). n < 0 is treated as 0.
@@ -155,12 +175,14 @@ func dur(secs int, fallback time.Duration) time.Duration {
 	return fallback
 }
 
-// resetRE matches "resets 4am (UTC)" style hints in runner stderr.
-// Anthropic surfaces this in the API-key-rate-limit error body.
-var resetRE = regexp.MustCompile(`(?i)resets\s+(\d{1,2})\s*(am|pm)\s*\(UTC\)`)
+// resetRE matches "resets 4am (UTC)" / "resets 10:30pm (UTC)" style hints
+// in runner stderr or the error envelope. Anthropic surfaces this in the
+// API-key-rate-limit error body and in some quota errors. The :MM group is
+// optional so hour-only hints keep matching.
+var resetRE = regexp.MustCompile(`(?i)resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(UTC\)`)
 
-// ParseRateLimitReset extracts a "resets Nam/pm (UTC)" hint from
-// stderr and returns the duration from now until that wall-clock
+// ParseRateLimitReset extracts a "resets Nam/pm (UTC)" hint (with optional
+// minutes) and returns the duration from now until that wall-clock
 // instant, plus a 60s safety buffer (matching Python). Returns 0 when
 // no hint is present so callers can fall through to exponential.
 //
@@ -176,7 +198,15 @@ func ParseRateLimitReset(stderr string, now time.Time) time.Duration {
 	if err != nil {
 		return 0
 	}
-	switch strings.ToLower(m[2]) {
+	// m[2] (minutes) is empty for hour-only hints — guard before Atoi so
+	// the common "resets 4am (UTC)" case doesn't error out to 0.
+	min := 0
+	if m[2] != "" {
+		if min, err = strconv.Atoi(m[2]); err != nil {
+			return 0
+		}
+	}
+	switch strings.ToLower(m[3]) {
 	case "pm":
 		if hour != 12 {
 			hour += 12
@@ -187,7 +217,7 @@ func ParseRateLimitReset(stderr string, now time.Time) time.Duration {
 		}
 	}
 	now = now.UTC()
-	reset := time.Date(now.Year(), now.Month(), now.Day(), hour, 0, 0, 0, time.UTC)
+	reset := time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, time.UTC)
 	if !reset.After(now) {
 		reset = reset.Add(24 * time.Hour)
 	}
