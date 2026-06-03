@@ -1,6 +1,6 @@
 # bd integration
 
-`bd` ([Beads](https://github.com/jcrussell/beads)) is ralph's only persistent store for *work*. Tasks, decisions, memories, and bead events all live in bd; ralph does not maintain a parallel store.
+`bd` ([Beads](https://github.com/gastownhall/beads)) is ralph's only persistent store for *work*. Tasks, decisions, memories, and bead events all live in bd; ralph does not maintain a parallel store.
 
 ## Two stores, no overlap
 

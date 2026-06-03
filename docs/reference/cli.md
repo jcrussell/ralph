@@ -14,17 +14,4 @@ The `go:generate` directive lives on `pkg/cmd/root/root.go` and points `tools/ge
 
 ## Commands
 
-The root entry point is [ralph.md](ralph.md). From there, follow the SEE ALSO links to each subcommand:
-
-| Group | Commands |
-|---|---|
-| Core | — (loop body lands in a later bead) |
-| Observability | [fsm](ralph_fsm.md), [logs](ralph_logs.md), [report](ralph_report.md), [status](ralph_status.md), [trace](ralph_trace.md) |
-| Setup | [doctor](ralph_doctor.md), [hook](ralph_hook.md), [init](ralph_init.md), [prompt](ralph_prompt.md) |
-| Info | [version](ralph_version.md) |
-
-Subcommand-bearing commands have one Markdown file per leaf:
-
-- [ralph fsm show](ralph_fsm_show.md) · [ralph fsm graph](ralph_fsm_graph.md)
-- [ralph hook run](ralph_hook_run.md)
-- [ralph prompt show](ralph_prompt_show.md)
+The root entry point is [ralph.md](ralph.md). From there, follow the SEE ALSO links to reach every subcommand and its leaves — that list is generated from the binary, so it never drifts from what `ralph --help` prints.
