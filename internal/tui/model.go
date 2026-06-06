@@ -95,6 +95,11 @@ type model struct {
 	quitting      bool
 	done          bool // loop.Run returned; keep rendering for review, quit only on q/ctrl+c
 
+	// confirmingQuit is set while the yes/no quit prompt is shown. q and
+	// ctrl+c arm it instead of quitting outright; only an explicit y/Y (or a
+	// second ctrl+c) then quits, so a stray keypress can't kill a running loop.
+	confirmingQuit bool
+
 	// quotaWaiting is set while the loop sleeps on a quota cap (the latest
 	// snapshot is a "quota-wait" row); quotaRemaining counts down to the
 	// resume, advanced by the elapsed tick like liveElapsed.
@@ -154,10 +159,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.confirmingQuit {
+			switch msg.String() {
+			case "y", "Y": // only an explicit yes quits
+				m.quitting = true
+				return m, tea.Quit
+			case "ctrl+c": // second ctrl+c while confirming = force quit
+				m.quitting = true
+				return m, tea.Quit
+			case "n", "N", "esc", "enter": // default is NO — enter dismisses
+				m.confirmingQuit = false
+				return m, nil
+			default:
+				return m, nil // swallow every other key while the prompt is up
+			}
+		}
 		switch msg.String() {
 		case "q", "ctrl+c":
-			m.quitting = true
-			return m, tea.Quit
+			m.confirmingQuit = true
+			return m, nil
 		case "e", "tab":
 			m.expanded = !m.expanded
 			m.relayout()
@@ -439,6 +459,9 @@ func abbrevHome(dir string) string {
 // affordances stay so a user who finished in expanded mode can still collapse
 // back to the frozen metrics panel (which shows the terminal state).
 func (m model) helpView() string {
+	if m.confirmingQuit {
+		return m.confirmView()
+	}
 	expand := "e expand"
 	if m.expanded {
 		expand = "e collapse"
@@ -449,6 +472,22 @@ func (m model) helpView() string {
 	}
 	help = truncatePlain(help, m.width)
 	return m.r.NewStyle().Faint(true).Render(help)
+}
+
+// confirmView renders the yes/no quit prompt that replaces the help line while
+// confirmingQuit is set. The capital N signals the default — only y/Y quits;
+// anything else dismisses. The wording (and a warning color) differ while the
+// loop is still running versus after it has finished. Like helpView it stays a
+// single line so the reserved layout height is unchanged, and styling degrades
+// to plain text under the ascii profile (NO_COLOR / non-TTY).
+func (m model) confirmView() string {
+	prompt := "Run complete — quit ralph? (y/N)"
+	style := m.r.NewStyle().Bold(true)
+	if !m.done {
+		prompt = "⚠ Loop still running — quit anyway? (y/N)"
+		style = style.Foreground(lipgloss.Color("3")) // yellow, matches the quota badge
+	}
+	return style.Render(truncatePlain(prompt, m.width))
 }
 
 // sepView renders a faint full-width horizontal rule separating the panel,

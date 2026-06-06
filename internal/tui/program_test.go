@@ -92,6 +92,8 @@ func TestDoneThenQuitUnblocksRun(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 
+	// Quit now confirms: the first ctrl+c arms the prompt, the second forces it.
+	pg.p.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 	pg.p.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 	waitQuit(t, errc)
 }
@@ -110,6 +112,8 @@ func TestProgramRendersMetricsToErrOut(t *testing.T) {
 	// Let the renderer flush at least one frame containing the metrics before
 	// quitting; the final flush on quit captures the latest View regardless.
 	time.Sleep(50 * time.Millisecond)
+	// Quit now confirms: first ctrl+c arms the prompt, second forces it.
+	pg.p.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 	pg.p.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 	waitQuit(t, errc)
 

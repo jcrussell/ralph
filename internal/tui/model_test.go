@@ -84,18 +84,95 @@ func TestLogLineMsgAppendsAndShows(t *testing.T) {
 	}
 }
 
-func TestQuitKeyReturnsQuit(t *testing.T) {
+// isQuit reports whether cmd, when run, yields tea.Quit.
+func isQuit(cmd tea.Cmd) bool {
+	if cmd == nil {
+		return false
+	}
+	_, ok := cmd().(tea.QuitMsg)
+	return ok
+}
+
+func TestQuitKeyArmsConfirmation(t *testing.T) {
+	// q and ctrl+c no longer quit outright — they arm the yes/no prompt.
 	for _, key := range []tea.KeyMsg{runeKey('q'), {Type: tea.KeyCtrlC}} {
 		m, cmd := step(t, sized(t, 80, 20), key)
+		if !m.confirmingQuit {
+			t.Errorf("%v should set confirmingQuit", key)
+		}
+		if m.quitting {
+			t.Errorf("%v should not quit yet", key)
+		}
+		if isQuit(cmd) {
+			t.Errorf("%v should not return tea.Quit before confirmation", key)
+		}
+	}
+}
+
+func TestConfirmYesQuits(t *testing.T) {
+	// Only an explicit y/Y quits once the prompt is armed.
+	for _, yes := range []tea.KeyMsg{runeKey('y'), runeKey('Y')} {
+		m, _ := step(t, sized(t, 80, 20), runeKey('q'))
+		m, cmd := step(t, m, yes)
 		if !m.quitting {
-			t.Errorf("%v should set quitting", key)
+			t.Errorf("%v should set quitting", yes)
 		}
-		if cmd == nil {
-			t.Fatalf("%v should return a command", key)
+		if !isQuit(cmd) {
+			t.Errorf("%v should return tea.Quit", yes)
 		}
-		if _, ok := cmd().(tea.QuitMsg); !ok {
-			t.Errorf("%v should return tea.Quit, got %T", key, cmd())
+	}
+}
+
+func TestConfirmCancelDoesNotQuit(t *testing.T) {
+	// The default is NO: n, esc, and enter all dismiss without quitting.
+	for _, no := range []tea.KeyMsg{runeKey('n'), runeKey('N'), {Type: tea.KeyEsc}, {Type: tea.KeyEnter}} {
+		m, _ := step(t, sized(t, 80, 20), runeKey('q'))
+		m, cmd := step(t, m, no)
+		if m.confirmingQuit {
+			t.Errorf("%v should dismiss the prompt", no)
 		}
+		if m.quitting || isQuit(cmd) {
+			t.Errorf("%v must not quit (default is no)", no)
+		}
+	}
+}
+
+func TestSecondCtrlCForceQuits(t *testing.T) {
+	m, _ := step(t, sized(t, 80, 20), tea.KeyMsg{Type: tea.KeyCtrlC})
+	m, cmd := step(t, m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	if !m.quitting || !isQuit(cmd) {
+		t.Errorf("second ctrl+c should force quit; quitting=%v cmd=%v", m.quitting, isQuit(cmd))
+	}
+}
+
+func TestKeysSwallowedWhileConfirming(t *testing.T) {
+	// Non-answer keys do nothing while the prompt is up — the loop can't be
+	// reconfigured out from under a pending quit decision.
+	m := sized(t, 100, 24)
+	m, _ = step(t, m, runeKey('q'))
+	before := m.expanded
+	m, _ = step(t, m, runeKey('e'))
+	if m.expanded != before {
+		t.Errorf("e should be swallowed while confirming")
+	}
+	if !m.confirmingQuit {
+		t.Errorf("prompt should stay up after a swallowed key")
+	}
+}
+
+func TestConfirmPromptWording(t *testing.T) {
+	// Running: a warning that the loop is still going. Finished: a plain quit
+	// prompt. Both are armed by q.
+	running, _ := step(t, sized(t, 80, 20), runeKey('q'))
+	if v := running.View(); !strings.Contains(v, "still running") {
+		t.Errorf("running confirm should warn the loop is live:\n%s", v)
+	}
+
+	done := sized(t, 80, 20)
+	done, _ = step(t, done, doneMsg{})
+	done, _ = step(t, done, runeKey('q'))
+	if v := done.View(); !strings.Contains(v, "Run complete") {
+		t.Errorf("finished confirm should say the run is complete:\n%s", v)
 	}
 }
 
