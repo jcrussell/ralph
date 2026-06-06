@@ -101,6 +101,35 @@ func TestRun_QuotaWaitsAndResumesWhenEnabled(t *testing.T) {
 	}
 }
 
+// ralph-6f4: the runner accrues its session cost into CumulativeCostUSD
+// before the quota branch, and waitOnQuota returns early (skipping the
+// routeAndPersist Save). waitOnQuota must therefore persist fsm.json itself
+// so a mid-wait restart keeps that last increment — assert the on-disk total.
+func TestRun_QuotaWaitPersistsAccruedCost(t *testing.T) {
+	repo := scaffoldRepo(t)
+	opts := baseOpts(t, repo)
+	opts.Once = true
+	opts.Cfg.Loop.WaitOnQuota = true
+	opts.Cfg.Loop.QuotaWaitSecs = 120
+	opts.BD = &fakeBD{ReadyByLabel: map[string][]bd.Issue{"": {{ID: "x"}}}}
+	sess := quotaSession()
+	sess.Envelope.TotalCostUSD = 0.42
+	opts.Runner = &fakeRunner{Sessions: []*runner.Session{sess}}
+	opts.Clock = newFakeClock()
+
+	if _, err := Run(context.Background(), opts); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	f, err := fsm.Load(repo)
+	if err != nil {
+		t.Fatalf("fsm.Load: %v", err)
+	}
+	if f.CumulativeCostUSD != 0.42 {
+		t.Errorf("persisted CumulativeCostUSD = %v, want 0.42", f.CumulativeCostUSD)
+	}
+}
+
 // When the quota envelope surfaces a "resets ...pm (UTC)" hint, the wait
 // sleeps until that parsed instant (capped at MaxQuotaWait) rather than the
 // blind-poll QuotaWaitSecs fallback.

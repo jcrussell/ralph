@@ -204,6 +204,75 @@ func TestRun_TerminalFailureFiresFailureHookAndIncident(t *testing.T) {
 	}
 }
 
+// The notify hook fires on a graceful done{*} terminal (the operator-
+// reachability channel), receiving the outcome state + reason. The runner
+// is never invoked on the start→done{queue_empty} path.
+func TestRun_NotifyHookFiresOnDone(t *testing.T) {
+	repo := scaffoldRepo(t)
+	opts := baseOpts(t, repo)
+	opts.Runner = &fakeRunner{}
+	opts.Clock = newFakeClock()
+
+	capture := filepath.Join(repo, "notify-env")
+	writeExecutableHook(t,
+		filepath.Join(repo, ".ralph", "hooks", "notify"),
+		"#!/bin/sh\n{ echo \"$RALPH_STATE\"; echo \"$RALPH_REASON\"; } > \""+capture+"\"\n",
+	)
+
+	out, err := Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if (out != fsm.Outcome{State: fsm.StateDone, Reason: fsm.ReasonQueueEmpty}) {
+		t.Fatalf("outcome = %+v, want done{queue_empty}", out)
+	}
+	b, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatalf("notify hook not invoked (capture missing): %v", err)
+	}
+	if got, want := strings.TrimSpace(string(b)), "done\nqueue_empty"; got != want {
+		t.Errorf("notify env = %q, want %q", got, want)
+	}
+}
+
+// On a failed{*} terminal both hooks fire — failure first, then notify —
+// and a failing notify hook never changes the returned outcome.
+func TestRun_NotifyHookFiresOnFailed(t *testing.T) {
+	repo := scaffoldRepo(t)
+	opts := baseOpts(t, repo)
+	opts.BD = &fakeBD{ReadyByLabel: map[string][]bd.Issue{"": {{ID: "x"}}}}
+	opts.Clock = newFakeClock()
+	opts.Runner = &fakeRunner{Sessions: []*runner.Session{{
+		ExitCode: 1,
+		Duration: 2 * time.Second,
+		Stderr:   "Error: invalid api key",
+	}}}
+
+	capture := filepath.Join(repo, "notify-env")
+	// Exit non-zero to prove a hook error is logged, not fatal.
+	writeExecutableHook(t,
+		filepath.Join(repo, ".ralph", "hooks", "notify"),
+		"#!/bin/sh\n{ echo \"$RALPH_STATE\"; echo \"$RALPH_REASON\"; echo \"$RALPH_DURATION_SECS\"; } > \""+capture+"\"\nexit 1\n",
+	)
+
+	out, err := Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if (out != fsm.Outcome{State: fsm.StateFailed, Reason: fsm.ReasonAuth}) {
+		t.Fatalf("outcome = %+v, want failed{auth}", out)
+	}
+	b, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatalf("notify hook not invoked (capture missing): %v", err)
+	}
+	// Duration comes from the FSM's cumulative wall-clock (the 2s session),
+	// not this invocation's wall-clock — which is 0 under the fake clock.
+	if got, want := strings.TrimSpace(string(b)), "failed\nauth\n2"; got != want {
+		t.Errorf("notify env = %q, want %q", got, want)
+	}
+}
+
 // Pre-seeded failed{*} terminal FSM + no --fresh: Run writes a notice to
 // ErrOut, returns ErrTerminalState, and creates no run dir (so we don't
 // pollute state/runs/ with empty manifests every time the user reruns).

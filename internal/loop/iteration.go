@@ -394,8 +394,11 @@ func sleepBackoff(ctx context.Context, rc *runContext, next fsm.Outcome, mode ru
 // ctx-cancellable interval, then returns prev so the loop resumes the
 // same state. The sleep is the opt-in alternative to routing ModeQuota
 // to failed{runner_terminal}; see the call site in runIteration. State
-// is not advanced (prev == rc.fsm.Outcome), so no FSM save is needed —
-// the same iteration re-runs once the cap (hopefully) resets.
+// is not advanced (prev == rc.fsm.Outcome), but the runner already ran
+// and accrued its session cost into rc.fsm.CumulativeCostUSD before this
+// branch — so fsm.json IS saved below to make that increment durable
+// across a mid-wait restart (routeAndPersist, which normally Saves, is
+// skipped on this path).
 //
 // When the runner surfaced a "resets ...pm (UTC)" hint (in the envelope
 // result or stderr) the wait sleeps until that instant, capped at
@@ -419,6 +422,11 @@ func waitOnQuota(ctx context.Context, rc *runContext, prev fsm.Outcome, sess *ru
 		"state", prev.State, "wait", d.String())
 	if err := recordQuotaWait(rc, prev, d); err != nil {
 		return prev, err
+	}
+	// Persist the runner's accrued cost (CumulativeCostUSD) before the sleep
+	// so a restart during/after the wait doesn't lose this tick's increment.
+	if err := rc.fsm.Save(rc.repo); err != nil {
+		return prev, fmt.Errorf("loop: save fsm during quota wait: %w", err)
 	}
 	rc.clock.Sleep(ctx, d)
 	return prev, nil

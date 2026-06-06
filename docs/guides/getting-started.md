@@ -54,6 +54,8 @@ ralph run --once
 
 For a full autonomous session, drop `--once`. The loop terminates on `done{queue_empty}`, `done{iter_cap}`, or one of the `failed{*}` outcomes. Full flags in [`ralph run`](../reference/ralph_run.md).
 
+Since a long run is unattended, get pinged when it stops: edit `.ralph/hooks/notify` (scaffolded as a no-op) to send a Slack/desktop alert — it fires on every terminal outcome with `RALPH_STATE`, `RALPH_REASON`, and `RALPH_COST_USD` in the env. See [Hooks](../concepts/hooks.md).
+
 ### Resuming and resetting
 
 `fsm.json` is the resume point. If the prior run terminated (`done{*}` or `failed{*}`), a follow-up `ralph run` will refuse to silently no-op — it prints a notice to stderr and exits non-zero. To start over, pass `--fresh`:

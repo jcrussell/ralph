@@ -241,7 +241,10 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 		}
 	}
 
-	// Terminal dispatch: failure hook fires on failed{}.
+	// Terminal dispatch. The failure hook fires on failed{} (unchanged,
+	// backward compatible). The notify hook fires on EVERY terminal outcome
+	// (done{*} and failed{*}) so an unattended operator can be reached when
+	// the run stops — after the failure hook, so a failed{} run runs both.
 	if rc.fsm.State == fsm.StateFailed {
 		env := hooks.Env{
 			Repo:          rc.repo,
@@ -252,6 +255,23 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 		}
 		if _, hErr := hooks.Run(ctx, hooks.GlobalPath(rc.repo, "failure"), env, nil, nil, nil); hErr != nil {
 			logger.WarnContext(ctx, "failure hook error", "err", hErr)
+		}
+	}
+	if rc.fsm.State.Terminal() {
+		// Cost and duration both come from the FSM's persisted cumulatives so
+		// they describe the WHOLE run (consistent across --once/crash-resume
+		// invocations) and match what `ralph hook run notify` reports — not
+		// this single invocation's wall-clock.
+		env := hooks.Env{
+			Repo:         rc.repo,
+			Iter:         rc.fsm.Iter,
+			State:        string(rc.fsm.State),
+			Reason:       string(rc.fsm.Reason),
+			CostUSD:      rc.fsm.CumulativeCostUSD,
+			DurationSecs: rc.fsm.CumulativeWallclockSecs,
+		}
+		if _, hErr := hooks.Run(ctx, hooks.GlobalPath(rc.repo, "notify"), env, nil, nil, nil); hErr != nil {
+			logger.WarnContext(ctx, "notify hook error", "err", hErr)
 		}
 	}
 	return rc.fsm.Outcome, nil

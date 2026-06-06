@@ -1,0 +1,22 @@
+#!/bin/sh
+# notify: runs once when a run reaches a terminal outcome — every done{*}
+# AND failed{*} (for failed{}, this runs after the `failure` hook). Use it to
+# reach an unattended operator: Slack, desktop, email, a custom command.
+# Env: RALPH_REPO RALPH_STATE (done|failed) RALPH_REASON (queue_empty|iter_cap|
+#      idle|budget|auth|runner_terminal) RALPH_ITER RALPH_COST_USD
+#      RALPH_DURATION_SECS.
+#
+# Secrets (webhook URLs, tokens) come from the environment — never hard-code
+# them here. Examples below; uncomment and adapt one.
+#
+# Slack/webhook (set RALPH_SLACK_WEBHOOK_URL in your environment):
+#   if [ -n "$RALPH_SLACK_WEBHOOK_URL" ]; then
+#     msg="ralph $RALPH_STATE ($RALPH_REASON) after $RALPH_ITER iters, \$$RALPH_COST_USD in $RALPH_REPO"
+#     curl -fsS -X POST -H 'Content-Type: application/json' \
+#       --data "{\"text\":\"$msg\"}" "$RALPH_SLACK_WEBHOOK_URL"
+#   fi
+#
+# Desktop (Linux, when a session bus is available):
+#   command -v notify-send >/dev/null 2>&1 && \
+#     notify-send "ralph: $RALPH_STATE" "$RALPH_REASON ($RALPH_ITER iters)"
+exit 0

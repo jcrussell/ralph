@@ -40,6 +40,7 @@ func TestScaffoldCreatesExpectedTree(t *testing.T) {
 		".ralph/hooks/pre-iteration",
 		".ralph/hooks/post-iteration",
 		".ralph/hooks/failure",
+		".ralph/hooks/notify",
 		".ralph/hooks/states/clean/enter",
 		".ralph/hooks/states/clean/exit",
 		".ralph/hooks/states/clean/gate",

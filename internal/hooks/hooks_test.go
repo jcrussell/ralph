@@ -46,6 +46,9 @@ func TestRunPropagatesEnv(t *testing.T) {
   echo "RALPH_PREV_STATE=$RALPH_PREV_STATE"
   echo "RALPH_NEXT_STATE=$RALPH_NEXT_STATE"
   echo "RALPH_PROMPT_FILE=$RALPH_PROMPT_FILE"
+  echo "RALPH_REASON=$RALPH_REASON"
+  echo "RALPH_COST_USD=$RALPH_COST_USD"
+  echo "RALPH_DURATION_SECS=$RALPH_DURATION_SECS"
 } > "$1"
 `, dir)
 
@@ -56,12 +59,15 @@ exec "`+hook+`" "`+out+`"
 `, dir)
 
 	env := Env{
-		Repo:       dir,
-		Iter:       7,
-		State:      "clean",
-		PrevState:  "start",
-		NextState:  "dirty",
-		PromptFile: "/tmp/p.txt",
+		Repo:         dir,
+		Iter:         7,
+		State:        "clean",
+		PrevState:    "start",
+		NextState:    "dirty",
+		PromptFile:   "/tmp/p.txt",
+		Reason:       "queue_empty",
+		CostUSD:      1.2345,
+		DurationSecs: 42,
 	}
 	r, err := Run(context.Background(), wrapper, env, nil, nil, nil)
 	if err != nil {
@@ -82,6 +88,9 @@ exec "`+hook+`" "`+out+`"
 		"RALPH_PREV_STATE=start",
 		"RALPH_NEXT_STATE=dirty",
 		"RALPH_PROMPT_FILE=/tmp/p.txt",
+		"RALPH_REASON=queue_empty",
+		"RALPH_COST_USD=1.2345",
+		"RALPH_DURATION_SECS=42",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("captured env missing %q\nfull capture:\n%s", want, got)
@@ -160,6 +169,20 @@ func TestPathHelpers(t *testing.T) {
 	want = filepath.Join("/r", ".ralph", "hooks", "pre-iteration")
 	if got != want {
 		t.Errorf("GlobalPath = %q, want %q", got, want)
+	}
+}
+
+// buildEnv omits the terminal-summary vars when they're zero so a hook
+// never sees RALPH_COST_USD=0.0000 / RALPH_DURATION_SECS=0 on a run that
+// never accrued cost or for a non-terminal phase. Mirrors the Iter guard.
+func TestBuildEnvOmitsZeroSummary(t *testing.T) {
+	env := buildEnv(Env{Repo: "/r"})
+	for _, k := range []string{"RALPH_COST_USD=", "RALPH_REASON=", "RALPH_DURATION_SECS="} {
+		for _, kv := range env {
+			if strings.HasPrefix(kv, k) {
+				t.Errorf("buildEnv emitted %q for zero-value Env", kv)
+			}
+		}
 	}
 }
 

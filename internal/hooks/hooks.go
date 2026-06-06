@@ -49,6 +49,12 @@ type Env struct {
 	// Failure-only:
 	FailureMode   string // RALPH_FAILURE_MODE
 	FailureReason string // RALPH_FAILURE_REASON
+	// Terminal-only (the `notify` hook): a run-outcome summary. Reason is
+	// the generic terminal reason (queue_empty/iter_cap/idle/budget/auth/
+	// runner_terminal); CostUSD and DurationSecs summarize the whole run.
+	Reason       string  // RALPH_REASON
+	CostUSD      float64 // RALPH_COST_USD
+	DurationSecs int     // RALPH_DURATION_SECS
 	// Review-only:
 	ReviewBranch string // RALPH_REVIEW_BRANCH
 	ReviewBase   string // RALPH_REVIEW_BASE
@@ -170,6 +176,13 @@ func buildEnv(e Env) []string {
 	add("RALPH_ITER_JSON", e.IterJSON)
 	add("RALPH_FAILURE_MODE", e.FailureMode)
 	add("RALPH_FAILURE_REASON", e.FailureReason)
+	add("RALPH_REASON", e.Reason)
+	if e.CostUSD > 0 {
+		env = append(env, fmt.Sprintf("RALPH_COST_USD=%.4f", e.CostUSD))
+	}
+	if e.DurationSecs > 0 {
+		env = append(env, fmt.Sprintf("RALPH_DURATION_SECS=%d", e.DurationSecs))
+	}
 	add("RALPH_REVIEW_BRANCH", e.ReviewBranch)
 	add("RALPH_REVIEW_BASE", e.ReviewBase)
 	env = append(env, e.Extra...)

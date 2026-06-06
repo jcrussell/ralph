@@ -9,6 +9,7 @@ Hooks are executable scripts under `.ralph/hooks/`. Any language; just `chmod +x
 ├── pre-iteration       # global: runs before every iteration
 ├── post-iteration      # global: runs after every iteration
 ├── failure             # global: runs when FSM enters `failed`
+├── notify              # global: runs on every terminal outcome (done or failed)
 └── states/
     ├── clean/{enter,exit,gate}
     ├── dirty/{enter,exit,gate}
@@ -45,6 +46,7 @@ flowchart TD
 | `pre-iteration`                 | env only           | Non-zero → skip iteration; log stderr.                                                  |
 | `post-iteration`                | iteration JSON on stdin | Exit ignored.                                                                       |
 | `failure`                       | env: `RALPH_FAILURE_MODE`, `RALPH_FAILURE_REASON` | Exit ignored. React to OOM / rate-limit / terminal.   |
+| `notify`                        | env: `RALPH_REPO`, `RALPH_ITER`, `RALPH_STATE`, `RALPH_REASON`, `RALPH_COST_USD`, `RALPH_DURATION_SECS` | Exit ignored. Fires on every terminal outcome (after `failure` for a failed run) — reach an unattended operator (Slack/desktop/email). |
 | `states/<state>/enter`          | env only           | Non-zero → log warning, continue.                                                       |
 | `states/<state>/exit`           | env: `RALPH_NEXT_STATE` | Non-zero → log warning, continue.                                                  |
 | `states/<state>/gate`           | env only           | Exit 0 = pass, non-zero = fail. Result surfaces in `{{.GateResult}}` for next prompt. Whether failure routes to `failed` depends on `[gate] soft_fail` — see [config reference](../reference/config.md). |
@@ -66,6 +68,8 @@ Conditional:
 
 - `RALPH_NEXT_STATE` — exit hooks only.
 - `RALPH_FAILURE_MODE` / `RALPH_FAILURE_REASON` — failure hook only.
+- `RALPH_REASON` — terminal reason for the `notify` hook (`queue_empty`, `iter_cap`, `idle`, `budget`, `auth`, `runner_terminal`).
+- `RALPH_COST_USD` / `RALPH_DURATION_SECS` — `notify` hook only: the run's cumulative cost and runner runtime in seconds, totaled across the whole run (omitted when zero).
 - `RALPH_REVIEW_BRANCH` / `RALPH_REVIEW_BASE` — review states only.
 
 ## What hooks should and shouldn't do
