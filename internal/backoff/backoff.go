@@ -9,7 +9,6 @@
 package backoff
 
 import (
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -175,12 +174,6 @@ func dur(secs int, fallback time.Duration) time.Duration {
 	return fallback
 }
 
-// resetRE matches "resets 4am (UTC)" / "resets 10:30pm (UTC)" style hints
-// in runner stderr or the error envelope. Anthropic surfaces this in the
-// API-key-rate-limit error body and in some quota errors. The :MM group is
-// optional so hour-only hints keep matching.
-var resetRE = regexp.MustCompile(`(?i)resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(UTC\)`)
-
 // ParseRateLimitReset extracts a "resets Nam/pm (UTC)" hint (with optional
 // minutes) and returns the duration from now until that wall-clock
 // instant, plus a 60s safety buffer (matching Python). Returns 0 when
@@ -190,7 +183,10 @@ var resetRE = regexp.MustCompile(`(?i)resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\
 // time.Now().UTC(). Splitting now out keeps the function deterministic
 // for tests.
 func ParseRateLimitReset(stderr string, now time.Time) time.Duration {
-	m := resetRE.FindStringSubmatch(stderr)
+	// runner.ResetHintRE is the canonical pattern, shared with the classifier
+	// so the "is this a cap?" check and the "how long until reset?" math can
+	// never drift apart. Its capture groups are (hour, minutes?, am/pm).
+	m := runner.ResetHintRE.FindStringSubmatch(stderr)
 	if m == nil {
 		return 0
 	}

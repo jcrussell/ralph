@@ -1,6 +1,9 @@
 package runner
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestClassifyTimeoutWins(t *testing.T) {
 	// Timeout dominates even when stderr looks like an auth error.
@@ -99,6 +102,22 @@ func TestClassifyEnvelopeResult(t *testing.T) {
 			ModeQuota,
 		},
 		{
+			// Captured 2026-06-06: the CLI dropped the qualifier and now
+			// renders the cap as bare "hit your limit" (ralph-5vt). Pre-fix
+			// this matched no quota substring and spun to iter_cap.
+			"generic hit-your-limit cap (captured envelope)",
+			&Envelope{IsError: true, APIErrorStatus: float64(429), Result: "You've hit your limit · resets 3:20am (UTC)"},
+			ModeQuota,
+		},
+		{
+			// No APIErrorStatus, so the "hit your limit" wording const is what
+			// catches this — not the numeric 429 guard. Proves the cap is
+			// recognized even when the envelope omits a status code.
+			"hit-your-limit wording path only (no status code)",
+			&Envelope{IsError: true, Result: "You've hit your limit"},
+			ModeQuota,
+		},
+		{
 			"credit balance in result",
 			&Envelope{IsError: true, Result: "your credit balance is too low"},
 			ModeBudget,
@@ -128,6 +147,68 @@ func TestClassifyEnvelopeResult(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got := Classify(&Session{Envelope: c.env, ExitCode: 0})
 			if got != c.want {
+				t.Errorf("Classify = %s, want %s", got, c.want)
+			}
+		})
+	}
+}
+
+// TestClassifyNumeric429Guard covers the structural fallback that keeps an
+// is_error envelope with a numeric HTTP error status from ever degrading to
+// ModeOK when its wording is unrecognized — the ralph-5vt / ralph-ii3 failure,
+// where unmatched wording looped to iter_cap. A 429 with a wall-clock reset
+// hint is a subscription cap (ModeQuota); a bare 429 is a transient rate-limit
+// (ModeRateLimit); other 4xx/5xx fall to recoverable ModeUnknown.
+func TestClassifyNumeric429Guard(t *testing.T) {
+	cases := []struct {
+		name string
+		env  *Envelope
+		want Mode
+	}{
+		{
+			"429 unrecognized wording with reset hint -> quota",
+			&Envelope{IsError: true, APIErrorStatus: float64(429), Result: "some brand-new wording · resets 4am (UTC)"},
+			ModeQuota,
+		},
+		{
+			"429 unrecognized wording no hint -> rate limit",
+			&Envelope{IsError: true, APIErrorStatus: float64(429), Result: "some brand-new wording with no hint"},
+			ModeRateLimit,
+		},
+		{
+			"429 empty result no hint -> rate limit",
+			&Envelope{IsError: true, APIErrorStatus: float64(429)},
+			ModeRateLimit,
+		},
+		{
+			"503 unrecognized wording -> unknown",
+			&Envelope{IsError: true, APIErrorStatus: float64(503), Result: "unrecognized server error"},
+			ModeUnknown,
+		},
+		{
+			// json.Number is handled defensively in case the decoder differs
+			// from the float64 the standard library produces.
+			"json.Number 429 with hint -> quota",
+			&Envelope{IsError: true, APIErrorStatus: json.Number("429"), Result: "resets 4am (UTC)"},
+			ModeQuota,
+		},
+		{
+			// is_error=false must suppress the guard: a 200 envelope quoting
+			// "429" in prose is not an error.
+			"is_error=false suppresses numeric guard",
+			&Envelope{IsError: false, APIErrorStatus: float64(429), Result: "all good"},
+			ModeOK,
+		},
+		{
+			// Sub-400 status is not an error code; the guard must not fire.
+			"numeric 200 is not an error status",
+			&Envelope{IsError: true, APIErrorStatus: float64(200), Result: "weird but not an http error"},
+			ModeOK,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := Classify(&Session{Envelope: c.env, ExitCode: 0}); got != c.want {
 				t.Errorf("Classify = %s, want %s", got, c.want)
 			}
 		})

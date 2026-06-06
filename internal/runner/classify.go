@@ -1,6 +1,18 @@
 package runner
 
-import "strings"
+import (
+	"encoding/json"
+	"regexp"
+	"strings"
+)
+
+// ResetHintRE matches a "resets 4am (UTC)" / "resets 10:30pm (UTC)" wall-clock
+// hint in runner output. It is the canonical source of this pattern: Classify
+// uses it (via MatchString) to recognize a subscription usage cap, which always
+// renders a reset time, while backoff.ParseRateLimitReset reuses it to compute
+// the sleep duration from its capture groups — one regexp keeps the two in
+// lockstep. The :MM group is optional so hour-only hints keep matching.
+var ResetHintRE = regexp.MustCompile(`(?i)resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(UTC\)`)
 
 // Mode is the classified outcome of one runner invocation. The loop
 // uses Mode to pick a backoff duration and to decide whether to fail
@@ -72,11 +84,18 @@ const (
 	txtSessionLimit       = "session limit"
 	txtWeeklyLimit        = "weekly limit"
 	txtFiveHourLimit      = "5-hour limit"
-	txtInvalidAPIKey      = "invalid api key"
-	txtAuthentication     = "authentication"
-	txtUnauthorized       = "unauthorized"
-	txtRateLimit          = "rate limit"
-	txtOverloaded         = "overloaded"
+	// Generic cap wording the claude CLI now renders without a qualifier,
+	// e.g. "You've hit your limit · resets 3:20am (UTC)". Added so wording
+	// drift off the specific phrases above doesn't slip past as ModeOK (see
+	// ralph-5vt / ralph-ii3). Kept narrow ("your limit", not a bare "limit
+	// reached") so it can't collide with a transient "rate limit reached" in
+	// the un-IsError-gated stderr scan and flip it to terminal quota.
+	txtHitYourLimit   = "hit your limit"
+	txtInvalidAPIKey  = "invalid api key"
+	txtAuthentication = "authentication"
+	txtUnauthorized   = "unauthorized"
+	txtRateLimit      = "rate limit"
+	txtOverloaded     = "overloaded"
 )
 
 // Terminal reports whether m forces the FSM into failed{m}. ModeAuth,
@@ -121,6 +140,24 @@ func Classify(s *Session) Mode {
 			if m := matchAPIErrorText(s.Envelope.Result); m != "" {
 				return m
 			}
+			// Structural fallback: an is_error envelope carrying a numeric
+			// HTTP error status whose wording we don't recognize must never
+			// degrade to ModeOK — the loop reads ModeOK as a clean success
+			// and spins to iter_cap (the ralph-5vt / ralph-ii3 failure). A
+			// 429 with a wall-clock "resets ... (UTC)" hint is a subscription
+			// usage cap (ModeQuota, which wait_on_quota sleeps out); a bare
+			// 429 is a transient API rate-limit (ModeRateLimit). Any other
+			// 4xx/5xx is recoverable ModeUnknown pending a captured sample.
+			if code, ok := httpErrStatus(s.Envelope.APIErrorStatus); ok {
+				switch {
+				case code == 429 && ResetHintRE.MatchString(s.Envelope.Result):
+					return ModeQuota
+				case code == 429:
+					return ModeRateLimit
+				default:
+					return ModeUnknown
+				}
+			}
 		}
 		if strings.EqualFold(s.Envelope.Subtype, "error_max_turns") {
 			return ModeDeadSession
@@ -139,7 +176,8 @@ func Classify(s *Session) Mode {
 		strings.Contains(low, txtFiveHourLimit),
 		strings.Contains(low, txtWeeklyLimit),
 		strings.Contains(low, txtSessionLimit),
-		strings.Contains(low, txtQuotaExceeded):
+		strings.Contains(low, txtQuotaExceeded),
+		strings.Contains(low, txtHitYourLimit):
 		// Best-guess substrings for claude CLI quota-exhaustion
 		// errors (5-hour window, weekly cap, session cap). Refine
 		// when a real quota failure is captured — see ralph-ii3.
@@ -209,6 +247,37 @@ func classifyAPIError(v any) Mode {
 	return matchAPIErrorText(s)
 }
 
+// httpErrStatus extracts a numeric HTTP status from the envelope's
+// api_error_status field when it carries a bare status code — the claude CLI
+// renders 429/5xx this way alongside is_error=true, with the human-readable
+// reason in the separate "result" field. JSON decoding yields float64; int and
+// json.Number are handled defensively in case the decoder differs. Reports
+// (0, false) for non-numeric values and for sub-400 codes (not error statuses),
+// so the caller's structural fallback only fires on genuine error responses.
+func httpErrStatus(v any) (int, bool) {
+	var code int
+	switch t := v.(type) {
+	case float64:
+		code = int(t)
+	case int:
+		code = t
+	case int64:
+		code = int(t)
+	case json.Number:
+		n, err := t.Int64()
+		if err != nil {
+			return 0, false
+		}
+		code = int(n)
+	default:
+		return 0, false
+	}
+	if code < 400 {
+		return 0, false
+	}
+	return code, true
+}
+
 // matchAPIErrorText scans free-form error text (envelope result or
 // api_error_status string/message) for the same set of substrings used
 // by classifyAPIError, so callers stay in sync about what counts as a
@@ -227,7 +296,8 @@ func matchAPIErrorText(s string) Mode {
 		strings.Contains(low, txtSessionLimit),
 		strings.Contains(low, "monthly usage"),
 		strings.Contains(low, txtWeeklyLimit),
-		strings.Contains(low, txtFiveHourLimit):
+		strings.Contains(low, txtFiveHourLimit),
+		strings.Contains(low, txtHitYourLimit):
 		return ModeQuota
 	case strings.Contains(low, txtAuthentication), strings.Contains(low, txtInvalidAPIKey), strings.Contains(low, txtUnauthorized):
 		return ModeAuth
