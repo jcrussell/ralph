@@ -81,6 +81,77 @@ type dataSource interface {
 	runDetail(id string) (string, error)
 	incidentDetail(path string) (string, error)
 	iterDetail(stem string) (string, error)
+
+	// iterRaw returns the concatenated raw log-file text for a stem,
+	// without the trace.RenderStem formatting. It is the cheap corpus
+	// for global search (searchCorpus) over many iterations — rendering
+	// every iteration just to grep it would be far too slow.
+	iterRaw(stem string) (string, error)
+}
+
+// searchHit is one global-search result. cat selects which *Detail loader
+// opens it; ref is the argument that loader takes (run id / incident path /
+// iter stem); snippet is the first matching line, for the list row.
+type searchHit struct {
+	cat     categoryKind
+	title   string
+	ref     string
+	snippet string
+}
+
+// searchCorpus greps the bodies of every run, incident, and iteration for a
+// case-insensitive substring. It is a free function over dataSource (not an
+// interface method) so the orchestration stays pure and directly testable and
+// dataSource keeps its narrow shape. The corpus is whatever the source reads
+// now — a disk snapshot that `r` (refresh) re-reads.
+//
+// Order mirrors the categories: runs → incidents → iterations, each in the
+// source's already-sorted (newest-first) order, so results are deterministic.
+func searchCorpus(d dataSource, query string) []searchHit {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return nil
+	}
+	needle := strings.ToLower(q)
+	var hits []searchHit
+
+	add := func(cat categoryKind, title, ref, body string) {
+		if snip, ok := firstMatchLine(body, needle); ok {
+			hits = append(hits, searchHit{cat: cat, title: title, ref: ref, snippet: snip})
+		}
+	}
+
+	for _, it := range d.runs() {
+		if body, err := d.runDetail(it.id); err == nil {
+			add(catRuns, it.id, it.id, body)
+		}
+	}
+	for _, it := range d.incidents() {
+		if body, err := d.incidentDetail(it.path); err == nil {
+			title := it.kind
+			if title == "" {
+				title = it.name
+			}
+			add(catIncidents, title, it.path, body)
+		}
+	}
+	for _, it := range d.iterations() {
+		if body, err := d.iterRaw(it.stem); err == nil {
+			add(catIterations, it.stem, it.stem, body)
+		}
+	}
+	return hits
+}
+
+// firstMatchLine returns the first line of body containing needle (already
+// lower-cased), trimmed for display, and whether any line matched.
+func firstMatchLine(body, needle string) (string, bool) {
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(strings.ToLower(line), needle) {
+			return strings.TrimSpace(line), true
+		}
+	}
+	return "", false
 }
 
 // fsData reads explore's three categories from .ralph/state.
@@ -213,6 +284,34 @@ func (d *fsData) iterDetail(stem string) (string, error) {
 	// selected is the one rendered even when iteration numbers collide.
 	if err := trace.RenderStem(os.DirFS(d.p.LogsDir()), stem, 200, &b); err != nil {
 		return "", err
+	}
+	return b.String(), nil
+}
+
+// iterRaw concatenates the raw contents of every log file for a stem
+// (iter-NNNN-<ts>.json, -prompt.txt, -stdout.txt, …) so global search can
+// grep an iteration without paying for trace.RenderStem.
+func (d *fsData) iterRaw(stem string) (string, error) {
+	dir := d.p.LogsDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), stem) {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names) // deterministic concatenation order
+	var b strings.Builder
+	for _, name := range names {
+		data, rerr := os.ReadFile(filepath.Join(dir, name)) //nolint:gosec // name comes from a readdir of the logs dir
+		if rerr != nil {
+			continue
+		}
+		b.Write(data)
+		b.WriteByte('\n')
 	}
 	return b.String(), nil
 }

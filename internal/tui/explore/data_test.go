@@ -105,6 +105,46 @@ func TestFSDataDetails(t *testing.T) {
 	}
 }
 
+func TestFSDataIterRaw(t *testing.T) {
+	d := newFSDataFixture(t)
+	raw, err := d.iterRaw("iter-0001-20260101T000000Z")
+	if err != nil {
+		t.Fatalf("iterRaw: %v", err)
+	}
+	// Concatenates the raw .json + -prompt.txt for the stem.
+	for _, want := range []string{"hello iter", "the prompt"} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("iterRaw missing %q\n%s", want, raw)
+		}
+	}
+	// Must not pull in unrelated files (summary.jsonl is not stem-prefixed).
+	if strings.Contains(raw, "summary") {
+		t.Errorf("iterRaw leaked a non-stem file\n%s", raw)
+	}
+}
+
+func TestSearchCorpusOverFSData(t *testing.T) {
+	d := newFSDataFixture(t)
+
+	// "hello iter" lives only in the iteration's raw .json body.
+	hits := searchCorpus(d, "hello iter")
+	if len(hits) != 1 || hits[0].cat != catIterations {
+		t.Fatalf("searchCorpus(hello iter) = %+v, want 1 iteration hit", hits)
+	}
+
+	// "incident body" lives only in the incident markdown.
+	hits = searchCorpus(d, "incident body")
+	if len(hits) != 1 || hits[0].cat != catIncidents {
+		t.Fatalf("searchCorpus(incident body) = %+v, want 1 incident hit", hits)
+	}
+
+	// A transition reason lives in the run detail (manifest + transitions).
+	hits = searchCorpus(d, "reason=ok")
+	if len(hits) != 1 || hits[0].cat != catRuns {
+		t.Fatalf("searchCorpus(reason=ok) = %+v, want 1 run hit", hits)
+	}
+}
+
 func TestFSDataMissingDirs(t *testing.T) {
 	repo := t.TempDir() // no .ralph at all
 	d := newFSData(repo, paths.New(repo))

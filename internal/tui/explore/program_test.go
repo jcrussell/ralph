@@ -29,13 +29,15 @@ func waitQuit(t *testing.T, errc <-chan error) {
 }
 
 // TestProgramQuits drives the headless program through a resize and a
-// Ctrl-C and asserts Run unblocks — the program quits cleanly.
+// Ctrl-C and asserts Run unblocks — the program quits cleanly. Quit now
+// confirms: the first ctrl+c arms the prompt, the second forces it.
 func TestProgramQuits(t *testing.T) {
 	ios, _ := iostreams.Test()
 	pg := newProgram(ios, sampleData(), tea.WithoutRenderer(), tea.WithInput(&bytes.Buffer{}))
 
 	errc := runDone(pg)
 	pg.p.Send(tea.WindowSizeMsg{Width: 100, Height: 24})
+	pg.p.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 	pg.p.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 	waitQuit(t, errc)
 }
