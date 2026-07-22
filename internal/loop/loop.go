@@ -94,6 +94,11 @@ type runContext struct {
 	// reads its tail to populate {{.GateOutput}} for the next iteration.
 	lastGateStdoutFile string
 
+	// promptFP is the previous iteration's prompt-library fingerprint
+	// (relpath -> content hash), used to announce mid-run template edits.
+	// nil until the first sample — nothing to compare against yet.
+	promptFP map[string]string
+
 	// lastReadyBeads is the most recent `bd ready` count, sampled in
 	// routeAndPersist and surfaced to the Observer's Snapshot. -1 until the
 	// first sample so the live UI can render "not yet sampled".

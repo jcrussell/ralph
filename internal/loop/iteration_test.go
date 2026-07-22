@@ -932,3 +932,69 @@ func TestRun_EmitsIterLineOnSkippedIteration(t *testing.T) {
 // the imported config package not being used in this test file. (The
 // other tests reference opts.Cfg via baseOpts which already imports it.)
 var _ = config.Defaults
+
+// TestPromptChangesAreAnnounced pins ralph-9bn. Prompt templates have always
+// been re-read every iteration; the gap was that a mid-run edit landed
+// silently, so the operator could not tell whether it had taken. Editing
+// clean.md between ticks must produce exactly one notice, on the iteration that
+// first sees the new bytes — and none on the first iteration, which has nothing
+// to compare against.
+func TestPromptChangesAreAnnounced(t *testing.T) {
+	repo := scaffoldRepo(t)
+	opts := baseOpts(t, repo)
+	ios, bufs := iostreams.Test()
+	opts.IO = ios
+	opts.Clock = newFakeClock()
+	opts.Cfg.Loop.MaxIterations = 3
+	opts.BD = &fakeBD{ReadyByLabel: map[string][]bd.Issue{"": {{ID: "x"}}}}
+	clean := filepath.Join(repo, ".ralph", "prompts", "clean.md")
+	fr := &fakeRunner{OnRun: func(call int, _ runner.RunOpts) {
+		if call == 0 {
+			// The operator edits the template while iteration 1 is running.
+			if err := os.WriteFile(clean, []byte("PROMPT clean REVISED iter={{.Iter}}\n"), 0o600); err != nil {
+				t.Errorf("rewrite prompt: %v", err)
+			}
+		}
+	}}
+	opts.Runner = fr
+
+	if _, err := Run(context.Background(), opts); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The notice can only be meaningful if a second iteration actually ran.
+	if fr.Calls < 2 {
+		t.Fatalf("runner calls = %d, want >= 2 so a post-edit iteration exists", fr.Calls)
+	}
+	if !strings.Contains(fr.Prompts[len(fr.Prompts)-1], "REVISED") {
+		t.Errorf("later iteration did not pick up the edited template: %q", fr.Prompts[len(fr.Prompts)-1])
+	}
+
+	notices := strings.Count(bufs.ErrOut.String(), "prompts changed")
+	if notices != 1 {
+		t.Errorf("got %d prompt-change notices, want exactly 1:\n%s", notices, bufs.ErrOut.String())
+	}
+	if !strings.Contains(bufs.ErrOut.String(), "clean.md") {
+		t.Errorf("notice should name the changed file:\n%s", bufs.ErrOut.String())
+	}
+}
+
+// The steady state must stay quiet: an untouched prompt library produces no
+// notices at all, or the signal would be worthless.
+func TestUnchangedPromptsAreSilent(t *testing.T) {
+	repo := scaffoldRepo(t)
+	opts := baseOpts(t, repo)
+	ios, bufs := iostreams.Test()
+	opts.IO = ios
+	opts.Clock = newFakeClock()
+	opts.Cfg.Loop.MaxIterations = 3
+	opts.BD = &fakeBD{ReadyByLabel: map[string][]bd.Issue{"": {{ID: "x"}}}}
+	opts.Runner = &fakeRunner{}
+
+	if _, err := Run(context.Background(), opts); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Contains(bufs.ErrOut.String(), "prompts changed") {
+		t.Errorf("unchanged prompts must not announce:\n%s", bufs.ErrOut.String())
+	}
+}

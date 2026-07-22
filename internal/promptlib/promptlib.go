@@ -20,10 +20,13 @@ package promptlib
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"sort"
 	"strings"
 	"text/template"
 
@@ -101,6 +104,69 @@ func PromptsDir(repoRoot string) string {
 // the trust boundary for {{include}}; see path-trust-boundaries.
 func Open(repoRoot string) (*os.Root, error) {
 	return os.OpenRoot(PromptsDir(repoRoot))
+}
+
+// Fingerprint returns relpath -> hex sha256 for every regular file under
+// fsys. The loop compares consecutive fingerprints to notice mid-run edits
+// to the prompt library: templates are re-read from disk on every iteration
+// anyway (Render below opens them fresh), so this changes nothing about
+// *what* the runner receives — it just makes the reload visible instead of
+// silent.
+//
+// Every regular file counts, not just <state>.md: {{include}} accepts any
+// relpath under the prompts root, so an edit to an included snippet is just
+// as much a prompt change. Content hashes, not mtimes — a `touch` must not
+// read as an edit.
+//
+// A missing prompts directory yields an empty map and no error; that is a
+// render-time problem to report, not a fingerprint one.
+func Fingerprint(fsys fs.FS) (map[string]string, error) {
+	out := map[string]string{}
+	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) && p == "." {
+				return fs.SkipAll
+			}
+			return err
+		}
+		if d.IsDir() || !d.Type().IsRegular() {
+			return nil
+		}
+		b, rerr := fs.ReadFile(fsys, p)
+		if rerr != nil {
+			return rerr
+		}
+		sum := sha256.Sum256(b)
+		out[p] = hex.EncodeToString(sum[:])
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("promptlib: fingerprint: %w", err)
+	}
+	return out, nil
+}
+
+// ChangedFiles returns the relpaths whose content differs between two
+// Fingerprint maps — added, removed, and modified alike — sorted so the
+// notice text is deterministic. A nil prev (nothing sampled yet) reports no
+// changes: the first iteration has nothing to compare against.
+func ChangedFiles(prev, cur map[string]string) []string {
+	if prev == nil {
+		return nil
+	}
+	var changed []string
+	for name, sum := range cur {
+		if prev[name] != sum {
+			changed = append(changed, name)
+		}
+	}
+	for name := range prev {
+		if _, ok := cur[name]; !ok {
+			changed = append(changed, name)
+		}
+	}
+	sort.Strings(changed)
+	return changed
 }
 
 // Render reads <state>.md from fsys, wraps with optional _header.md

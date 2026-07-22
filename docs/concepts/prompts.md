@@ -71,6 +71,21 @@ ralph prompt show review        # uses .Review.* vars from fsm.json
 
 Prints the final composed text — same string that would be sent to the runner.
 
+## Live editing
+
+Templates are read from disk at the top of every iteration, so editing
+`.ralph/prompts/` mid-run takes effect on the next tick — no restart, no
+watcher, and the iteration in flight is unaffected (its prompt was already
+rendered). The loop hashes the prompt directory each iteration and prints a
+notice when anything changed:
+
+```
+ralph: prompts changed since last iteration (clean.md, _header.md) — reloaded
+```
+
+Every regular file under the root counts, not just `<state>.md` — an
+`{{include}}`d snippet is as much a prompt as the state body is.
+
 ## Capture
 
 Every iteration's *fully rendered* prompt is saved at `.ralph/state/logs/iter-NNNN-<ts>-prompt.txt`. Lets you reconstruct what the agent was actually asked even after templates evolve.

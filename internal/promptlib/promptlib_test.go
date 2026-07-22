@@ -223,3 +223,78 @@ func TestRenderStringUsesHeaderFooter(t *testing.T) {
 		t.Errorf("RenderString = %q", out)
 	}
 }
+
+func TestFingerprintCoversEveryRegularFile(t *testing.T) {
+	fsys := fstest.MapFS{
+		"clean.md":           {Data: []byte("body")},
+		"_header.md":         {Data: []byte("hdr")},
+		"snippets/rules.txt": {Data: []byte("rules")},
+	}
+	fp, err := Fingerprint(fsys)
+	if err != nil {
+		t.Fatalf("Fingerprint: %v", err)
+	}
+	// Includes accept any relpath under the root, so a non-.md snippet is as
+	// much a prompt as clean.md is.
+	for _, want := range []string{"clean.md", "_header.md", "snippets/rules.txt"} {
+		if fp[want] == "" {
+			t.Errorf("missing %s from fingerprint: %v", want, fp)
+		}
+	}
+}
+
+// Same bytes must hash the same, or every iteration would report a change.
+func TestFingerprintIsStable(t *testing.T) {
+	fsys := fstest.MapFS{"clean.md": {Data: []byte("body")}}
+	a, err := Fingerprint(fsys)
+	if err != nil {
+		t.Fatalf("Fingerprint: %v", err)
+	}
+	b, err := Fingerprint(fsys)
+	if err != nil {
+		t.Fatalf("Fingerprint: %v", err)
+	}
+	if a["clean.md"] != b["clean.md"] {
+		t.Errorf("fingerprint not stable across calls: %q vs %q", a["clean.md"], b["clean.md"])
+	}
+}
+
+func TestFingerprintMissingDirIsEmptyNotError(t *testing.T) {
+	fp, err := Fingerprint(fstest.MapFS{})
+	if err != nil {
+		t.Fatalf("Fingerprint on an empty FS = %v, want nil", err)
+	}
+	if len(fp) != 0 {
+		t.Errorf("fingerprint = %v, want empty", fp)
+	}
+}
+
+func TestChangedFiles(t *testing.T) {
+	base := map[string]string{"clean.md": "a", "_header.md": "b"}
+
+	tests := []struct {
+		name      string
+		prev, cur map[string]string
+		want      []string
+	}{
+		{"first sample reports nothing", nil, base, nil},
+		{"unchanged", base, map[string]string{"clean.md": "a", "_header.md": "b"}, nil},
+		{"modified", base, map[string]string{"clean.md": "z", "_header.md": "b"}, []string{"clean.md"}},
+		{"added", base, map[string]string{"clean.md": "a", "_header.md": "b", "dirty.md": "c"}, []string{"dirty.md"}},
+		{"removed", base, map[string]string{"clean.md": "a"}, []string{"_header.md"}},
+		{"sorted", base, map[string]string{"clean.md": "z", "_header.md": "z"}, []string{"_header.md", "clean.md"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ChangedFiles(tc.prev, tc.cur)
+			if len(got) != len(tc.want) {
+				t.Fatalf("ChangedFiles = %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("ChangedFiles = %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}

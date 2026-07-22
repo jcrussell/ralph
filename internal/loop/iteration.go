@@ -196,6 +196,7 @@ func runEnterHook(ctx context.Context, rc *runContext, prev fsm.Outcome) {
 // and ModeOK without touching the streak/cumulative counters. Returns
 // the session + classified mode, or an error for prompt/runner failures.
 func runRunnerPhase(ctx context.Context, rc *runContext, prev fsm.Outcome, beforeHead string) (*runner.Session, runner.Mode, error) {
+	notePromptChanges(ctx, rc)
 	prompt, err := composePrompt(ctx, rc, prev, beforeHead)
 	if err != nil {
 		return nil, runner.ModeOK, err
@@ -546,6 +547,42 @@ func notifyObserver(rc *runContext, rec IterRecord) {
 		Elapsed:                 rc.clock.Now().Sub(rc.started),
 		ReadyBeads:              rc.lastReadyBeads,
 	})
+}
+
+// notePromptChanges announces mid-run edits to the prompt library. Prompts are
+// already re-read from disk every iteration (composePrompt opens the root
+// fresh), so an edit lands on the next tick with no action needed — the problem
+// this solves is that it happened silently, leaving the operator to guess
+// whether the change took. Nothing here affects what the runner receives.
+//
+// Best-effort by construction: a fingerprint failure is logged and leaves the
+// stored map untouched (so the next successful sample compares against the last
+// known-good state rather than reporting a spurious full-library change), and
+// never fails the iteration — composePrompt is the authority on a prompts
+// directory that is actually broken.
+func notePromptChanges(ctx context.Context, rc *runContext) {
+	root, err := promptlib.Open(rc.repo)
+	if err != nil {
+		rc.log.WarnContext(ctx, "prompt fingerprint: open prompts", "err", err)
+		return
+	}
+	defer func() { _ = root.Close() }()
+
+	cur, err := promptlib.Fingerprint(root.FS())
+	if err != nil {
+		rc.log.WarnContext(ctx, "prompt fingerprint", "err", err)
+		return
+	}
+	changed := promptlib.ChangedFiles(rc.promptFP, cur)
+	rc.promptFP = cur
+	if len(changed) == 0 {
+		return
+	}
+	rc.log.InfoContext(ctx, "prompts changed since last iteration", "files", changed)
+	if rc.io != nil && rc.io.ErrOut != nil {
+		_, _ = fmt.Fprintf(rc.io.ErrOut, "ralph: prompts changed since last iteration (%s) — reloaded\n",
+			strings.Join(changed, ", "))
+	}
 }
 
 // composePrompt renders the per-state prompt with the iteration's vars.
