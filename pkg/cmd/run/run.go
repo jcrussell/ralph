@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync/atomic"
 
 	"github.com/spf13/cobra"
 
@@ -142,6 +143,13 @@ func runRun(ctx context.Context, opts *Options) error {
 	}
 	applyOverrides(cfg, opts)
 
+	// Refuse a second concurrent orchestrator before anything visible happens.
+	// loop.Run would refuse too, but only after the TUI has taken over the
+	// terminal — and the TUI can't show the reason until the operator quits.
+	if err := cmdutil.CheckRepoFree(repo); err != nil {
+		return err
+	}
+
 	lopts := loop.Options{
 		Repo:     repo,
 		Cfg:      cfg,
@@ -202,14 +210,31 @@ func shouldUseTUI(io *iostreams.IOStreams, opts *Options) bool {
 // liveUI is the narrow consumer seam the activation path drives. *tui.Program
 // satisfies it; orchestrate is unit-tested against a fake, so the
 // control-inversion dance needs no real terminal. LoopIO/Observer feed
-// loop.Run; Run renders in the foreground until quit; Done signals loop
+// loop.Run; Run renders in the foreground until quit; Finish signals loop
 // completion; Tail surfaces the captured pane lines for the post-quit flush.
 type liveUI interface {
 	LoopIO() *iostreams.IOStreams
 	Observer() loop.Observer
 	Run() error
-	Done()
+	Finish(err error, observed bool)
 	Tail() []string
+}
+
+// observedObserver forwards Snapshots to the UI and records whether the loop
+// ever got as far as an iteration. orchestrate uses that to tell a startup
+// failure (nothing on screen, tear down and print) from a mid-run error (keep
+// the run up for review). Observe must not block (loop seams.go) and this adds
+// only an atomic store.
+type observedObserver struct {
+	inner loop.Observer
+	saw   *atomic.Bool
+}
+
+func (o observedObserver) Observe(s loop.Snapshot) {
+	if s.Iter > 0 {
+		o.saw.Store(true)
+	}
+	o.inner.Observe(s)
 }
 
 // loopFn is loop.Run's signature, injected into orchestrate so tests stand in
@@ -235,20 +260,26 @@ func orchestrate(ctx context.Context, ui liveUI, run loopFn, lopts loop.Options,
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	var observed atomic.Bool
 	lopts.IO = ui.LoopIO()
-	lopts.Observer = ui.Observer()
+	lopts.Observer = observedObserver{inner: ui.Observer(), saw: &observed}
 
 	resultCh := make(chan runResult, 1)
 	go func() {
-		// Done always fires (LIFO defer, after recover) so the UI unblocks
-		// even if loop.Run panics; otherwise Run would hang on a dead loop.
-		defer ui.Done()
+		// Finish always fires exactly once (LIFO defer, after recover) so the
+		// UI unblocks even if loop.Run panics; otherwise Run would hang on a
+		// dead loop. finErr is set by both the normal and the panic path so the
+		// badge reports the real reason either way.
+		var finErr error
+		defer func() { ui.Finish(finErr, observed.Load()) }()
 		defer func() {
 			if r := recover(); r != nil {
-				resultCh <- runResult{err: fmt.Errorf("ralph run: loop panicked: %v", r)}
+				finErr = fmt.Errorf("ralph run: loop panicked: %v", r)
+				resultCh <- runResult{err: finErr}
 			}
 		}()
 		out, err := run(ctx, lopts)
+		finErr = err
 		resultCh <- runResult{outcome: out, err: err}
 	}()
 

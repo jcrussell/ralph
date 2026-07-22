@@ -16,7 +16,7 @@ package tui
 // the consumer interface it satisfies. Two seams leave the package: LoopIO
 // (the inner, redirected IOStreams handed to loop.Run) and Observer (the
 // metrics sink set on loop.Options). Lifecycle is Run (blocks until the user
-// quits) and Done (mark the run finished so it stays on screen for review;
+// quits) and Finish (mark the run finished so it stays on screen for review;
 // the user then quits).
 
 import (
@@ -39,7 +39,7 @@ func (o observer) Observe(s loop.Snapshot) { o.send.Send(metricsMsg{s: s}) }
 
 // Program is the wired live-run TUI: a tea.Program plus the seams the run
 // orchestration needs. The redirected IOStreams (LoopIO) and metrics Observer
-// feed loop.Run; Run renders until quit; Done signals loop completion.
+// feed loop.Run; Run renders until quit; Finish signals loop completion.
 type Program struct {
 	p    *tea.Program
 	ios  *iostreams.IOStreams // inner redirected streams handed to loop.Run
@@ -91,9 +91,9 @@ func (pg *Program) LoopIO() *iostreams.IOStreams { return pg.ios }
 func (pg *Program) Observer() loop.Observer { return pg.obs }
 
 // Run starts the Bubble Tea event loop and blocks until the user quits with
-// q / Ctrl-C. A Done() signal no longer quits — the finished run stays on
-// screen for review — so by the time Run returns the loop goroutine has already
-// completed. On return it stops the log writer so a still-draining loop cannot
+// q / Ctrl-C. A Finish signal no longer quits — the finished run stays on
+// screen for review, except for the startup-failure case Finish documents — so
+// by the time Run returns the loop goroutine has already completed. On return it stops the log writer so a still-draining loop cannot
 // Send into the torn-down program (the quit-before-cancel half of the
 // ralph-g3s.1 ordering); the orchestration then cancels the loop (a no-op once
 // it has returned) and reads its buffered result. It returns tea's run error,
@@ -115,9 +115,22 @@ func (pg *Program) Run() error {
 // until Run has returned.
 func (pg *Program) Tail() []string { return pg.tail }
 
-// Done signals that loop.Run has reached its terminal outcome: it Sends a
-// doneMsg, which the model folds into its finished state (frozen panel,
-// "run complete" help) but does NOT quit — the operator quits with q / Ctrl-C
-// once done reviewing. Safe to call after the program has already quit (Send
-// no-ops once the program is down).
-func (pg *Program) Done() { pg.p.Send(doneMsg{}) }
+// Finish signals that loop.Run has returned: it Sends a doneMsg, which the
+// model folds into its finished state (frozen panel, "run complete" help).
+// err is loop.Run's error, if any; observed reports whether the loop ever
+// produced an iteration Snapshot.
+//
+// The usual case does NOT quit — the operator quits with q / Ctrl-C once done
+// reviewing. The one exception is a startup failure (err != nil with nothing
+// ever observed: lock contention, a terminal fsm.json): there is no run on
+// screen to review, so the model quits and the orchestration flushes the
+// captured notice to the real stderr.
+//
+// Safe to call after the program has already quit (Send no-ops once the
+// program is down). Note that bubbletea's Send blocks until the event loop is
+// running, so a Finish that beats the first paint parks this goroutine until
+// then; the orchestration writes its buffered result channel first, so nothing
+// depends on Finish returning promptly.
+func (pg *Program) Finish(err error, observed bool) {
+	pg.p.Send(doneMsg{err: err, observed: observed})
+}

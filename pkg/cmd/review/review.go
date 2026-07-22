@@ -114,6 +114,12 @@ func runReview(ctx context.Context, opts *Options) error {
 		cfg.Loop.MaxIterations = opts.MaxRounds
 	}
 
+	// Same preflight `ralph run` does: refuse a concurrent orchestrator with a
+	// clear message before we check out a PR or resolve branches.
+	if lerr := cmdutil.CheckRepoFree(repo); lerr != nil {
+		return lerr
+	}
+
 	if opts.PR != 0 {
 		if cerr := reviewlib.CheckoutPR(ctx, repo, opts.PR); cerr != nil {
 			return cerr

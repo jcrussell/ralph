@@ -63,14 +63,29 @@ type logLineMsg struct{ line string }
 // tickMsg drives the once-a-second elapsed bump between iterations.
 type tickMsg struct{}
 
-// doneMsg signals that loop.Run has reached a terminal outcome. The program
-// orchestration (bead ralph-g3s.7) Sends it when the loop goroutine returns.
-// The model does NOT quit on it: the run stays on screen so the operator can
-// scroll the log pane and review what happened, freezing the elapsed clock and
-// switching the help line to "run complete". Run unblocks only when the user
-// presses q / Ctrl-C; the orchestration's subsequent cancel is then a no-op
-// (the loop already returned) and its buffered result is read immediately.
-type doneMsg struct{}
+// doneMsg signals that loop.Run has returned. The program orchestration
+// (bead ralph-g3s.7) Sends it when the loop goroutine finishes, via
+// Program.Finish. The zero value is the clean case: the run reached a terminal
+// outcome and the model does NOT quit on it — the run stays on screen so the
+// operator can scroll the log pane and review what happened, freezing the
+// elapsed clock and switching the help line to "run complete". Run unblocks
+// only when the user presses q / Ctrl-C; the orchestration's subsequent cancel
+// is then a no-op (the loop already returned) and its buffered result is read
+// immediately.
+//
+// err carries a non-nil loop.Run error. observed reports whether the loop ever
+// produced an iteration Snapshot: a non-nil err with observed=false is a
+// startup failure (lock contention, ErrTerminalState) where there is nothing on
+// screen to review, so that combination — and only that one — quits. A mid-run
+// error (a transient git/bd failure inside routing, a cancelled context) keeps
+// the review screen up and just badges the error.
+type doneMsg struct {
+	err      error
+	observed bool
+}
+
+// startupFailed reports the one case that must tear the UI down immediately.
+func (d doneMsg) startupFailed() bool { return d.err != nil && !d.observed }
 
 // model is the package-private Bubble Tea model. It satisfies tea.Model
 // with value receivers (the bubbletea convention); Update returns the
@@ -94,6 +109,12 @@ type model struct {
 	expanded      bool
 	quitting      bool
 	done          bool // loop.Run returned; keep rendering for review, quit only on q/ctrl+c
+
+	// finishErr is the error loop.Run returned, if any, and startupFail marks
+	// the subset of those where the loop never got as far as an iteration —
+	// the badge distinguishes "failed to start" from "errored mid-run".
+	finishErr   error
+	startupFail bool
 
 	// confirmingQuit is set while the yes/no quit prompt is shown. q and
 	// ctrl+c arm it instead of quitting outright; only an explicit y/Y (or a
@@ -230,6 +251,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case doneMsg:
 		m.done = true // run finished; keep rendering so the user can scroll/review
+		m.finishErr = msg.err
+		m.startupFail = msg.startupFailed()
+		if m.startupFail {
+			// Nothing ran, so there is nothing to review: tear down now and let
+			// the orchestration flush the captured notice to the real stderr.
+			m.quitting = true
+			return m, tea.Quit
+		}
 		return m, nil // NO tea.Quit — the user quits with q/ctrl+c
 	}
 	return m, nil
@@ -399,7 +428,10 @@ func (m model) headerView() string {
 }
 
 // doneBadge renders the terminal-state badge shown once the run has finished.
-// done{*} is green, failed{*} red, anything else (e.g. a mid-run quit) a faint
+// An error from loop.Run wins over the FSM state — it is why the run stopped,
+// and the state would otherwise render as a misleading "■ stopped" (which is
+// exactly what a lock-contention refusal used to look like). done{*} is green,
+// failed{*} and errors red, anything else (e.g. a mid-run quit) a faint
 // "stopped"; the reason, when present, is parenthesized.
 func (m model) doneBadge() seg {
 	st := string(m.snap.State)
@@ -409,6 +441,13 @@ func (m model) doneBadge() seg {
 	}
 	fg := func(c string) func(string) string {
 		return func(s string) string { return m.r.NewStyle().Foreground(lipgloss.Color(c)).Render(s) }
+	}
+	if m.finishErr != nil {
+		what := "✗ error: "
+		if m.startupFail {
+			what = "✗ failed to start: "
+		}
+		return seg{text: what + m.finishErr.Error(), color: fg("1")}
 	}
 	switch {
 	case strings.HasPrefix(st, "done"):

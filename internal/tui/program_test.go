@@ -74,7 +74,7 @@ func TestProgramObserverImplementsLoopObserver(t *testing.T) {
 	}
 }
 
-// TestDoneThenQuitUnblocksRun verifies the loop-done path: Done() marks the run
+// TestDoneThenQuitUnblocksRun verifies the loop-done path: Finish marks the run
 // finished but does NOT quit (the run stays on screen for review); Run unblocks
 // only on a subsequent user quit keypress.
 func TestDoneThenQuitUnblocksRun(t *testing.T) {
@@ -83,12 +83,12 @@ func TestDoneThenQuitUnblocksRun(t *testing.T) {
 
 	errc := runDone(pg)
 	pg.p.Send(tea.WindowSizeMsg{Width: 100, Height: 24})
-	pg.Done()
+	pg.Finish(nil, true)
 
-	// Done alone must not unblock Run — the program keeps rendering.
+	// Finish alone must not unblock Run — the program keeps rendering.
 	select {
 	case <-errc:
-		t.Fatal("Run returned after Done(); it must stay alive until the user quits")
+		t.Fatal("Run returned after Finish; it must stay alive until the user quits")
 	case <-time.After(100 * time.Millisecond):
 	}
 
@@ -101,7 +101,7 @@ func TestDoneThenQuitUnblocksRun(t *testing.T) {
 // TestProgramRendersMetricsToErrOut is the integration assertion: with a real
 // renderer pointed at the injected ErrOut, a Snapshot pushed through the
 // Observer bridge renders into the panel, and nothing lands on Out (stdout's
-// stand-in). Quit is driven by a Ctrl-C keypress (Done() no longer quits).
+// stand-in). Quit is driven by a Ctrl-C keypress (a clean Finish no longer quits).
 func TestProgramRendersMetricsToErrOut(t *testing.T) {
 	ios, bufs := iostreams.Test()
 	pg := New(ios, loop.Snapshot{}, Header{}, DefaultLogCaps(), tea.WithInput(&bytes.Buffer{}))

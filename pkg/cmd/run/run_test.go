@@ -10,6 +10,7 @@ import (
 
 	"github.com/jcrussell/ralph/internal/config"
 	"github.com/jcrussell/ralph/internal/fsm"
+	"github.com/jcrussell/ralph/internal/lock"
 	"github.com/jcrussell/ralph/internal/loop"
 	"github.com/jcrussell/ralph/internal/tui"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
@@ -268,6 +269,12 @@ type fakeUI struct {
 
 	doneOnce sync.Once
 	doneCh   chan struct{}
+
+	// finishErr / finishObserved record the single Finish call orchestrate is
+	// required to make on every exit path, including the panic path.
+	finishCalls    int
+	finishErr      error
+	finishObserved bool
 }
 
 func newFakeUI(quitEarly bool) *fakeUI {
@@ -282,7 +289,13 @@ func newFakeUI(quitEarly bool) *fakeUI {
 
 func (f *fakeUI) LoopIO() *iostreams.IOStreams { return f.ios }
 func (f *fakeUI) Observer() loop.Observer      { return noopObserver{} }
-func (f *fakeUI) Done()                        { f.doneOnce.Do(func() { close(f.doneCh) }) }
+func (f *fakeUI) Finish(err error, observed bool) {
+	f.doneOnce.Do(func() {
+		f.finishCalls++
+		f.finishErr, f.finishObserved = err, observed
+		close(f.doneCh)
+	})
+}
 
 func (f *fakeUI) Run() error {
 	if f.quitEarly {
@@ -303,6 +316,62 @@ func (f *fakeUI) Tail() []string {
 type noopObserver struct{}
 
 func (noopObserver) Observe(loop.Snapshot) {}
+
+// TestOrchestrateStartupFailure covers the lock-contention shape (ralph-62i):
+// loop.Run returns an infrastructure error before any iteration is observed, so
+// Finish must report it as a startup failure (observed=false) — that is what
+// tells the TUI to tear down instead of parking on a "stopped" badge with the
+// reason trapped behind a keypress. The error still propagates to the caller.
+func TestOrchestrateStartupFailure(t *testing.T) {
+	ui := newFakeUI(false)
+	run := func(context.Context, loop.Options) (fsm.Outcome, error) {
+		return fsm.Outcome{}, fmt.Errorf("loop: acquire lock: %w", lock.ErrHeld)
+	}
+	err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{})
+	if !errors.Is(err, lock.ErrHeld) {
+		t.Fatalf("orchestrate = %v, want the lock error", err)
+	}
+	if ui.finishCalls != 1 {
+		t.Errorf("Finish called %d times, want exactly 1", ui.finishCalls)
+	}
+	if !errors.Is(ui.finishErr, lock.ErrHeld) || ui.finishObserved {
+		t.Errorf("Finish(%v, %v), want (lock error, false)", ui.finishErr, ui.finishObserved)
+	}
+}
+
+// TestOrchestrateMidRunErrorIsObserved is the other half: an error that lands
+// after the loop has produced iterations (a transient git/bd failure inside
+// routing, a cancelled context) must NOT be reported as a startup failure — the
+// finished screen stays up for review. The observed flag comes from the wrapped
+// Observer, so this also pins that orchestrate wires it into loop.Options.
+func TestOrchestrateMidRunErrorIsObserved(t *testing.T) {
+	ui := newFakeUI(false)
+	run := func(_ context.Context, o loop.Options) (fsm.Outcome, error) {
+		o.Observer.Observe(loop.Snapshot{Iter: 3})
+		return fsm.Outcome{}, errors.New("bd exploded")
+	}
+	err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{})
+	if err == nil {
+		t.Fatal("orchestrate = nil, want the loop error")
+	}
+	if !ui.finishObserved {
+		t.Error("Finish observed = false, want true (the loop reported an iteration)")
+	}
+}
+
+// TestOrchestrateSeedSnapshotIsNotAnIteration guards the boundary: the pre-run
+// seed Snapshot carries Iter 0, so it must not count as "the loop started".
+func TestOrchestrateSeedSnapshotIsNotAnIteration(t *testing.T) {
+	ui := newFakeUI(false)
+	run := func(_ context.Context, o loop.Options) (fsm.Outcome, error) {
+		o.Observer.Observe(loop.Snapshot{Iter: 0})
+		return fsm.Outcome{}, errors.New("died before iterating")
+	}
+	_ = orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{})
+	if ui.finishObserved {
+		t.Error("Finish observed = true for an Iter 0 snapshot, want false")
+	}
+}
 
 // TestOrchestrateLoopCompletes is acceptance (a): the loop reaches a terminal
 // outcome, signals Done so the UI quits, and the collected outcome maps to the

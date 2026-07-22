@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"os"
 	"strconv"
 	"strings"
@@ -688,5 +689,48 @@ func TestQuotaWaitBadgeFloorsToResuming(t *testing.T) {
 	view := m.View()
 	if !strings.Contains(view, "resuming…") || strings.Contains(view, "resuming in") {
 		t.Errorf("badge should show bare 'resuming…' at zero:\n%s", view)
+	}
+}
+
+// TestStartupFailureQuitsWithBadge covers ralph-62i: a loop.Run error with no
+// iteration ever observed is a startup failure (lock contention, a terminal
+// fsm.json). There is nothing on screen to review, so the model must quit
+// immediately and badge the real reason — the old behavior parked on the
+// zero-value "■ stopped" badge with the error trapped behind a keypress.
+func TestStartupFailureQuitsWithBadge(t *testing.T) {
+	m := sized(t, 100, 24)
+	m, cmd := step(t, m, doneMsg{err: errors.New("lock: held by another process: pid 1558335"), observed: false})
+
+	if !m.done || !m.quitting {
+		t.Fatalf("done = %v, quitting = %v; want both true", m.done, m.quitting)
+	}
+	if cmd == nil {
+		t.Fatal("startup failure must return tea.Quit")
+	}
+	view := m.View()
+	if !strings.Contains(view, "failed to start") || !strings.Contains(view, "pid 1558335") {
+		t.Errorf("View should badge the startup error, got:\n%s", view)
+	}
+	if strings.Contains(view, "stopped") {
+		t.Errorf("startup failure must not render the empty-state badge, got:\n%s", view)
+	}
+}
+
+// TestMidRunErrorKeepsScreenForReview is the other half: once the loop has
+// reported iterations, an error is badged but the run stays on screen — the
+// review affordance the model was built for.
+func TestMidRunErrorKeepsScreenForReview(t *testing.T) {
+	m := sized(t, 100, 24)
+	m, _ = step(t, m, metricsMsg{s: fullSnapshot()})
+	m, cmd := step(t, m, doneMsg{err: errors.New("bd exploded"), observed: true})
+
+	if m.quitting {
+		t.Error("a mid-run error must not quit; the finished screen stays up")
+	}
+	if cmd != nil {
+		t.Errorf("a mid-run error must not return tea.Quit, got %T", cmd())
+	}
+	if view := m.View(); !strings.Contains(view, "✗ error: bd exploded") {
+		t.Errorf("View should badge the mid-run error, got:\n%s", view)
 	}
 }
