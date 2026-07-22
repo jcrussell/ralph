@@ -358,3 +358,40 @@ func TestIDFormat(t *testing.T) {
 		t.Errorf("parseID empty for %q", r.ID())
 	}
 }
+
+// Caps is a pointer so "not recorded" (a manifest written before the field
+// existed) stays distinguishable from "recorded as unlimited" — status keys the
+// difference off nil, so a round-trip that collapsed them would misreport an
+// old run as uncapped.
+func TestManifestCapsRoundTrip(t *testing.T) {
+	repo := t.TempDir()
+	r, err := Begin(repo)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+
+	m, err := r.ReadManifest()
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if m.Caps != nil {
+		t.Errorf("fresh manifest Caps = %+v, want nil (nothing recorded yet)", m.Caps)
+	}
+
+	if uerr := r.UpdateManifest(func(m *Manifest) {
+		m.Caps = &Caps{MaxIterations: 0, MaxCostUSD: 12.5, MaxWallclockSecs: 3600}
+	}); uerr != nil {
+		t.Fatalf("UpdateManifest: %v", uerr)
+	}
+
+	got, err := r.ReadManifest()
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if got.Caps == nil {
+		t.Fatal("Caps = nil after stamping")
+	}
+	if *got.Caps != (Caps{MaxIterations: 0, MaxCostUSD: 12.5, MaxWallclockSecs: 3600}) {
+		t.Errorf("Caps = %+v, want {0 12.5 3600}", *got.Caps)
+	}
+}

@@ -581,3 +581,77 @@ func itoaInt(n int) string {
 	}
 	return out
 }
+
+// TestRun_StampsEffectiveCapsOnManifest pins ralph-594: the caps the loop is
+// actually running under are recorded on the run manifest, because CLI
+// overrides (`run --unlimited`, `review --max-rounds`) never reach config on
+// disk — an out-of-process reader like `ralph status` has no other way to know.
+func TestRun_StampsEffectiveCapsOnManifest(t *testing.T) {
+	repo := scaffoldRepo(t)
+	opts := baseOpts(t, repo)
+	opts.Runner = &fakeRunner{}
+	opts.Clock = newFakeClock()
+	opts.Cfg.Loop.MaxIterations = 0 // what --unlimited leaves behind
+	opts.Cfg.Budget.MaxCostUSD = 12.5
+
+	if _, err := Run(context.Background(), opts); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	r, err := runs.Latest(repo)
+	if err != nil {
+		t.Fatalf("runs.Latest: %v", err)
+	}
+	m, err := r.ReadManifest()
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if m.Caps == nil {
+		t.Fatal("manifest.Caps = nil, want the effective caps recorded")
+	}
+	if m.Caps.MaxIterations != 0 || m.Caps.MaxCostUSD != 12.5 {
+		t.Errorf("Caps = %+v, want {MaxIterations:0 MaxCostUSD:12.5}", *m.Caps)
+	}
+}
+
+// TestRun_RestampsCapsOnResume is the half that forces the stamp into Run
+// rather than runs.Begin: openOrBeginRun reuses an open run when the FSM is
+// mid-loop, so a resume under different caps must overwrite what the earlier
+// invocation recorded instead of inheriting it.
+func TestRun_RestampsCapsOnResume(t *testing.T) {
+	repo := scaffoldRepo(t)
+
+	// Seed an open run stamped with the old cap, plus a mid-loop fsm.json so
+	// openOrBeginRun reuses it.
+	prior, err := runs.Begin(repo)
+	if err != nil {
+		t.Fatalf("seed Begin: %v", err)
+	}
+	if uerr := prior.UpdateManifest(func(m *runs.Manifest) {
+		m.Caps = &runs.Caps{MaxIterations: 30}
+	}); uerr != nil {
+		t.Fatalf("seed caps: %v", uerr)
+	}
+	f := fsm.Fresh()
+	f.Outcome = fsm.Outcome{State: fsm.StateClean}
+	f.Iter = 1
+	if serr := f.Save(repo); serr != nil {
+		t.Fatalf("seed fsm.Save: %v", serr)
+	}
+
+	opts := baseOpts(t, repo)
+	opts.Runner = &fakeRunner{}
+	opts.Clock = newFakeClock()
+	opts.Cfg.Loop.MaxIterations = 0 // resumed with --unlimited
+	if _, rerr := Run(context.Background(), opts); rerr != nil {
+		t.Fatalf("Run: %v", rerr)
+	}
+
+	m, err := prior.ReadManifest()
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if m.Caps == nil || m.Caps.MaxIterations != 0 {
+		t.Errorf("Caps = %+v, want MaxIterations 0 (the resume's cap, not the seeded 30)", m.Caps)
+	}
+}

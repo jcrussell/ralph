@@ -14,7 +14,7 @@ The repo-level file is scaffolded by `ralph init` with every section present and
 
 | Key                      | Type    | Default | Meaning |
 |--------------------------|---------|---------|---------|
-| `max_iterations`         | int     | `30`    | Hard cap on iterations. `0` = unlimited (not recommended without a budget cap). When `fsm.Iter >= max_iterations`, the FSM routes to `done{iter_cap}`. |
+| `max_iterations`         | int     | `30`    | Hard cap on iterations. `0` = unlimited (not recommended without a budget cap). When `fsm.Iter >= max_iterations`, the FSM routes to `done{iter_cap}`. CLI overrides (`run --max-iterations`, `run --unlimited`, `review --max-rounds`) apply to one invocation only; the effective value is recorded on the run manifest so `ralph status` reports the cap the loop is actually running under rather than the one on disk. |
 | `session_timeout_secs`   | int     | `3600`  | Per-iteration runner timeout. ralph kills the runner when exceeded; the iteration is classified as `timeout`. |
 | `memory_limit_bytes`     | string  | `"7G"`  | systemd-run memory cap for the runner cgroup. Suffixes `K`/`M`/`G`/`T` use 1024 multipliers; a trailing `B` is accepted. Empty or `"0"` disables the cap. |
 | `sleep_between_secs`     | int     | `5`     | Sleep between iterations. Backoff modes (rate-limit, OOM, timeout) override this with their own durations. |

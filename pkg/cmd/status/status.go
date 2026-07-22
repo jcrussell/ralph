@@ -86,14 +86,14 @@ type View struct {
 	State                   string            `json:"state"`
 	Reason                  string            `json:"reason,omitempty"`
 	Iter                    int               `json:"iter"`
-	MaxIterations           int               `json:"max_iterations,omitempty"`
+	MaxIterations           int               `json:"max_iterations"`
 	ReviewMode              bool              `json:"review_mode"`
 	ReviewBranch            string            `json:"review_branch,omitempty"`
 	ReviewBase              string            `json:"review_base,omitempty"`
 	CumulativeCostUSD       float64           `json:"cumulative_cost_usd"`
-	MaxCostUSD              float64           `json:"max_cost_usd,omitempty"`
+	MaxCostUSD              float64           `json:"max_cost_usd"`
 	CumulativeWallclockSecs int               `json:"cumulative_wallclock_secs"`
-	MaxWallclockSecs        int               `json:"max_wallclock_secs,omitempty"`
+	MaxWallclockSecs        int               `json:"max_wallclock_secs"`
 	ConsecutiveDirty        int               `json:"consecutive_dirty"`
 	LastGateResult          string            `json:"last_gate_result,omitempty"`
 	Transitions             []runs.Transition `json:"transitions,omitempty"`
@@ -122,6 +122,9 @@ func runStatus(_ context.Context, opts *Options) error {
 			return terr
 		}
 		v.Transitions = tailN(all, opts.Tail)
+		if m, merr := r.ReadManifest(); merr == nil {
+			applyRunCaps(&v, m)
+		}
 	} else if !errors.Is(lerr, runs.ErrNoRuns) {
 		return lerr
 	}
@@ -149,6 +152,22 @@ func buildView(f *fsm.FSM, cfg *config.Config) View {
 		ConsecutiveDirty:        f.ConsecutiveDirty,
 		LastGateResult:          f.LastGateResult,
 	}
+}
+
+// applyRunCaps overrides the config-derived caps with the ones the latest run
+// recorded, but only while that run is still open (no ExitOutcome). CLI
+// overrides like `run --unlimited` and `review --max-rounds` never reach disk
+// as config, so config alone would have status reporting "iter 7 / 30" at a
+// loop that is running uncapped. Once the run has finished, config is again the
+// truth — it is what the *next* run will use. A nil Caps is a manifest written
+// before the field existed; leave the config values in place.
+func applyRunCaps(v *View, m *runs.Manifest) {
+	if m == nil || m.Caps == nil || m.ExitOutcome != nil {
+		return
+	}
+	v.MaxIterations = m.Caps.MaxIterations
+	v.MaxCostUSD = m.Caps.MaxCostUSD
+	v.MaxWallclockSecs = m.Caps.MaxWallclockSecs
 }
 
 func tailN(all []runs.Transition, n int) []runs.Transition {

@@ -54,6 +54,26 @@ type Manifest struct {
 	StateCounts             map[string]int `json:"state_counts"`
 	CumulativeCostUSD       float64        `json:"cumulative_cost_usd"`
 	CumulativeWallclockSecs int            `json:"cumulative_wallclock_secs"`
+
+	// Caps are the effective limits this invocation is running under,
+	// after CLI overrides (`run --unlimited`, `review --max-rounds`) have
+	// been folded onto config. Recorded because those overrides live only
+	// in the orchestrator's memory: an out-of-process reader like `ralph
+	// status` would otherwise re-load config from disk and report a cap
+	// the running loop is not using. 0 within Caps means "no cap"; a nil
+	// Caps means "not recorded" (a manifest written before this field
+	// existed), which is why it is a pointer — 0 and unknown must not
+	// collapse, or an old manifest would read as an unlimited run.
+	Caps *Caps `json:"caps,omitempty"`
+}
+
+// Caps is the effective limit set a run is executing under. Mirrors the
+// config knobs it is copied from ([loop] max_iterations, [budget]
+// max_cost_usd / max_wallclock_secs); 0 means unlimited in each.
+type Caps struct {
+	MaxIterations    int     `json:"max_iterations"`
+	MaxCostUSD       float64 `json:"max_cost_usd"`
+	MaxWallclockSecs int     `json:"max_wallclock_secs"`
 }
 
 // Transition is one row in transitions.jsonl.

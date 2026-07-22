@@ -167,6 +167,20 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 	if err != nil {
 		return fsm.Outcome{}, err
 	}
+
+	// Record the caps this invocation is actually running under. Done here,
+	// not in runs.Begin, because openOrBeginRun REUSES an open run when the FSM
+	// is mid-loop: a `--unlimited` resume after a --once exit or a crash must
+	// overwrite the caps the earlier invocation stamped, not inherit them.
+	if err := r.UpdateManifest(func(m *runs.Manifest) {
+		m.Caps = &runs.Caps{
+			MaxIterations:    opts.Cfg.Loop.MaxIterations,
+			MaxCostUSD:       opts.Cfg.Budget.MaxCostUSD,
+			MaxWallclockSecs: opts.Cfg.Budget.MaxWallclockSecs,
+		}
+	}); err != nil {
+		return fsm.Outcome{}, fmt.Errorf("loop: stamp caps: %w", err)
+	}
 	finalOutcome := f.Outcome
 	defer func() {
 		// Only record an ExitOutcome for runs that actually reached a

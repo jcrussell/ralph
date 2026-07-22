@@ -214,3 +214,104 @@ func TestNewCmdStatusFlags(t *testing.T) {
 		t.Error("--tail flag missing")
 	}
 }
+
+// stampCaps records caps on the latest run's manifest, optionally closing the
+// run, the way loop.Run does at entry and Finalize does at exit.
+func stampCaps(t *testing.T, repo string, caps *runs.Caps, closed bool) {
+	t.Helper()
+	r, err := runs.Latest(repo)
+	if err != nil {
+		t.Fatalf("runs.Latest: %v", err)
+	}
+	if err := r.UpdateManifest(func(m *runs.Manifest) {
+		m.Caps = caps
+		if closed {
+			m.ExitOutcome = &fsm.Outcome{State: fsm.StateDone, Reason: fsm.ReasonQueueEmpty}
+		}
+	}); err != nil {
+		t.Fatalf("UpdateManifest: %v", err)
+	}
+}
+
+// The point of ralph-594: a run started with --unlimited reports "unlimited"
+// even though config on disk still says 30. Without the manifest, status has no
+// way to know about an override that only ever lived in the loop's memory.
+func TestStatusPrefersOpenRunCaps(t *testing.T) {
+	state := fsm.Fresh()
+	state.State = fsm.StateClean
+	state.Iter = 7
+	repo := scaffold(t, state, true, nil)
+	stampCaps(t, repo, &runs.Caps{MaxIterations: 0}, false)
+
+	f, bufs := newFactory(t, repo)
+	if err := runStatus(context.Background(), &Options{F: f, Tail: 5}); err != nil {
+		t.Fatalf("runStatus: %v", err)
+	}
+	if out := bufs.Out.String(); !strings.Contains(out, "iter:              7 / unlimited") {
+		t.Errorf("want the run's uncapped iter line, got:\n%s", out)
+	}
+}
+
+// Once the run has ended, config is the truth again — it is what the next run
+// will use, so continuing to echo the finished run's override would mislead.
+func TestStatusFallsBackToConfigForClosedRun(t *testing.T) {
+	state := fsm.Fresh()
+	state.State = fsm.StateDone
+	state.Reason = fsm.ReasonQueueEmpty
+	state.Iter = 7
+	repo := scaffold(t, state, true, nil)
+	stampCaps(t, repo, &runs.Caps{MaxIterations: 0}, true)
+
+	f, bufs := newFactory(t, repo)
+	if err := runStatus(context.Background(), &Options{F: f, Tail: 5}); err != nil {
+		t.Fatalf("runStatus: %v", err)
+	}
+	if out := bufs.Out.String(); !strings.Contains(out, "iter:              7 / 30") {
+		t.Errorf("want the config cap for a finished run, got:\n%s", out)
+	}
+}
+
+// A manifest predating the Caps field must not read as an unlimited run: nil
+// and 0 are different answers, which is why Caps is a pointer.
+func TestStatusIgnoresManifestWithoutCaps(t *testing.T) {
+	state := fsm.Fresh()
+	state.State = fsm.StateClean
+	state.Iter = 7
+	repo := scaffold(t, state, true, nil)
+
+	f, bufs := newFactory(t, repo)
+	if err := runStatus(context.Background(), &Options{F: f, Tail: 5}); err != nil {
+		t.Fatalf("runStatus: %v", err)
+	}
+	if out := bufs.Out.String(); !strings.Contains(out, "iter:              7 / 30") {
+		t.Errorf("want the config cap when the manifest records none, got:\n%s", out)
+	}
+}
+
+// --json must emit an explicit 0 for an uncapped run rather than dropping the
+// key, so a script can tell "unlimited" from "field absent".
+func TestStatusJSONEmitsZeroCaps(t *testing.T) {
+	state := fsm.Fresh()
+	state.State = fsm.StateClean
+	repo := scaffold(t, state, true, nil)
+	stampCaps(t, repo, &runs.Caps{}, false)
+
+	f, bufs := newFactory(t, repo)
+	if err := runStatus(context.Background(), &Options{F: f, JSON: true, Tail: 5}); err != nil {
+		t.Fatalf("runStatus: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(bufs.Out.Bytes(), &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, k := range []string{"max_iterations", "max_cost_usd", "max_wallclock_secs"} {
+		v, ok := raw[k]
+		if !ok {
+			t.Errorf("%s missing from --json; unlimited must be an explicit 0", k)
+			continue
+		}
+		if v != float64(0) {
+			t.Errorf("%s = %v, want 0", k, v)
+		}
+	}
+}
