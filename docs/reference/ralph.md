@@ -50,7 +50,7 @@ docs/concepts/configuration.md for the .ralph/config.toml schema.
 * [ralph init](ralph_init.md)	 - Scaffold .ralph/ in the current repo
 * [ralph logs](ralph_logs.md)	 - Stream the per-iteration log
 * [ralph prompt](ralph_prompt.md)	 - Inspect ralph prompts
-* [ralph report](ralph_report.md)	 - Markdown summary of orchestrator activity
+* [ralph report](ralph_report.md)	 - Activity summary (markdown or JSON) over a time window
 * [ralph review](ralph_review.md)	 - Run the ralph loop in review mode against a branch
 * [ralph run](ralph_run.md)	 - Run the ralph loop in normal mode
 * [ralph status](ralph_status.md)	 - Show ralph's current FSM state, counters, and recent transitions

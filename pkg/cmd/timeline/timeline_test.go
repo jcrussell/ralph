@@ -171,19 +171,44 @@ func TestTimeline_NoTransitionsFile(t *testing.T) {
 func TestTimeline_JSONMode(t *testing.T) {
 	repo := scaffoldRunWith(t, []runs.Transition{
 		{TS: time.Unix(1, 0).UTC(), Iter: 1, From: "start", To: "clean"},
+		{TS: time.Unix(2, 0).UTC(), Iter: 2, From: "clean", To: "dirty"},
 	}, nil)
 
 	f, bufs := factoryAt(t, repo)
-	if err := run(context.Background(), &Options{F: f, JSON: true}); err != nil {
+	exp, err := cmdutil.NewExporter(strings.Join(timelineFields, ","), "", "", timelineFields)
+	if err != nil {
+		t.Fatalf("NewExporter: %v", err)
+	}
+	if err := run(context.Background(), &Options{F: f, Exporter: exp}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	out := strings.TrimSpace(bufs.Out.String())
-	var got runs.Transition
-	if err := json.Unmarshal([]byte(out), &got); err != nil {
-		t.Fatalf("unmarshal JSON line %q: %v", out, err)
+	// --json now emits a single JSON array (was newline-delimited JSONL).
+	var got []runs.Transition
+	if err := json.Unmarshal(bufs.Out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal JSON array %q: %v", bufs.Out.String(), err)
 	}
-	if got.Iter != 1 || got.From != "start" || got.To != "clean" {
-		t.Errorf("JSON row = %+v, want iter=1 start→clean", got)
+	if len(got) != 2 || got[0].Iter != 1 || got[0].To != "clean" || got[1].To != "dirty" {
+		t.Errorf("JSON array = %+v, want 2 rows start→clean, clean→dirty", got)
+	}
+}
+
+// TestTimeline_JQ exercises the built-in jq path over the transition array.
+func TestTimeline_JQ(t *testing.T) {
+	repo := scaffoldRunWith(t, []runs.Transition{
+		{TS: time.Unix(1, 0).UTC(), Iter: 1, From: "start", To: "clean"},
+		{TS: time.Unix(2, 0).UTC(), Iter: 2, From: "clean", To: "dirty"},
+	}, nil)
+
+	f, bufs := factoryAt(t, repo)
+	exp, err := cmdutil.NewExporter(strings.Join(timelineFields, ","), `.[] | select(.to=="dirty") | .iter`, "", timelineFields)
+	if err != nil {
+		t.Fatalf("NewExporter: %v", err)
+	}
+	if err := run(context.Background(), &Options{F: f, Exporter: exp}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := strings.TrimSpace(bufs.Out.String()); got != "2" {
+		t.Errorf("jq select = %q, want %q", got, "2")
 	}
 }
 

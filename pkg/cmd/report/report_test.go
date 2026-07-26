@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -118,6 +119,136 @@ func TestRenderEmpty(t *testing.T) {
 	}
 	if !strings.Contains(out, "no bead activity") {
 		t.Errorf("expected 'no bead activity' placeholder")
+	}
+}
+
+// newFactory wires a bare Factory over iostreams.Test() pointing at repo.
+func newFactory(t *testing.T, repo string) (*cmdutil.Factory, *iostreams.TestBuffers) {
+	t.Helper()
+	io, bufs := iostreams.Test()
+	rootFn := func() (string, error) { return repo, nil }
+	return &cmdutil.Factory{IOStreams: io, RepoRoot: rootFn, Paths: cmdutil.LazyPaths(rootFn)}, bufs
+}
+
+// scaffoldBeads seeds a summary.jsonl with one in-window record closing two
+// beads, so the work_done section has content.
+func scaffoldBeads(t *testing.T, repo string) {
+	t.Helper()
+	logs := filepath.Join(repo, ".ralph/state/logs")
+	if err := os.MkdirAll(logs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := json.Marshal(map[string]any{
+		"iter":      1,
+		"state":     "clean",
+		"timestamp": time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339),
+		"bd_diff":   map[string][]string{"closed": {"a-1", "a-2"}},
+	})
+	if err := os.WriteFile(filepath.Join(logs, "summary.jsonl"), append(rec, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReportSectionFilter(t *testing.T) {
+	repo := t.TempDir()
+	scaffoldBeads(t, repo)
+	f, bufs := newFactory(t, repo)
+
+	opts := &Options{F: f, Since: "24h", Sections: []string{"commits"}}
+	if err := run(context.Background(), opts); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	out := bufs.Out.String()
+	if !strings.Contains(out, "## Commits") {
+		t.Errorf("commits section missing:\n%s", out)
+	}
+	for _, absent := range []string{"## Work done", "## Incidents", "## State distribution", "## Cost"} {
+		if strings.Contains(out, absent) {
+			t.Errorf("section %q should be filtered out:\n%s", absent, out)
+		}
+	}
+}
+
+func TestReportJSON(t *testing.T) {
+	repo := t.TempDir()
+	scaffoldBeads(t, repo)
+	f, bufs := newFactory(t, repo)
+
+	exp, err := cmdutil.NewExporter(strings.Join(reportFields, ","), "", "", reportFields)
+	if err != nil {
+		t.Fatalf("NewExporter: %v", err)
+	}
+	if err := run(context.Background(), &Options{F: f, Since: "24h", Exporter: exp}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var rpt Report
+	if err := json.Unmarshal(bufs.Out.Bytes(), &rpt); err != nil {
+		t.Fatalf("decode JSON: %v\n%s", err, bufs.Out.String())
+	}
+	if len(rpt.WorkDone.Closed) != 2 || rpt.WorkDone.Closed[0] != "a-1" {
+		t.Errorf("work_done.closed = %v, want [a-1 a-2]", rpt.WorkDone.Closed)
+	}
+	// git is unavailable in this non-git tempdir, but commits must still
+	// serialize as [] (non-nil), not null — so `.commits[]` never errors.
+	if rpt.Commits == nil {
+		t.Error("commits serialized as null; want [] even when git is unavailable")
+	}
+}
+
+// TestReportJQCommitsCount is the headline use case: "how many commits has
+// ralph made" via --json --jq '.commits | length'.
+func TestReportJQCommitsCount(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q", "-b", "main")
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	runGit(t, repo, "config", "user.name", "test")
+	runGit(t, repo, "commit", "--allow-empty", "-q", "-m", "one")
+	runGit(t, repo, "commit", "--allow-empty", "-q", "-m", "two")
+	runGit(t, repo, "commit", "--allow-empty", "-q", "-m", "three")
+
+	f, bufs := newFactory(t, repo)
+	exp, err := cmdutil.NewExporter(strings.Join(reportFields, ","), ".commits | length", "", reportFields)
+	if err != nil {
+		t.Fatalf("NewExporter: %v", err)
+	}
+	if err := run(context.Background(), &Options{F: f, Since: "24h", Exporter: exp}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := strings.TrimSpace(bufs.Out.String()); got != "3" {
+		t.Errorf("commit count = %q, want %q\n(full output: %s)", got, "3", bufs.Out.String())
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+}
+
+// TestReportSectionAndJSONExclusive verifies cobra rejects --section with --json.
+func TestReportSectionAndJSONExclusive(t *testing.T) {
+	f := &cmdutil.Factory{IOStreams: iostreams.System()}
+	cmd := NewCmdReport(f, func(context.Context, *Options) error { return nil })
+	cmd.SetArgs([]string{"--section", "commits", "--json", "commits"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("want error for --section with --json, got nil")
+	}
+}
+
+func TestReportInvalidSection(t *testing.T) {
+	f := &cmdutil.Factory{IOStreams: iostreams.System()}
+	cmd := NewCmdReport(f, func(context.Context, *Options) error { return nil })
+	cmd.SetArgs([]string{"--section", "bogus"})
+	err := cmd.Execute()
+	var fe *cmdutil.FlagError
+	if !errors.As(err, &fe) {
+		t.Errorf("err = %v, want FlagError", err)
 	}
 }
 

@@ -14,9 +14,10 @@ transitions.jsonl and renders a single-screen dashboard:
   - consecutive dirty streak
   - the last N transitions (default 5)
 
-Pass --json to emit the same data in machine-readable form. The JSON
-shape is stable enough to script against; treat unknown fields as
-informational.
+Pass --json with a comma-separated field list to emit machine-readable
+output (the flag help lists the available fields). --jq filters that JSON
+with a built-in jq engine (no external jq needed); --template formats it
+with a Go template.
 
 ```
 ralph status [flags]
@@ -28,8 +29,11 @@ ralph status [flags]
   # human-readable (default)
   ralph status
 
-  # JSON for scripts
-  ralph status --json | jq '.state, .iter'
+  # JSON with the fields you want
+  ralph status --json state,iter
+
+  # built-in jq (no external jq binary required)
+  ralph status --json state --jq '.state'
 
   # last 20 transitions
   ralph status --tail=20
@@ -38,9 +42,11 @@ ralph status [flags]
 ### Options
 
 ```
-  -h, --help       help for status
-      --json       emit machine-readable JSON
-      --tail int   number of recent transitions to render (default 5)
+  -h, --help              help for status
+      --jq string         filter --json output with a jq expression
+      --json string       output JSON with the given comma-separated fields (available: run_id,state,reason,iter,max_iterations,review_mode,review_branch,review_base,cumulative_cost_usd,max_cost_usd,cumulative_wallclock_secs,max_wallclock_secs,consecutive_dirty,last_gate_result,transitions)
+      --tail int          number of recent transitions to render (default 5)
+      --template string   format --json output with a Go template
 ```
 
 ### Options inherited from parent commands

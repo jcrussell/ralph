@@ -10,7 +10,6 @@ package gc
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -36,7 +35,10 @@ type Options struct {
 	F         *cmdutil.Factory
 	OlderThan string
 	Force     bool
-	JSON      bool
+
+	// Exporter is non-nil when --json is set; it renders the Plan as JSON,
+	// optionally post-filtered by --jq or --template.
+	Exporter cmdutil.Exporter
 
 	now func() time.Time // test seam; defaults to time.Now
 	dur time.Duration    // parsed from OlderThan by Validate
@@ -86,7 +88,10 @@ timestamps are left alone for manual inspection.`,
   ralph gc --older-than 30d --force
 
   # machine-readable plan
-  ralph gc --older-than 2w --json`,
+  ralph gc --older-than 2w --json runs,iterations,incidents,total_bytes,total_count
+
+  # just the byte total, via built-in jq
+  ralph gc --older-than 2w --json total_bytes --jq '.total_bytes'`,
 		RunE: func(c *cobra.Command, args []string) error {
 			if err := opts.Validate(); err != nil {
 				return err
@@ -99,8 +104,17 @@ timestamps are left alone for manual inspection.`,
 	}
 	cmd.Flags().StringVar(&opts.OlderThan, "older-than", "", "delete state older than this age (e.g. 30d, 2w, 72h); required")
 	cmd.Flags().BoolVarP(&opts.Force, "force", "f", false, "actually delete; without it gc only prints what would be removed")
-	cmd.Flags().BoolVar(&opts.JSON, "json", false, "emit machine-readable JSON")
+	cmdutil.AddJSONFlags(cmd, &opts.Exporter, gcFields)
 	return cmd
+}
+
+// gcFields is the --json field allowlist, derived from Plan's json tags.
+var gcFields = cmdutil.JSONFieldNames(Plan{})
+
+// ExportData satisfies cmdutil.RowExporter, shaping the Plan to the requested
+// --json fields.
+func (pl Plan) ExportData(fields []string) map[string]any {
+	return cmdutil.StructFields(pl, fields)
 }
 
 // Plan is the set of deletion targets gc found, grouped by category. It
@@ -353,13 +367,10 @@ func deleteTargets(ctx context.Context, pl *Plan) {
 // --- rendering & helpers ---
 
 func render(opts *Options, pl *Plan) error {
-	out := opts.F.IOStreams.Out
-	if opts.JSON {
-		enc := json.NewEncoder(out)
-		enc.SetIndent("", "  ")
-		return enc.Encode(pl)
+	if opts.Exporter != nil {
+		return cmdutil.WriteRow(opts.F.IOStreams, opts.Exporter, *pl)
 	}
-	return writeText(out, pl)
+	return writeText(opts.F.IOStreams.Out, pl)
 }
 
 func writeText(w io.Writer, pl *Plan) error {

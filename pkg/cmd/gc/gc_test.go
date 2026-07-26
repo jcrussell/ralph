@@ -184,7 +184,11 @@ func TestGCActiveRunProtected(t *testing.T) {
 func TestGCJSON(t *testing.T) {
 	repo := fixture(t)
 	opts, bufs := optsFor(repo, false)
-	opts.JSON = true
+	exp, err := cmdutil.NewExporter(strings.Join(gcFields, ","), "", "", gcFields)
+	if err != nil {
+		t.Fatalf("NewExporter: %v", err)
+	}
+	opts.Exporter = exp
 	if err := gcRun(context.Background(), opts); err != nil {
 		t.Fatalf("gcRun: %v", err)
 	}
@@ -201,6 +205,23 @@ func TestGCJSON(t *testing.T) {
 	}
 	if pl.TotalCount != 3 {
 		t.Errorf("TotalCount = %d, want 3", pl.TotalCount)
+	}
+}
+
+// TestGCJQ exercises the built-in jq path: --json --jq '.total_count'.
+func TestGCJQ(t *testing.T) {
+	repo := fixture(t)
+	opts, bufs := optsFor(repo, false)
+	exp, err := cmdutil.NewExporter(strings.Join(gcFields, ","), ".total_count", "", gcFields)
+	if err != nil {
+		t.Fatalf("NewExporter: %v", err)
+	}
+	opts.Exporter = exp
+	if err := gcRun(context.Background(), opts); err != nil {
+		t.Fatalf("gcRun: %v", err)
+	}
+	if got := strings.TrimSpace(bufs.Out.String()); got != "3" {
+		t.Errorf("--jq '.total_count' = %q, want %q", got, "3")
 	}
 }
 

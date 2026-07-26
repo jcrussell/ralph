@@ -36,7 +36,10 @@ ralph gc [flags]
   ralph gc --older-than 30d --force
 
   # machine-readable plan
-  ralph gc --older-than 2w --json
+  ralph gc --older-than 2w --json runs,iterations,incidents,total_bytes,total_count
+
+  # just the byte total, via built-in jq
+  ralph gc --older-than 2w --json total_bytes --jq '.total_bytes'
 ```
 
 ### Options
@@ -44,8 +47,10 @@ ralph gc [flags]
 ```
   -f, --force               actually delete; without it gc only prints what would be removed
   -h, --help                help for gc
-      --json                emit machine-readable JSON
+      --jq string           filter --json output with a jq expression
+      --json string         output JSON with the given comma-separated fields (available: cutoff,older_than,runs,iterations,incidents,skipped_active_run,total_bytes,total_count,applied)
       --older-than string   delete state older than this age (e.g. 30d, 2w, 72h); required
+      --template string     format --json output with a Go template
 ```
 
 ### Options inherited from parent commands

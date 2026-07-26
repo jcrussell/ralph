@@ -3,6 +3,7 @@ package logs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,6 +113,48 @@ func TestJSONMode(t *testing.T) {
 	}
 }
 
+// TestJQFilter checks the built-in per-record jq: select(...) keeps only
+// matching records and emits them as compact JSON, one per line.
+func TestJQFilter(t *testing.T) {
+	repo := newRepoWithRecords(t, []map[string]any{
+		{"iter": 1, "state": "clean", "narrative": "a"},
+		{"iter": 2, "state": "dirty", "narrative": "b"},
+		{"iter": 3, "state": "dirty", "narrative": "c"},
+	})
+	f, bufs := newFactory(repo)
+	opts := &Options{F: f, JQ: `select(.state=="dirty") | .iter`}
+	if err := opts.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if err := run(context.Background(), opts); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	got := strings.Split(strings.TrimRight(bufs.Out.String(), "\n"), "\n")
+	want := []string{"2", "3"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d lines %q, want %v", len(got), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("line[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestJQInvalidIsFlagError checks a malformed --jq is rejected as a FlagError
+// (exit 2) at Validate time, before any streaming.
+func TestJQInvalidIsFlagError(t *testing.T) {
+	opts := &Options{F: nil, JQ: ".foo |"}
+	err := opts.Validate()
+	if err == nil {
+		t.Fatal("want FlagError for bad jq, got nil")
+	}
+	var fe *cmdutil.FlagError
+	if !errors.As(err, &fe) {
+		t.Fatalf("got %T, want *cmdutil.FlagError", err)
+	}
+}
+
 func TestMissingFileError(t *testing.T) {
 	repo := t.TempDir() // no .ralph/state/logs/summary.jsonl
 	f, _ := newFactory(repo)
@@ -160,6 +203,19 @@ func TestNewCmdLogsRejectsConflictingFlags(t *testing.T) {
 	// names; matching on a stable substring keeps the test resilient.
 	if !strings.Contains(err.Error(), "[iter tail]") {
 		t.Errorf("err = %v, want substring '[iter tail]'", err)
+	}
+}
+
+func TestNewCmdLogsRejectsJSONWithJQ(t *testing.T) {
+	f := &cmdutil.Factory{IOStreams: iostreams.System()}
+	cmd := NewCmdLogs(f, func(context.Context, *Options) error { return nil })
+	cmd.SetArgs([]string{"--json", "--jq", ".state"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected mutually-exclusive error for --json with --jq")
+	}
+	if !strings.Contains(err.Error(), "[jq json]") && !strings.Contains(err.Error(), "[json jq]") {
+		t.Errorf("err = %v, want a json/jq mutual-exclusion error", err)
 	}
 }
 

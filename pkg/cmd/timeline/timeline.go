@@ -7,7 +7,6 @@ package timeline
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -30,7 +29,21 @@ type Options struct {
 	Since  string // duration ("1h") or RFC3339; empty = all
 	State  string // filter rows whose From==state OR To==state
 	Reason string // filter rows whose Reason==reason
-	JSON   bool   // emit raw transition JSONL
+
+	// Exporter is non-nil when --json is set; it renders the filtered
+	// transitions as a JSON array, optionally post-filtered by --jq/--template.
+	Exporter cmdutil.Exporter
+}
+
+// timelineFields is the --json field allowlist, derived from Transition's tags.
+var timelineFields = cmdutil.JSONFieldNames(runs.Transition{})
+
+// transitionRow adapts runs.Transition to cmdutil.RowExporter (a method can't
+// be defined on a type from another package).
+type transitionRow struct{ runs.Transition }
+
+func (r transitionRow) ExportData(fields []string) map[string]any {
+	return cmdutil.StructFields(r.Transition, fields)
 }
 
 // Validate enforces flag-value invariants before any side effects.
@@ -57,7 +70,11 @@ on iter number.
 Use 'ralph timeline' when you want the chronological FSM view; use
 'ralph logs' when you want only the iteration narrative; use 'ralph
 status' for the single-screen dashboard. --since takes a Go duration
-(1h, 30m) or an RFC3339 timestamp; --state and --reason filter rows.`,
+(1h, 30m) or an RFC3339 timestamp; --state and --reason filter rows.
+
+--json with a comma-separated field list emits the filtered transitions as
+a JSON array; --jq filters that array with a built-in jq engine (no external
+jq needed) and --template formats it with a Go template.`,
 		Example: `  # all transitions for the latest run
   ralph timeline
 
@@ -67,8 +84,11 @@ status' for the single-screen dashboard. --since takes a Go duration
   # only failed-state transitions
   ralph timeline --state=failed
 
-  # raw JSONL for scripting
-  ralph timeline --json | jq 'select(.to=="dirty")'`,
+  # JSON array of transitions
+  ralph timeline --json iter,ts,from,to,reason
+
+  # built-in jq: only transitions into dirty
+  ralph timeline --json to,iter --jq '.[] | select(.to=="dirty")'`,
 		RunE: func(c *cobra.Command, args []string) error {
 			if err := opts.Validate(); err != nil {
 				return err
@@ -82,7 +102,7 @@ status' for the single-screen dashboard. --since takes a Go duration
 	cmd.Flags().StringVar(&opts.Since, "since", "", "duration (e.g. 1h) or RFC3339 timestamp; empty = all")
 	cmd.Flags().StringVar(&opts.State, "state", "", "filter rows whose from or to matches this state")
 	cmd.Flags().StringVar(&opts.Reason, "reason", "", "filter rows whose reason matches this string")
-	cmd.Flags().BoolVar(&opts.JSON, "json", false, "emit raw transition JSONL")
+	cmdutil.AddJSONFlags(cmd, &opts.Exporter, timelineFields)
 	cmdutil.MustRegisterFlagCompletion(cmd, "state",
 		cobra.FixedCompletions(fsm.AllStateNames(), cobra.ShellCompDirectiveNoFileComp))
 	return cmd
@@ -113,8 +133,7 @@ func run(_ context.Context, opts *Options) error {
 		since, _ = cmdutil.ParseSince(opts.Since)
 	}
 
-	narrByIter, _ := loadNarratives(p.Summary())
-
+	var matched []runs.Transition
 	for _, t := range transitions {
 		if !since.IsZero() && t.TS.Before(since) {
 			continue
@@ -125,14 +144,19 @@ func run(_ context.Context, opts *Options) error {
 		if opts.Reason != "" && t.Reason != opts.Reason {
 			continue
 		}
-		if opts.JSON {
-			b, jerr := json.Marshal(t)
-			if jerr != nil {
-				return fmt.Errorf("timeline: marshal transition: %w", jerr)
-			}
-			_, _ = fmt.Fprintln(opts.F.IOStreams.Out, string(b))
-			continue
+		matched = append(matched, t)
+	}
+
+	if opts.Exporter != nil {
+		rows := make([]transitionRow, len(matched))
+		for i, t := range matched {
+			rows[i] = transitionRow{t}
 		}
+		return cmdutil.WriteRows(opts.F.IOStreams, opts.Exporter, rows)
+	}
+
+	narrByIter, _ := loadNarratives(p.Summary())
+	for _, t := range matched {
 		_, _ = fmt.Fprintln(opts.F.IOStreams.Out, formatLine(t, narrByIter[t.Iter]))
 	}
 	return nil

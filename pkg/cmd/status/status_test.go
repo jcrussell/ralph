@@ -147,7 +147,7 @@ func TestStatusJSON(t *testing.T) {
 	repo := scaffold(t, state, true, []runs.Transition{{Iter: 3, From: "start", To: "clean"}})
 	f, bufs := newFactory(t, repo)
 
-	opts := &Options{F: f, JSON: true, Tail: 5}
+	opts := &Options{F: f, Exporter: allFieldsExporter(t), Tail: 5}
 	if err := runStatus(context.Background(), opts); err != nil {
 		t.Fatalf("runStatus: %v", err)
 	}
@@ -164,6 +164,61 @@ func TestStatusJSON(t *testing.T) {
 	}
 	if len(v.Transitions) != 1 {
 		t.Errorf("Transitions len = %d, want 1", len(v.Transitions))
+	}
+}
+
+// allFieldsExporter builds the plain-JSON exporter over every View field, the
+// equivalent of bare `--json`.
+func allFieldsExporter(t *testing.T) cmdutil.Exporter {
+	t.Helper()
+	e, err := cmdutil.NewExporter(strings.Join(statusFields, ","), "", "", statusFields)
+	if err != nil {
+		t.Fatalf("NewExporter: %v", err)
+	}
+	return e
+}
+
+// TestStatusJQ exercises the built-in jq path end to end: --json --jq '.state'
+// emits just the state value.
+func TestStatusJQ(t *testing.T) {
+	state := fsm.Fresh()
+	state.State = fsm.StateClean
+	repo := scaffold(t, state, true, nil)
+	f, bufs := newFactory(t, repo)
+
+	e, err := cmdutil.NewExporter(strings.Join(statusFields, ","), ".state", "", statusFields)
+	if err != nil {
+		t.Fatalf("NewExporter: %v", err)
+	}
+	if err := runStatus(context.Background(), &Options{F: f, Exporter: e, Tail: 5}); err != nil {
+		t.Fatalf("runStatus: %v", err)
+	}
+	if got := strings.TrimSpace(bufs.Out.String()); got != `"clean"` {
+		t.Errorf("--jq '.state' = %q, want %q", got, `"clean"`)
+	}
+}
+
+// TestStatusJSONFieldSubset verifies --json state,iter emits only those keys.
+func TestStatusJSONFieldSubset(t *testing.T) {
+	state := fsm.Fresh()
+	state.State = fsm.StateClean
+	state.Iter = 4
+	repo := scaffold(t, state, true, nil)
+	f, bufs := newFactory(t, repo)
+
+	e, err := cmdutil.NewExporter("state,iter", "", "", statusFields)
+	if err != nil {
+		t.Fatalf("NewExporter: %v", err)
+	}
+	if err := runStatus(context.Background(), &Options{F: f, Exporter: e, Tail: 5}); err != nil {
+		t.Fatalf("runStatus: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(bufs.Out.Bytes(), &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(raw) != 2 || raw["state"] != "clean" || raw["iter"] != float64(4) {
+		t.Errorf("subset = %v, want {state:clean, iter:4}", raw)
 	}
 }
 
@@ -207,11 +262,10 @@ func TestNewCmdStatusFlags(t *testing.T) {
 	if c.Use != "status" {
 		t.Errorf("Use = %s, want status", c.Use)
 	}
-	if c.Flags().Lookup("json") == nil {
-		t.Error("--json flag missing")
-	}
-	if c.Flags().Lookup("tail") == nil {
-		t.Error("--tail flag missing")
+	for _, name := range []string{"json", "jq", "template", "tail"} {
+		if c.Flags().Lookup(name) == nil {
+			t.Errorf("--%s flag missing", name)
+		}
 	}
 }
 
@@ -297,7 +351,7 @@ func TestStatusJSONEmitsZeroCaps(t *testing.T) {
 	stampCaps(t, repo, &runs.Caps{}, false)
 
 	f, bufs := newFactory(t, repo)
-	if err := runStatus(context.Background(), &Options{F: f, JSON: true, Tail: 5}); err != nil {
+	if err := runStatus(context.Background(), &Options{F: f, Exporter: allFieldsExporter(t), Tail: 5}); err != nil {
 		t.Fatalf("runStatus: %v", err)
 	}
 	var raw map[string]any

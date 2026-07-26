@@ -4,7 +4,6 @@ package status
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,8 +19,11 @@ import (
 
 // Options is the three-part command shape's Options struct.
 type Options struct {
-	F    *cmdutil.Factory
-	JSON bool
+	F *cmdutil.Factory
+
+	// Exporter is non-nil when --json is set; it renders the View as JSON,
+	// optionally post-filtered by --jq or --template.
+	Exporter cmdutil.Exporter
 
 	// Tail bounds how many recent transitions to render. Default 5.
 	Tail int
@@ -52,14 +54,18 @@ transitions.jsonl and renders a single-screen dashboard:
   - consecutive dirty streak
   - the last N transitions (default 5)
 
-Pass --json to emit the same data in machine-readable form. The JSON
-shape is stable enough to script against; treat unknown fields as
-informational.`,
+Pass --json with a comma-separated field list to emit machine-readable
+output (the flag help lists the available fields). --jq filters that JSON
+with a built-in jq engine (no external jq needed); --template formats it
+with a Go template.`,
 		Example: `  # human-readable (default)
   ralph status
 
-  # JSON for scripts
-  ralph status --json | jq '.state, .iter'
+  # JSON with the fields you want
+  ralph status --json state,iter
+
+  # built-in jq (no external jq binary required)
+  ralph status --json state --jq '.state'
 
   # last 20 transitions
   ralph status --tail=20`,
@@ -73,9 +79,19 @@ informational.`,
 			return runStatus(c.Context(), opts)
 		},
 	}
-	cmd.Flags().BoolVar(&opts.JSON, "json", false, "emit machine-readable JSON")
+	cmdutil.AddJSONFlags(cmd, &opts.Exporter, statusFields)
 	cmd.Flags().IntVar(&opts.Tail, "tail", 5, "number of recent transitions to render")
 	return cmd
+}
+
+// statusFields is the --json field allowlist, derived from View's json tags so
+// it can never drift from the struct.
+var statusFields = cmdutil.JSONFieldNames(View{})
+
+// ExportData satisfies cmdutil.RowExporter, shaping the View to the requested
+// --json fields.
+func (v View) ExportData(fields []string) map[string]any {
+	return cmdutil.StructFields(v, fields)
 }
 
 // View is the data shape rendered by both --json and the table writer.
@@ -130,8 +146,8 @@ func runStatus(_ context.Context, opts *Options) error {
 	}
 
 	io := opts.F.IOStreams
-	if opts.JSON {
-		return writeJSON(io.Out, v)
+	if opts.Exporter != nil {
+		return cmdutil.WriteRow(io, opts.Exporter, v)
 	}
 	return writeText(io.Out, v)
 }
@@ -175,12 +191,6 @@ func tailN(all []runs.Transition, n int) []runs.Transition {
 		return all
 	}
 	return all[len(all)-n:]
-}
-
-func writeJSON(w io.Writer, v View) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(v)
 }
 
 func writeText(w io.Writer, v View) error {

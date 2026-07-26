@@ -9,6 +9,10 @@ Default: one narrative line per iteration.
 --iter N selects a single record (pretty JSON).
 --tail follows appends until interrupted.
 --json emits raw JSONL.
+--jq filters each record with a built-in jq engine (no external jq
+needed), one compact JSON result per line so it stays tail-friendly.
+Because the stream is unbounded (--tail), --jq runs per record rather
+than over one buffered array like 'ralph status --jq' / 'timeline --jq'.
 
 Use 'ralph logs' when you want the per-iteration narrative stream;
 use 'ralph timeline' when you want the FSM transition view joined
@@ -32,16 +36,20 @@ ralph logs [flags]
   ralph logs --iter=42
 
   # raw JSONL for scripting
-  ralph logs --json | jq 'select(.state=="dirty")'
+  ralph logs --json
+
+  # built-in jq: only dirty records (works live with --tail)
+  ralph logs --jq 'select(.state=="dirty")'
 ```
 
 ### Options
 
 ```
-  -h, --help       help for logs
-      --iter int   only print the record with this iter
-      --json       emit raw JSONL
-      --tail       follow new records as they're appended
+  -h, --help        help for logs
+      --iter int    only print the record with this iter
+      --jq string   filter each record with a jq expression (compact JSON per line)
+      --json        emit raw JSONL
+      --tail        follow new records as they're appended
 ```
 
 ### Options inherited from parent commands

@@ -52,6 +52,9 @@ ralph run [flags]
   # run with no iteration cap (equivalent to [loop] max_iterations = 0)
   ralph run --unlimited
 
+  # unattended: don't exit when the queue drains, wait for new beads
+  ralph run --wait-for-beads
+
   # disable the live TUI and stream the iteration narrative instead
   ralph run --no-tui
 ```
@@ -59,18 +62,19 @@ ralph run [flags]
 ### Options
 
 ```
-      --dry-run              render prompts and route states without invoking the runner
-      --fresh                reset fsm.json before starting (required after failed{*}; done{*} auto-resets)
-  -h, --help                 help for run
-      --label string         iteration label recorded in summary.jsonl
-      --max-iterations int   override [loop] max_iterations (0 = use config; pass --unlimited to disable the cap)
-      --memory string        override [loop] memory_limit_bytes ('' = config)
-      --no-tui               disable the live terminal UI; stream the one-line-per-iteration narrative instead (auto-disabled off a TTY)
-      --once                 run one iteration then exit
-      --skip-gate            skip the per-state gate hook
-      --timeout int          override [loop] session_timeout_secs (0 = config)
-      --unlimited            disable the iteration cap for this invocation (sets [loop] max_iterations = 0); not recommended without a budget cap
-      --wait-on-quota        on a runner quota cap, sleep until it resets and resume instead of exiting failed (overrides [loop] wait_on_quota)
+      --dry-run                   render prompts and route states without invoking the runner
+      --fresh                     reset fsm.json before starting (required after failed{*}; done{*} auto-resets)
+  -h, --help                      help for run
+      --label string              iteration label recorded in summary.jsonl
+      --max-iterations int        override [loop] max_iterations (0 = use config; pass --unlimited to disable the cap)
+      --memory string             override [loop] memory_limit_bytes ('' = config)
+      --no-tui                    disable the live terminal UI; stream the one-line-per-iteration narrative instead (auto-disabled off a TTY)
+      --once                      run one iteration then exit
+      --skip-gate                 skip the per-state gate hook
+      --timeout int               override [loop] session_timeout_secs (0 = config)
+      --unlimited                 disable the iteration cap for this invocation (sets [loop] max_iterations = 0); not recommended without a budget cap
+      --wait-for-beads bd ready   on done{idle} or done{queue_empty}, park polling bd ready and resume when the queue changes instead of exiting (overrides [loop] wait_for_beads)
+      --wait-on-quota             on a runner quota cap, sleep until it resets and resume instead of exiting failed (overrides [loop] wait_on_quota)
 ```
 
 ### Options inherited from parent commands
