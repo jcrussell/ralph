@@ -28,14 +28,15 @@ import (
 type Options struct {
 	F *cmdutil.Factory
 
-	Once        bool
-	SkipGate    bool
-	DryRun      bool
-	Fresh       bool
-	WaitOnQuota bool
-	NoTUI       bool
-	Unlimited   bool
-	Label       string
+	Once         bool
+	SkipGate     bool
+	DryRun       bool
+	Fresh        bool
+	WaitOnQuota  bool
+	WaitForBeads bool
+	NoTUI        bool
+	Unlimited    bool
+	Label        string
 
 	MaxIterations  int    // 0 = use config
 	SessionTimeout int    // seconds; 0 = use config
@@ -106,6 +107,9 @@ and exit 1.`,
   # run with no iteration cap (equivalent to [loop] max_iterations = 0)
   ralph run --unlimited
 
+  # unattended: don't exit when the queue drains, wait for new beads
+  ralph run --wait-for-beads
+
   # disable the live TUI and stream the iteration narrative instead
   ralph run --no-tui`,
 		RunE: func(c *cobra.Command, args []string) error {
@@ -123,6 +127,7 @@ and exit 1.`,
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "render prompts and route states without invoking the runner")
 	cmd.Flags().BoolVar(&opts.Fresh, "fresh", false, "reset fsm.json before starting (required after failed{*}; done{*} auto-resets)")
 	cmd.Flags().BoolVar(&opts.WaitOnQuota, "wait-on-quota", false, "on a runner quota cap, sleep until it resets and resume instead of exiting failed (overrides [loop] wait_on_quota)")
+	cmd.Flags().BoolVar(&opts.WaitForBeads, "wait-for-beads", false, "on done{idle} or done{queue_empty}, park polling `bd ready` and resume when the queue changes instead of exiting (overrides [loop] wait_for_beads)")
 	cmd.Flags().BoolVar(&opts.NoTUI, "no-tui", false, "disable the live terminal UI; stream the one-line-per-iteration narrative instead (auto-disabled off a TTY)")
 	cmd.Flags().StringVar(&opts.Label, "label", "", "iteration label recorded in summary.jsonl")
 	cmd.Flags().IntVar(&opts.MaxIterations, "max-iterations", 0, "override [loop] max_iterations (0 = use config; pass --unlimited to disable the cap)")
@@ -343,5 +348,8 @@ func applyOverrides(cfg *config.Config, opts *Options) {
 	// indistinguishable from unset, so it must not clobber a true config).
 	if opts.WaitOnQuota {
 		cfg.Loop.WaitOnQuota = true
+	}
+	if opts.WaitForBeads {
+		cfg.Loop.WaitForBeads = true
 	}
 }

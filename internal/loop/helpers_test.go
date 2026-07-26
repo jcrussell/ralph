@@ -99,9 +99,24 @@ type fakeBD struct {
 	ListByStatusLab map[string][]bd.Issue
 	Snap            *bd.Snapshot
 	Err             error
+
+	// OnReady, when set, takes over Ready entirely: it receives the 0-based
+	// call index so a test can script a queue that changes over time (the
+	// bead-park wake condition). ReadyCalls counts every Ready call, which the
+	// park tests assert on to prove a cancelled wait does not spin.
+	OnReady    func(call int, label string) ([]bd.Issue, error)
+	ReadyCalls int
+	mu         sync.Mutex
 }
 
 func (b *fakeBD) Ready(_ context.Context, label string) ([]bd.Issue, error) {
+	b.mu.Lock()
+	call := b.ReadyCalls
+	b.ReadyCalls++
+	b.mu.Unlock()
+	if b.OnReady != nil {
+		return b.OnReady(call, label)
+	}
 	if b.Err != nil {
 		return nil, b.Err
 	}
@@ -142,10 +157,15 @@ func (c *fakeClock) Now() time.Time {
 	return t
 }
 
+// Sleep records the duration and advances Now by it, so code that measures a
+// deadline with Now() deltas (the bead park's max_bead_wait_secs) terminates in
+// test time. It does not block: a test's scripted state changes are already in
+// place by the time the loop looks again.
 func (c *fakeClock) Sleep(_ context.Context, d time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.Sleeps = append(c.Sleeps, d)
+	c.now = c.now.Add(d)
 }
 
 // fakeObserver records every Snapshot the loop hands it, in call order,
@@ -290,4 +310,14 @@ func fsmAt(t *testing.T, repo string) *fsm.FSM {
 		t.Fatalf("fsm.Load: %v", err)
 	}
 	return f
+}
+
+// readSummaryIfAny is readSummary for tests where the file may legitimately
+// not exist (a run that parked and exited without ever iterating).
+func readSummaryIfAny(t *testing.T, repo string) []IterRecord {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(repo, ".ralph", "state", "logs", "summary.jsonl")); os.IsNotExist(err) {
+		return nil
+	}
+	return readSummary(t, repo)
 }

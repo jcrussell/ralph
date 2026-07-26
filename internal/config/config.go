@@ -49,6 +49,19 @@ type LoopConfig struct {
 	// and resuming the same state instead of exiting failed{runner_terminal}.
 	// Default false keeps quota terminal (fail fast, don't burn iterations).
 	WaitOnQuota bool `toml:"wait_on_quota"`
+	// WaitForBeads opts into parking on done{idle} / done{queue_empty}
+	// instead of exiting: the loop polls `bd ready` every BeadPollSecs and
+	// resumes when the ready-issue set CHANGES (not merely when it grows —
+	// done{idle} fires with a non-empty queue, so a count is the wrong
+	// predicate). Default false keeps a drained queue terminal.
+	WaitForBeads bool `toml:"wait_for_beads"`
+	// BeadPollSecs is the interval between `bd ready` checks while parked.
+	// 0 resolves to the default at the call site.
+	BeadPollSecs int `toml:"bead_poll_secs"`
+	// MaxBeadWaitSecs bounds a park. 0 = park indefinitely, which is the
+	// point for an unattended operator; set it when a run must not outlive
+	// some window.
+	MaxBeadWaitSecs int `toml:"max_bead_wait_secs"`
 	// QuotaWaitSecs is the bounded blind-poll sleep between quota retries
 	// when WaitOnQuota is set and the error carries no reset hint. When the
 	// envelope does surface a "resets ...pm (UTC)" instant, the loop sleeps
@@ -128,6 +141,9 @@ func Defaults() *Config {
 			SleepBetweenSecs:   5,
 			WaitOnQuota:        false,
 			QuotaWaitSecs:      1800,
+			WaitForBeads:       false,
+			BeadPollSecs:       60,
+			MaxBeadWaitSecs:    0,
 		},
 		Runner: RunnerConfig{
 			Command: "claude",
@@ -288,6 +304,12 @@ func (l *LoopConfig) Validate() error {
 	}
 	if l.QuotaWaitSecs < 0 {
 		return fmt.Errorf("quota_wait_secs must be >= 0, got %d", l.QuotaWaitSecs)
+	}
+	if l.BeadPollSecs < 0 {
+		return fmt.Errorf("bead_poll_secs must be >= 0, got %d", l.BeadPollSecs)
+	}
+	if l.MaxBeadWaitSecs < 0 {
+		return fmt.Errorf("max_bead_wait_secs must be >= 0, got %d", l.MaxBeadWaitSecs)
 	}
 	if _, err := ParseBytes(l.MemoryLimit); err != nil {
 		return fmt.Errorf("memory_limit_bytes: %w", err)

@@ -121,11 +121,15 @@ type model struct {
 	// second ctrl+c) then quits, so a stray keypress can't kill a running loop.
 	confirmingQuit bool
 
-	// quotaWaiting is set while the loop sleeps on a quota cap (the latest
-	// snapshot is a "quota-wait" row); quotaRemaining counts down to the
-	// resume, advanced by the elapsed tick like liveElapsed.
-	quotaWaiting   bool
-	quotaRemaining time.Duration
+	// waiting is set while the loop is parked rather than iterating — on a
+	// quota cap, or on a drained bead queue under --wait-for-beads. waitKind
+	// names which; waitRemaining counts down to the next wake-up and
+	// waitElapsed up from the start of the park, both advanced by the elapsed
+	// tick like liveElapsed.
+	waiting       bool
+	waitKind      string
+	waitRemaining time.Duration
+	waitElapsed   time.Duration
 }
 
 // newModel builds the model for the given streams. The live TUI renders
@@ -216,11 +220,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.snap = msg.s
 		m.hasSnap = true
 		m.liveElapsed = msg.s.Elapsed
-		// A quota-wait row puts the loop to sleep; seed the countdown so the
-		// header badge shows time-to-resume. Any other row clears it.
-		m.quotaWaiting = msg.s.Record.Skipped == "quota-wait"
-		if m.quotaWaiting {
-			m.quotaRemaining = time.Duration(msg.s.Record.QuotaWaitSecs) * time.Second
+		// A parked loop puts the badge up and seeds the countdown to its next
+		// wake-up; any ordinary iteration clears it. The bead park reports
+		// through Snapshot.Wait; the older quota wait signals through its
+		// summary row, so both are read here.
+		switch {
+		case msg.s.Wait != nil:
+			m.waiting, m.waitKind = true, msg.s.Wait.Kind
+			m.waitRemaining, m.waitElapsed = msg.s.Wait.Remaining, msg.s.Wait.Elapsed
+		case msg.s.Record.Skipped == "quota-wait":
+			m.waiting, m.waitKind = true, "quota"
+			m.waitRemaining = time.Duration(msg.s.Record.QuotaWaitSecs) * time.Second
+			m.waitElapsed = 0
+		default:
+			m.waiting, m.waitKind = false, ""
+			m.waitRemaining, m.waitElapsed = 0, 0
 		}
 		m.relayout() // panel height can change as fields populate
 		return m, nil
@@ -241,10 +255,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.hasSnap {
 			m.liveElapsed += tickInterval
 		}
-		if m.quotaWaiting && m.quotaRemaining > 0 {
-			m.quotaRemaining -= tickInterval
-			if m.quotaRemaining < 0 {
-				m.quotaRemaining = 0
+		if m.waiting {
+			m.waitElapsed += tickInterval
+			if m.waitRemaining > 0 {
+				m.waitRemaining -= tickInterval
+				if m.waitRemaining < 0 {
+					m.waitRemaining = 0
+				}
 			}
 		}
 		return m, tick()
@@ -408,8 +425,8 @@ func (m model) headerView() string {
 	switch {
 	case m.done:
 		segs = append(segs, m.doneBadge())
-	case m.quotaWaiting:
-		segs = append(segs, m.quotaBadge())
+	case m.waiting:
+		segs = append(segs, m.waitBadge())
 	}
 
 	// Drop empty segments (e.g. an unset dir) so no dangling separator shows,
@@ -459,16 +476,28 @@ func (m model) doneBadge() seg {
 	}
 }
 
-// quotaBadge renders the header badge shown while the loop sleeps on a quota
-// cap. It counts down to the resume; once the countdown bottoms out (the loop
-// hasn't sent its next snapshot yet) it shows a bare "resuming…". Yellow,
-// degrading to plain under the ascii profile like doneBadge. Plain text only —
-// every rune is single-width so the header's rune-count fit check in headerView
-// stays accurate.
-func (m model) quotaBadge() seg {
-	text := "sleeping (quota) — resuming…"
-	if m.quotaRemaining > 0 {
-		text = "sleeping (quota) — resuming in " + dur(m.quotaRemaining)
+// waitBadge renders the header badge shown while the loop is parked. A quota
+// wait counts down to the resume; a bead park counts down to the next `bd
+// ready` check and also shows how long it has been waiting, since that park is
+// open-ended. Once a countdown bottoms out (the loop hasn't sent its next
+// update yet) the badge drops it. Yellow, degrading to plain under the ascii
+// profile like doneBadge. Plain text only — every rune is single-width so the
+// header's rune-count fit check in headerView stays accurate.
+func (m model) waitBadge() seg {
+	var text string
+	if m.waitKind == "beads" {
+		text = "waiting for beads"
+		if m.waitElapsed >= time.Second {
+			text += " — " + dur(m.waitElapsed)
+		}
+		if m.waitRemaining > 0 {
+			text += ", next check in " + dur(m.waitRemaining)
+		}
+	} else {
+		text = "sleeping (quota) — resuming…"
+		if m.waitRemaining > 0 {
+			text = "sleeping (quota) — resuming in " + dur(m.waitRemaining)
+		}
 	}
 	yellow := func(s string) string { return m.r.NewStyle().Foreground(lipgloss.Color("3")).Render(s) }
 	return seg{text: text, color: yellow}

@@ -95,6 +95,27 @@ type Snapshot struct {
 	// configured exclude_types) as of this iteration — the same queue the
 	// done{queue_empty} check drains. -1 means "not yet sampled".
 	ReadyBeads int
+
+	// Wait is non-nil while the loop is parked rather than iterating, and
+	// is refreshed on each poll so a long park doesn't freeze the display.
+	// Record then describes the LAST iteration, not the current tick —
+	// there isn't one. nil on every ordinary iteration.
+	Wait *WaitState
+}
+
+// WaitState describes an in-progress park. Kind names why the loop is
+// stopped; Elapsed is how long it has been parked; Remaining is the time to
+// the next wake-up (a poll for "beads", the resume instant for "quota") and
+// is 0 when unknown.
+//
+// Only the bead park populates this today. The quota wait predates it and
+// still signals through Record.Skipped/QuotaWaitSecs on its summary row,
+// which keeps its one-Observe-per-tick contract intact; the live UI reads
+// Wait first and falls back to those fields.
+type WaitState struct {
+	Kind      string
+	Elapsed   time.Duration
+	Remaining time.Duration
 }
 
 // noopObserver is the nil-default Observer: it drops every Snapshot so an

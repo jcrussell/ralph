@@ -137,6 +137,7 @@ func TestApplyOverrides(t *testing.T) {
 				MemoryLimit:        "7G",
 				SleepBetweenSecs:   5,
 				QuotaWaitSecs:      1800,
+				BeadPollSecs:       60,
 			},
 		},
 		{
@@ -149,6 +150,7 @@ func TestApplyOverrides(t *testing.T) {
 				MemoryLimit:        "7G",
 				SleepBetweenSecs:   5,
 				QuotaWaitSecs:      1800,
+				BeadPollSecs:       60,
 			},
 		},
 		{
@@ -161,6 +163,7 @@ func TestApplyOverrides(t *testing.T) {
 				MemoryLimit:        "7G",
 				SleepBetweenSecs:   5,
 				QuotaWaitSecs:      1800,
+				BeadPollSecs:       60,
 			},
 		},
 		{
@@ -173,6 +176,7 @@ func TestApplyOverrides(t *testing.T) {
 				MemoryLimit:        "1G",
 				SleepBetweenSecs:   5,
 				QuotaWaitSecs:      1800,
+				BeadPollSecs:       60,
 			},
 		},
 		{
@@ -185,6 +189,7 @@ func TestApplyOverrides(t *testing.T) {
 				MemoryLimit:        "2G",
 				SleepBetweenSecs:   5,
 				QuotaWaitSecs:      1800,
+				BeadPollSecs:       60,
 			},
 		},
 		{
@@ -199,6 +204,7 @@ func TestApplyOverrides(t *testing.T) {
 				MemoryLimit:        "7G",
 				SleepBetweenSecs:   5,
 				QuotaWaitSecs:      1800,
+				BeadPollSecs:       60,
 			},
 		},
 		{
@@ -212,6 +218,7 @@ func TestApplyOverrides(t *testing.T) {
 				SleepBetweenSecs:   5,
 				WaitOnQuota:        true,
 				QuotaWaitSecs:      1800,
+				BeadPollSecs:       60,
 			},
 		},
 	}

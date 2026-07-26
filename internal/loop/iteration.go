@@ -316,6 +316,11 @@ func routeAndPersist(ctx context.Context, rc *runContext, prev fsm.Outcome, befo
 		rc.consecNoops = 0
 	}
 
+	// Opt-in bead park. Sits here — after the streak bookkeeping, before any
+	// persistence — so a queue that refills never lands a terminal done{} in
+	// fsm.json and the transition row reads as an ordinary hop.
+	next = waitThenReroute(ctx, rc, next)
+
 	// Update counters *before* assigning the new state.
 	rc.fsm.ObserveTransition(next.State)
 
@@ -433,6 +438,183 @@ func waitOnQuota(ctx context.Context, rc *runContext, prev fsm.Outcome, sess *ru
 	return prev, nil
 }
 
+// waitable reports whether an outcome is one the bead park can sit on: the two
+// terminals that mean "no actionable work right now" rather than "something
+// went wrong". iter_cap and budget are real limits and must still terminate.
+func waitable(o fsm.Outcome) bool {
+	return o.State == fsm.StateDone &&
+		(o.Reason == fsm.ReasonIdle || o.Reason == fsm.ReasonQueueEmpty)
+}
+
+// waitThenReroute parks on a waitable terminal and returns the outcome the FSM
+// routes to once new work shows up — or the original terminal if the wait ends
+// without any (ctx cancelled, max_bead_wait_secs reached, or the feature off).
+//
+// The wake condition is a CHANGE in the ready-issue ID set, not growth in its
+// size: done{idle} fires with a non-empty queue (a noop streak the agent can't
+// action), so "count went up" would never trigger while "count > 0" would
+// trigger instantly and spin. A changed set means something genuinely new to
+// try.
+//
+// Resumption re-routes through fsm.SelectNextState rather than naming a state,
+// so review mode still goes to review, a tree that went dirty during the park
+// goes to dirty, and a cap crossed meanwhile still terminates. The noop streak
+// is cleared first — the whole point of resuming is that the situation changed.
+//
+// Callers must not have persisted the terminal outcome yet: parking pre-persist
+// keeps a phantom done{} out of fsm.json and leaves transitions.jsonl reading as
+// an ordinary hop.
+func waitThenReroute(ctx context.Context, rc *runContext, out fsm.Outcome) fsm.Outcome {
+	// --once must finish its single tick, and --dry-run is an inspection, not
+	// an unattended run; neither should block indefinitely.
+	if !rc.cfg.Loop.WaitForBeads || rc.opts.Once || rc.opts.DryRun || !waitable(out) {
+		return out
+	}
+
+	poll := time.Duration(rc.cfg.Loop.BeadPollSecs) * time.Second
+	if poll <= 0 {
+		poll = defaultBeadPoll
+	}
+	maxWait := time.Duration(rc.cfg.Loop.MaxBeadWaitSecs) * time.Second
+
+	baseline, err := readyIDs(ctx, rc)
+	if err != nil {
+		rc.log.WarnContext(ctx, "bead wait: baseline query failed; not parking", "err", err)
+		return out
+	}
+
+	start := rc.clock.Now()
+	rc.log.InfoContext(ctx, "parking until the bead queue changes",
+		"outcome", out.String(), "poll", poll.String(), "ready", len(baseline))
+	emitChatter(rc, fmt.Sprintf("ralph: %s — waiting for new beads (checking every %s; Ctrl-C to stop)",
+		out, poll))
+
+	for {
+		notifyWait(rc, &WaitState{Kind: "beads", Elapsed: rc.clock.Now().Sub(start), Remaining: poll})
+		rc.clock.Sleep(ctx, poll)
+		// Sleep returns immediately once ctx is done, so without this check the
+		// loop would spin through `bd ready` subprocesses until maxWait.
+		if ctx.Err() != nil {
+			rc.log.InfoContext(ctx, "bead wait cancelled", "waited", rc.clock.Now().Sub(start).String())
+			return out
+		}
+		if maxWait > 0 && rc.clock.Now().Sub(start) >= maxWait {
+			rc.log.InfoContext(ctx, "bead wait exceeded max_bead_wait_secs; exiting", "outcome", out.String())
+			emitChatter(rc, fmt.Sprintf("ralph: no new beads after %s — exiting %s", maxWait, out))
+			return out
+		}
+
+		cur, qerr := readyIDs(ctx, rc)
+		if qerr != nil {
+			// A transient bd failure is not a reason to give up the park; the
+			// operator asked to wait.
+			rc.log.WarnContext(ctx, "bead wait: query failed; retrying", "err", qerr)
+			continue
+		}
+		if sameIDs(baseline, cur) {
+			continue
+		}
+
+		rc.consecNoops = 0
+		next, rerr := fsm.SelectNextState(ctx, fsm.RouteInput{
+			FSM:  rc.fsm,
+			Cfg:  rc.cfg,
+			BD:   rc.bdClient,
+			Repo: rc.repo,
+		})
+		if rerr != nil {
+			rc.log.WarnContext(ctx, "bead wait: reroute failed; exiting", "err", rerr)
+			return out
+		}
+		if waitable(next) {
+			// The queue changed but there is still nothing to do (e.g. the new
+			// bead is blocked). Keep parking against the new set.
+			baseline = cur
+			continue
+		}
+		rc.log.InfoContext(ctx, "bead queue changed; resuming", "state", string(next.State),
+			"waited", rc.clock.Now().Sub(start).String())
+		emitChatter(rc, fmt.Sprintf("ralph: bead queue changed — resuming at %s", next))
+		return next
+	}
+}
+
+// defaultBeadPoll is the poll interval used when bead_poll_secs is 0. Matches
+// config.Defaults; resolved at the call site rather than by mutating config,
+// the way backoff.QuotaWait handles quota_wait_secs.
+const defaultBeadPoll = 60 * time.Second
+
+// readyIDs returns the set of ready issue IDs the park watches, honoring the
+// configured exclude_types filter (the client carries it). In review mode that
+// is the review:<branch> queue — the one routing actually consults there, so
+// watching the unlabeled queue would wake on work the review run can't take.
+func readyIDs(ctx context.Context, rc *runContext) (map[string]struct{}, error) {
+	label := ""
+	if rc.fsm.ReviewMode {
+		label = "review:" + rc.fsm.ReviewBranch
+	}
+	issues, err := rc.bdClient.Ready(ctx, label)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]struct{}, len(issues))
+	for _, i := range issues {
+		out[i.ID] = struct{}{}
+	}
+	return out, nil
+}
+
+func sameIDs(a, b map[string]struct{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for id := range a {
+		if _, ok := b[id]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// emitChatter writes an operator-facing line to ErrOut (teed into the live log
+// pane). No-ops when streams are unset, like emitIterLine.
+func emitChatter(rc *runContext, line string) {
+	if rc.io == nil || rc.io.ErrOut == nil {
+		return
+	}
+	_, _ = fmt.Fprintln(rc.io.ErrOut, line)
+}
+
+// notifyWait pushes a park update to the Observer. It carries the LAST
+// iteration's record — there is no current one — and deliberately writes no
+// summary.jsonl row: a park happens inside an iteration's routing, so a row
+// here would collide with that iteration's real row on iter/iter_id and hide it
+// from `ralph timeline`. The Observer is a live-UI side channel that no-ops by
+// default, so refreshing it every poll is free and keeps the badge from
+// freezing over a long park.
+func notifyWait(rc *runContext, w *WaitState) {
+	if rc.observer == nil {
+		return
+	}
+	rc.observer.Observe(Snapshot{
+		Record:                  rc.lastRecord,
+		Iter:                    rc.fsm.Iter,
+		State:                   rc.fsm.State,
+		Reason:                  rc.fsm.Reason,
+		CumulativeCostUSD:       rc.fsm.CumulativeCostUSD,
+		CumulativeWallclockSecs: rc.fsm.CumulativeWallclockSecs,
+		CumulativeCommits:       rc.fsm.CumulativeCommits,
+		ConsecutiveDirty:        rc.fsm.ConsecutiveDirty,
+		LastGateResult:          rc.fsm.LastGateResult,
+		MaxIterations:           rc.cfg.Loop.MaxIterations,
+		MaxCostUSD:              rc.cfg.Budget.MaxCostUSD,
+		MaxWallclockSecs:        rc.cfg.Budget.MaxWallclockSecs,
+		Elapsed:                 rc.clock.Now().Sub(rc.started),
+		ReadyBeads:              rc.lastReadyBeads,
+		Wait:                    w,
+	})
+}
+
 // recordQuotaWait writes a summary row for a quota-wait tick. The runner
 // ran and hit the cap, so RunnerMode is quota; Skipped marks the tick as
 // non-productive for tooling that filters such rows.
@@ -486,6 +668,7 @@ func recordSkippedIteration(rc *runContext, prev fsm.Outcome, reason string) err
 // any ANSI codes. The Observer is notified before the ErrOut guard so a nil
 // IOStreams still produces a Snapshot.
 func emitIterLine(rc *runContext, rec IterRecord) {
+	rc.lastRecord = rec
 	notifyObserver(rc, rec)
 	if rc.io == nil || rc.io.ErrOut == nil {
 		return

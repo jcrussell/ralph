@@ -637,8 +637,8 @@ func TestQuotaWaitBadgeShowsAndClears(t *testing.T) {
 	m := sized(t, 120, 24)
 	m, _ = step(t, m, metricsMsg{s: quotaWaitSnapshot(1800)})
 
-	if !m.quotaWaiting {
-		t.Fatal("quota-wait snapshot should set quotaWaiting")
+	if !m.waiting {
+		t.Fatal("quota-wait snapshot should set waiting")
 	}
 	view := m.View()
 	if !strings.Contains(view, "sleeping (quota)") {
@@ -650,8 +650,8 @@ func TestQuotaWaitBadgeShowsAndClears(t *testing.T) {
 
 	// A normal iteration snapshot clears the badge.
 	m, _ = step(t, m, metricsMsg{s: fullSnapshot()})
-	if m.quotaWaiting {
-		t.Error("an ordinary snapshot should clear quotaWaiting")
+	if m.waiting {
+		t.Error("an ordinary snapshot should clear waiting")
 	}
 	if strings.Contains(m.View(), "sleeping (quota)") {
 		t.Errorf("badge should be gone after a normal snapshot:\n%s", m.View())
@@ -666,8 +666,8 @@ func TestQuotaWaitBadgeCountsDown(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		m, _ = step(t, m, tickMsg{})
 	}
-	if got, want := m.quotaRemaining, 115*time.Second; got != want {
-		t.Errorf("quotaRemaining = %s after 5 ticks, want %s", got, want)
+	if got, want := m.waitRemaining, 115*time.Second; got != want {
+		t.Errorf("waitRemaining = %s after 5 ticks, want %s", got, want)
 	}
 	if !strings.Contains(m.View(), "resuming in 1m55s") {
 		t.Errorf("badge should reflect the decremented countdown:\n%s", m.View())
@@ -683,8 +683,8 @@ func TestQuotaWaitBadgeFloorsToResuming(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		m, _ = step(t, m, tickMsg{})
 	}
-	if m.quotaRemaining != 0 {
-		t.Errorf("quotaRemaining = %s, want floored to 0", m.quotaRemaining)
+	if m.waitRemaining != 0 {
+		t.Errorf("waitRemaining = %s, want floored to 0", m.waitRemaining)
 	}
 	view := m.View()
 	if !strings.Contains(view, "resuming…") || strings.Contains(view, "resuming in") {
@@ -732,5 +732,61 @@ func TestMidRunErrorKeepsScreenForReview(t *testing.T) {
 	}
 	if view := m.View(); !strings.Contains(view, "✗ error: bd exploded") {
 		t.Errorf("View should badge the mid-run error, got:\n%s", view)
+	}
+}
+
+// beadWaitSnapshot is a park update from the bead wait: no summary row of its
+// own, so the Record still describes the last real iteration and the park
+// itself rides on Snapshot.Wait.
+func beadWaitSnapshot(elapsed, remaining time.Duration) loop.Snapshot {
+	s := fullSnapshot()
+	s.Wait = &loop.WaitState{Kind: "beads", Elapsed: elapsed, Remaining: remaining}
+	return s
+}
+
+// The bead park badge reports both halves an open-ended wait needs: how long
+// it has been waiting, and when it will look again.
+func TestBeadWaitBadgeShowsAndClears(t *testing.T) {
+	m := sized(t, 120, 24)
+	m, _ = step(t, m, metricsMsg{s: beadWaitSnapshot(14*time.Minute, 45*time.Second)})
+
+	if !m.waiting || m.waitKind != "beads" {
+		t.Fatalf("waiting = %v, kind = %q; want true/beads", m.waiting, m.waitKind)
+	}
+	view := m.View()
+	if !strings.Contains(view, "waiting for beads") {
+		t.Errorf("header should show the bead-wait badge:\n%s", view)
+	}
+	if !strings.Contains(view, "14m0s") || !strings.Contains(view, "next check in 45s") {
+		t.Errorf("badge should show elapsed and next-check:\n%s", view)
+	}
+
+	// Resuming sends an ordinary iteration snapshot, which must clear it.
+	m, _ = step(t, m, metricsMsg{s: fullSnapshot()})
+	if m.waiting {
+		t.Error("an ordinary snapshot should clear waiting")
+	}
+	if strings.Contains(m.View(), "waiting for beads") {
+		t.Errorf("badge should be gone after resuming:\n%s", m.View())
+	}
+}
+
+// A park can outlast many polls, so elapsed keeps climbing on ticks even after
+// the next-check countdown bottoms out.
+func TestBeadWaitBadgeAdvancesElapsed(t *testing.T) {
+	m := sized(t, 120, 24)
+	m, _ = step(t, m, metricsMsg{s: beadWaitSnapshot(time.Minute, 2*time.Second)})
+
+	for i := 0; i < 5; i++ {
+		m, _ = step(t, m, tickMsg{})
+	}
+	if got, want := m.waitElapsed, 65*time.Second; got != want {
+		t.Errorf("waitElapsed = %s after 5 ticks, want %s", got, want)
+	}
+	if m.waitRemaining != 0 {
+		t.Errorf("waitRemaining = %s, want floored to 0", m.waitRemaining)
+	}
+	if view := m.View(); strings.Contains(view, "next check in") {
+		t.Errorf("badge should drop the countdown at zero:\n%s", view)
 	}
 }

@@ -94,6 +94,10 @@ type runContext struct {
 	// reads its tail to populate {{.GateOutput}} for the next iteration.
 	lastGateStdoutFile string
 
+	// lastRecord is the most recent summary row emitted. A park has no
+	// record of its own, so its Observer updates carry this one.
+	lastRecord IterRecord
+
 	// promptFP is the previous iteration's prompt-library fingerprint
 	// (relpath -> content hash), used to announce mid-run template edits.
 	// nil until the first sample — nothing to compare against yet.
@@ -354,6 +358,10 @@ func handleStartState(ctx context.Context, rc *runContext) error {
 	if err != nil {
 		return fmt.Errorf("loop: start route: %w", err)
 	}
+	// A drained queue at startup exits done{queue_empty} before iteration 1,
+	// which is the most common way an unattended run ends — so the park has to
+	// apply here too, not only in routeAndPersist.
+	next = waitThenReroute(ctx, rc, next)
 	rc.fsm.ObserveTransition(next.State)
 	rc.fsm.Outcome = next
 	if err := rc.fsm.Save(rc.repo); err != nil {
