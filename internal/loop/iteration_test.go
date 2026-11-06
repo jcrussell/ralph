@@ -200,6 +200,74 @@ func TestRun_QuotaWaitCapsFarReset(t *testing.T) {
 	}
 }
 
+// A reset hint that has already passed by our clock (the runner repeated
+// "resets 8:50pm" at 20:51) is stale: the wait backs off from
+// QuotaBackoffBase instead of rolling the hint to tomorrow and sleeping
+// MaxQuotaWait.
+func TestRun_QuotaWaitBacksOffOnStaleResetHint(t *testing.T) {
+	repo := scaffoldRepo(t)
+	opts := baseOpts(t, repo)
+	opts.Once = true
+	opts.Cfg.Loop.WaitOnQuota = true
+	opts.BD = &fakeBD{ReadyByLabel: map[string][]bd.Issue{"": {{ID: "x"}}}}
+	sess := quotaSession()
+	// The fake clock starts at 12:00 UTC.
+	sess.Envelope.Result = "You've hit your session limit · resets 11:59am (UTC)"
+	opts.Runner = &fakeRunner{Sessions: []*runner.Session{sess}}
+	clk := newFakeClock()
+	opts.Clock = clk
+
+	if _, err := Run(context.Background(), opts); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	recs := readSummary(t, repo)
+	last := recs[len(recs)-1]
+	if want := int(backoff.QuotaBackoffBase.Seconds()); last.QuotaWaitSecs != want {
+		t.Errorf("QuotaWaitSecs = %d, want the %d backoff base (not a rolled-forward reset)", last.QuotaWaitSecs, want)
+	}
+}
+
+// Consecutive hint-less (or stale-hint) quota waits double from
+// QuotaBackoffBase up to the quota_wait_secs ceiling, and any non-quota
+// iteration resets the streak.
+func TestRun_QuotaWaitBackoffDoublesAndResets(t *testing.T) {
+	repo := scaffoldRepo(t)
+	opts := baseOpts(t, repo)
+	opts.Cfg.Loop.WaitOnQuota = true
+	opts.Cfg.Loop.MaxIterations = 6
+	opts.BD = &fakeBD{ReadyByLabel: map[string][]bd.Issue{"": {{ID: "x"}}}}
+	stale := quotaSession()
+	stale.Envelope.Result = "You've hit your session limit · resets 11:59am (UTC)"
+	ok := &runner.Session{
+		ExitCode: 0,
+		Duration: time.Second,
+		Stdout:   `{"total_cost_usd":0.01,"num_turns":1,"subtype":"success"}`,
+		Envelope: &runner.Envelope{TotalCostUSD: 0.01, NumTurns: 1, Subtype: "success", Raw: map[string]any{"subtype": "success"}},
+	}
+	opts.Runner = &fakeRunner{Sessions: []*runner.Session{
+		stale, quotaSession(), quotaSession(), quotaSession(), ok, quotaSession(),
+	}}
+	opts.Clock = newFakeClock()
+
+	if _, err := Run(context.Background(), opts); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var got []int
+	for _, r := range readSummary(t, repo) {
+		if r.Skipped == "quota-wait" {
+			got = append(got, r.QuotaWaitSecs)
+		}
+	}
+	base := int(backoff.QuotaBackoffBase.Seconds())
+	ceiling := int(backoff.DefaultQuotaWait.Seconds())
+	want := []int{base, 2 * base, 4 * base, ceiling, base}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("quota waits = %v, want %v", got, want)
+	}
+}
+
 // classifyToReason maps modes to fsm reasons per the contract:
 // ModeAuth → ReasonAuth; ModeBudget → ReasonRunnerTerminal (note:
 // fsm.ReasonBudget is reserved for ralph's own cost cap);

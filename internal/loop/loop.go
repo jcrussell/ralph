@@ -87,6 +87,9 @@ type runContext struct {
 	// Streaks the FSM doesn't track — owned by the loop.
 	consecFailures int
 	deadStreak     int
+	// quotaStreak counts consecutive quota waits; waitOnQuota uses it as the
+	// QuotaBackoff exponent and updateStreaks clears it on any other mode.
+	quotaStreak int
 	// consecNoops counts consecutive no-op iterations (runner OK, zero
 	// commits, empty bd diff, unchanged state). Fed into RouteInput so
 	// SelectNextState can exit done{idle} once it reaches MaxNoopIters.

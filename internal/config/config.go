@@ -62,10 +62,13 @@ type LoopConfig struct {
 	// point for an unattended operator; set it when a run must not outlive
 	// some window.
 	MaxBeadWaitSecs int `toml:"max_bead_wait_secs"`
-	// QuotaWaitSecs is the bounded blind-poll sleep between quota retries
-	// when WaitOnQuota is set and the error carries no reset hint. When the
-	// envelope does surface a "resets ...pm (UTC)" instant, the loop sleeps
-	// until then instead (capped at MaxQuotaWait), ignoring this interval.
+	// QuotaWaitSecs is the ceiling of the exponential backoff between quota
+	// retries when WaitOnQuota is set and the error carries no usable reset
+	// hint (none, or a stale instant that has already passed by our clock):
+	// waits start at backoff.QuotaBackoffBase and double per consecutive
+	// quota wait up to this. When the envelope surfaces a "resets ...pm
+	// (UTC)" instant still ahead, the loop sleeps until then instead (capped
+	// at MaxQuotaWait), ignoring this interval.
 	QuotaWaitSecs int `toml:"quota_wait_secs"`
 	// RunnerTerminalRetries is how many times a run that would end
 	// failed{runner_terminal} because of a dead-session streak instead

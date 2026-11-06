@@ -327,3 +327,57 @@ func TestComputeIsPure(t *testing.T) {
 		}
 	}
 }
+
+func TestQuotaBackoff(t *testing.T) {
+	cases := []struct {
+		name   string
+		secs   int
+		streak int
+		want   time.Duration
+	}{
+		{"first wait is the base", 0, 0, QuotaBackoffBase},
+		{"doubles per consecutive wait", 0, 1, 2 * QuotaBackoffBase},
+		{"doubles again", 0, 2, 4 * QuotaBackoffBase},
+		{"capped at the default ceiling", 0, 3, DefaultQuotaWait},
+		{"long streak stays at the ceiling", 0, 50, DefaultQuotaWait},
+		{"ceiling below the base wins", 120, 0, 120 * time.Second},
+		{"raised ceiling lets it grow", 3600, 3, 8 * QuotaBackoffBase},
+		{"raised ceiling is still MaxBackoff-bounded", 99999, 50, MaxBackoff},
+		{"negative streak is the base", 0, -1, QuotaBackoffBase},
+	}
+	for _, c := range cases {
+		if got := QuotaBackoff(c.secs, c.streak); got != c.want {
+			t.Errorf("%s: QuotaBackoff(%d, %d) = %v, want %v", c.name, c.secs, c.streak, got, c.want)
+		}
+	}
+}
+
+func TestQuotaResetWait(t *testing.T) {
+	at := func(h, m, s int) time.Time { return time.Date(2026, 11, 5, h, m, s, 0, time.UTC) }
+	cases := []struct {
+		name   string
+		text   string
+		now    time.Time
+		want   time.Duration
+		wantOK bool
+	}{
+		{"no hint", "You've hit your org's monthly usage limit", at(12, 0, 0), 0, false},
+		{"malformed hint", "resets 13:00pm (UTC)", at(12, 0, 0), 0, false},
+		{"ahead today", "resets 3:30pm (UTC)", at(12, 0, 0), 3*time.Hour + 31*time.Minute, true},
+		// The captured incident: asked at 20:51:07, the runner still said
+		// 8:50pm. Rolling that to tomorrow slept MaxQuotaWait.
+		{"just passed is stale", "You've hit your session limit · resets 8:50pm (UTC)", at(20, 51, 7), 0, false},
+		{"exactly now is stale", "resets 8:50pm (UTC)", at(20, 50, 0), 0, false},
+		{"at the window edge is stale", "resets 2pm (UTC)", at(20, 0, 0), 0, false},
+		{"past the window is tomorrow's", "resets 3am (UTC)", at(10, 0, 0), 17*time.Hour + time.Minute, true},
+		{"yesterday's, across midnight, is stale", "resets 11:59pm (UTC)", at(0, 1, 0), 0, false},
+		{"just before midnight, tomorrow's 12am is ahead", "resets 12am (UTC)", at(23, 58, 0), 3 * time.Minute, true},
+	}
+	for _, c := range cases {
+		got, ok := QuotaResetWait(c.text, c.now)
+		if got != c.want || ok != c.wantOK {
+			t.Errorf("%s: QuotaResetWait(%q, %v) = (%v, %v), want (%v, %v)",
+				c.name, c.text, c.now, got, ok, c.want, c.wantOK)
+		}
+	}
+}

@@ -135,7 +135,8 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 	// set, sleep a bounded, ctx-cancellable interval and resume the same
 	// state instead — the 5-hour/weekly/monthly window is expected to
 	// reset. When the error surfaces a reset instant ("resets 10:30pm
-	// (UTC)") the wait sleeps until then; otherwise it polls. Default stays
+	// (UTC)") still ahead, the wait sleeps until then; otherwise it backs
+	// off exponentially (see waitOnQuota). Default stays
 	// terminate so we don't regress the fail-fast behavior. SIGINT/SIGTERM
 	// during the sleep cancels it and the loop's top-level ctx.Err() check
 	// exits cleanly on the next tick.
@@ -475,19 +476,24 @@ func sleepBackoff(ctx context.Context, rc *runContext, next fsm.Outcome, mode ru
 // skipped on this path).
 //
 // When the runner surfaced a "resets ...pm (UTC)" hint (in the envelope
-// result or stderr) the wait sleeps until that instant, capped at
-// MaxQuotaWait; otherwise it falls back to the blind poll interval.
+// result or stderr) whose instant lies ahead, the wait sleeps until then,
+// capped at MaxQuotaWait. With no hint, or a stale one (an instant that has
+// already passed by our clock), it backs off exponentially from
+// QuotaBackoffBase over consecutive quota waits, capped at the
+// quota_wait_secs ceiling, so a window that has already reset is retried
+// within minutes.
 func waitOnQuota(ctx context.Context, rc *runContext, prev fsm.Outcome, sess *runner.Session) (fsm.Outcome, error) {
-	d := backoff.QuotaWait(rc.cfg.Loop.QuotaWaitSecs)
+	d := backoff.QuotaBackoff(rc.cfg.Loop.QuotaWaitSecs, rc.quotaStreak)
 	if sess != nil {
 		hint := sess.Stderr
 		if sess.Envelope != nil {
 			hint = sess.Envelope.Result + "\n" + hint
 		}
-		if reset := backoff.ParseRateLimitReset(hint, rc.clock.Now().UTC()); reset > 0 {
+		if reset, ok := backoff.QuotaResetWait(hint, rc.clock.Now().UTC()); ok {
 			d = backoff.CapQuotaWait(reset)
 		}
 	}
+	rc.quotaStreak++
 	// Round to whole seconds so the log line, the quota-wait narrative, the
 	// recorded QuotaWaitSecs, and the TUI countdown all agree (a parsed
 	// reset otherwise carries sub-second precision from time.Now).
@@ -1158,6 +1164,11 @@ func resumeCooldown(ctx context.Context, rc *runContext) {
 // runner outcome. A healthy session also refills the runner_terminal
 // retry budget.
 func updateStreaks(rc *runContext, mode runner.Mode) {
+	// Any other mode ends the quota streak waitOnQuota's backoff counts;
+	// waitOnQuota itself bumps it, after this has run.
+	if mode != runner.ModeQuota {
+		rc.quotaStreak = 0
+	}
 	switch mode {
 	case runner.ModeOK:
 		rc.consecFailures = 0

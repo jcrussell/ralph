@@ -18,9 +18,10 @@ The two pure functions are `runner.Classify(*Session) Mode` and `backoff.Compute
 | `oom`              | The scope ended `Result=oom-kill`, an unexplained `SIGKILL` (or exit 137 from a wrapper), or stderr mentions `out of memory` / `oom`. | no        | `oom_secs` |
 | `timeout`          | The runner was killed by ralph's session timeout (`session_timeout_secs`). | no  | `timeout_secs` |
 | `dead_session`     | Exit non-zero with no envelope, or envelope subtype `error_max_turns`. | no, but escalates | `unknown_secs` until threshold, then exponential |
+| `quota`            | A subscription usage cap: a 429 carrying a `resets ... (UTC)` hint, or `quota exceeded` / usage-limit wording. | **yes** (`failed{runner_terminal}`) unless `wait_on_quota` | see [Quota waits](#quota-waits) |
 | `unknown`          | Anything else with a non-zero exit and no signal.                     | no        | `unknown_secs` |
 
-`Mode.Terminal()` is true only for `auth` and `budget`. `dead_session` becomes terminal once the loop has seen `dead_session_threshold` consecutive dead sessions (the loop owns the streak counter; `Classify` does not).
+`Mode.Terminal()` is true for `auth`, `budget` and `quota`. `dead_session` becomes terminal once the loop has seen `dead_session_threshold` consecutive dead sessions (the loop owns the streak counter; `Classify` does not).
 
 The terminal mapping into `fsm.Reason` happens in the loop (`classifyToReason` in `internal/loop`):
 
@@ -63,7 +64,16 @@ The exponential cap is `min(n, 4)` so `2^4 = 16` is the highest multiplier. With
 
 ### Rate-limit reset parsing
 
-Anthropic surfaces a hint like `resets 4am (UTC)` in 429 responses. `backoff.ParseRateLimitReset(stderr, now)` finds the first match of `(?i)resets\s+(\d{1,2})\s*(am|pm)\s*\(UTC\)` and returns the duration from `now` to that wall-clock instant, plus a 60-second safety buffer. Returns 0 when no hint is present so the caller falls back to exponential.
+Anthropic surfaces a hint like `resets 4am (UTC)` or `resets 10:30pm (UTC)` in 429 responses. `backoff.ParseRateLimitReset(stderr, now)` finds the first match of `runner.ResetHintRE` and returns the duration from `now` to the next such wall-clock instant, plus a 60-second safety buffer. Returns 0 when no hint is present so the caller falls back to exponential.
+
+### Quota waits
+
+With `[loop] wait_on_quota` (or `--wait-on-quota`), a `quota` session does not terminate: the loop records a `quota-wait` row, sleeps, and retries the same state. The sleep comes from `waitOnQuota` in `internal/loop`:
+
+- **A reset hint still ahead** (`backoff.QuotaResetWait` returns ok): sleep until it, plus 60s, capped at `MaxQuotaWait` (6 h).
+- **No hint, or a stale one:** `backoff.QuotaBackoff(quota_wait_secs, streak)`, which is `QuotaBackoffBase` (5 min) doubled per consecutive quota wait, capped at `quota_wait_secs` (default 1800s, itself capped at `MaxBackoff`). With the defaults that is 5, 10, 20, 30, 30, ... minutes. Any non-quota iteration resets the streak.
+
+A hint is stale when it names an instant at most `StaleResetWindow` (6 h) before `now`, including yesterday's instant just across midnight. The runner can repeat a reset time that has just gone by, and reading it as the next day's would sleep `MaxQuotaWait` after a window that has already reset.
 
 ## Escalation rules
 
@@ -81,6 +91,6 @@ The `[loop] sleep_between_secs` knob is NOT used by `backoff.Compute`. It's rese
 ## See also
 
 - `internal/runner/classify.go` — the Mode taxonomy and `Classify` function.
-- `internal/backoff/backoff.go` — `Compute`, `ParseRateLimitReset`, and the math constants (`MaxBackoff = 80m`, `OKBackoff = 10s`, `expCap = 4`).
+- `internal/backoff/backoff.go` — `Compute`, `ParseRateLimitReset`, `QuotaResetWait`, `QuotaBackoff`, and the math constants (`MaxBackoff = 80m`, `OKBackoff = 10s`, `expCap = 4`, `MaxQuotaWait = 6h`, `QuotaBackoffBase = 5m`).
 - `docs/reference/config.md` — the `[backoff]`, `[budget]`, and `[loop]` knobs.
 - `docs/concepts/state-machine.md` — how the FSM consumes terminal modes and the `consecutive_dirty` predicate.

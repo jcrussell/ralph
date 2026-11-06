@@ -31,6 +31,20 @@ const OKBackoff = 10 * time.Second
 // when wait-on-quota is enabled but no explicit interval is configured.
 const DefaultQuotaWait = 30 * time.Minute
 
+// QuotaBackoffBase is the first sleep of a quota wait that has no usable
+// reset instant (no hint, or a stale one); each consecutive quota wait
+// doubles it, up to the QuotaWait ceiling. See QuotaBackoff.
+const QuotaBackoffBase = 5 * time.Minute
+
+// StaleResetWindow is how far in the past a "resets ...(UTC)" hint may lie
+// and still be read as an already-passed instant rather than tomorrow's.
+// A runner can repeat a reset time that has just gone by (the window had
+// not yet rolled over when it answered, or the local clock runs ahead), and
+// rolling that hint forward a day turned a minutes-long wait into a
+// MaxQuotaWait sleep. It matches MaxQuotaWait: the loop never sleeps longer
+// than that in one go, so a hint further back cannot be one it slept toward.
+const StaleResetWindow = MaxQuotaWait
+
 // MaxQuotaWait bounds a quota wait derived from a parsed reset instant.
 // Larger than MaxBackoff because a known reset time ("resets 10:30pm
 // (UTC)") is trustworthy to sleep straight through — and the sleep is
@@ -133,6 +147,44 @@ func QuotaWait(secs int) time.Duration {
 	return capDur(d)
 }
 
+// QuotaBackoff is the quota wait when the runner gave no usable reset
+// instant: QuotaBackoffBase * 2^streak (streak = consecutive quota waits
+// before this one), capped at the QuotaWait(secs) ceiling. A cap whose
+// window has already reset is retried within minutes instead of a full
+// blind-poll interval, and one that persists backs off toward the ceiling.
+func QuotaBackoff(secs, streak int) time.Duration {
+	ceiling := QuotaWait(secs)
+	if d := expBackoff(QuotaBackoffBase, streak); d < ceiling {
+		return d
+	}
+	return ceiling
+}
+
+// QuotaResetWait reads a "resets ...(UTC)" hint for a quota wait. It returns
+// the sleep until the next such instant plus ParseRateLimitReset's 60s
+// buffer, and ok=true. When the hint names an instant at most
+// StaleResetWindow ago (yesterday's, across midnight, included) it is stale:
+// the window has, by our clock, already reset, so it returns ok=false and
+// the caller backs off with QuotaBackoff rather than sleeping toward the
+// next day's instant. A missing or malformed hint is also ok=false.
+func QuotaResetWait(text string, now time.Time) (d time.Duration, ok bool) {
+	now = now.UTC()
+	today, ok := parseResetClock(text, now)
+	if !ok {
+		return 0, false
+	}
+	for _, c := range []time.Time{today.Add(-24 * time.Hour), today} {
+		if !c.After(now) && now.Sub(c) <= StaleResetWindow {
+			return 0, false
+		}
+	}
+	reset := today
+	if !reset.After(now) {
+		reset = reset.Add(24 * time.Hour)
+	}
+	return reset.Sub(now) + time.Minute, true
+}
+
 // CapQuotaWait clamps a quota wait derived from a parsed reset instant to
 // [0, MaxQuotaWait]. Distinct from capDur (MaxBackoff) because a known
 // reset time is trusted for a long, single sleep; see MaxQuotaWait.
@@ -183,23 +235,39 @@ func dur(secs int, fallback time.Duration) time.Duration {
 // time.Now().UTC(). Splitting now out keeps the function deterministic
 // for tests.
 func ParseRateLimitReset(stderr string, now time.Time) time.Duration {
+	now = now.UTC()
+	reset, ok := parseResetClock(stderr, now)
+	if !ok {
+		return 0
+	}
+	if !reset.After(now) {
+		reset = reset.Add(24 * time.Hour)
+	}
+	return reset.Sub(now) + time.Minute
+}
+
+// parseResetClock extracts a "resets Nam/pm (UTC)" hint (with optional
+// minutes) as that wall-clock instant on now's UTC date, which may be at or
+// before now; the callers decide what a past instant means. ok is false when
+// no well-formed hint is present.
+func parseResetClock(text string, now time.Time) (time.Time, bool) {
 	// runner.ResetHintRE is the canonical pattern, shared with the classifier
 	// so the "is this a cap?" check and the "how long until reset?" math can
 	// never drift apart. Its capture groups are (hour, minutes?, am/pm).
-	m := runner.ResetHintRE.FindStringSubmatch(stderr)
+	m := runner.ResetHintRE.FindStringSubmatch(text)
 	if m == nil {
-		return 0
+		return time.Time{}, false
 	}
 	hour, err := strconv.Atoi(m[1])
 	if err != nil {
-		return 0
+		return time.Time{}, false
 	}
 	// m[2] (minutes) is empty for hour-only hints — guard before Atoi so
 	// the common "resets 4am (UTC)" case doesn't error out to 0.
 	min := 0
 	if m[2] != "" {
 		if min, err = strconv.Atoi(m[2]); err != nil {
-			return 0
+			return time.Time{}, false
 		}
 	}
 	// The regex accepts up to two digits per field, so reject out-of-range
@@ -207,7 +275,7 @@ func ParseRateLimitReset(stderr string, now time.Time) time.Duration {
 	// them into a different instant. A malformed hint returns 0 so the
 	// caller falls through to exponential backoff.
 	if hour < 1 || hour > 12 || min > 59 {
-		return 0
+		return time.Time{}, false
 	}
 	switch strings.ToLower(m[3]) {
 	case "pm":
@@ -219,10 +287,5 @@ func ParseRateLimitReset(stderr string, now time.Time) time.Duration {
 			hour = 0
 		}
 	}
-	now = now.UTC()
-	reset := time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, time.UTC)
-	if !reset.After(now) {
-		reset = reset.Add(24 * time.Hour)
-	}
-	return reset.Sub(now) + time.Minute
+	return time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, time.UTC), true
 }
