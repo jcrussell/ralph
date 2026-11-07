@@ -1,0 +1,81 @@
+# Unattended ralph loop for one repository. Replace USER, UID,
+# /path/to/repo and the deadline, then install:
+#   sudo cp contrib/systemd/ralph.service /etc/systemd/system/ralph-myrepo.service
+#   sudo systemctl daemon-reload
+#   sudo loginctl enable-linger USER   # keeps user@UID (ralph's --user scopes) up without a login
+#   sudo systemctl enable --now ralph-myrepo
+# Logs: journalctl -u ralph-myrepo -f. See docs/guides/unattended.md.
+[Unit]
+Description=ralph autonomous loop (myrepo)
+After=network-online.target user@UID.service
+Wants=network-online.target user@UID.service
+# Stop restarting a ralph that keeps crashing.
+StartLimitIntervalSec=3600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=USER
+Group=USER
+WorkingDirectory=/path/to/repo
+Environment=HOME=/home/USER
+# A system service gets a minimal PATH: include wherever ralph, claude, bd
+# and the gate's toolchain live.
+Environment=PATH=/home/USER/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=LC_ALL=C.UTF-8
+# ralph isolates each iteration with `systemd-run --user --scope`, which
+# needs the user manager's bus; a system service has neither variable.
+Environment=XDG_RUNTIME_DIR=/run/user/UID
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/UID/bus
+# Proxy and CA variables the runner needs go here too (HTTPS_PROXY,
+# NODE_EXTRA_CA_CERTS, ...): the service does not read your shell profile.
+
+# The run's wall-clock deadline: an absolute date-time, so every restart
+# keeps the same window. Start a new window with
+# `systemctl edit ralph-myrepo` (Environment=RALPH_UNTIL=...).
+Environment=RALPH_UNTIL=2026-11-14T18:00
+# --unlimited lifts the iteration cap (the deadline and [budget] bound the
+# run); --wait-on-quota rides out a usage cap instead of failing. Set
+# [loop] runner_terminal_retries in .ralph/config.toml to cool down and
+# retry a dead runner instead of stopping.
+ExecStart=/usr/local/bin/ralph run --no-tui --unlimited --wait-on-quota --until ${RALPH_UNTIL}
+
+# ralph's exit code names the outcome (docs/reference/exit-codes.md).
+# Restart on 1 (unexpected error) and a crash: ralph resumes mid-run with
+# its totals intact. Stop on every deliberate end: 0 done{queue_empty},
+# 10 done{idle}, 11 done{iter_cap}, 12 done{deadline}, 20 failed{budget},
+# 21 failed{auth} (log the runner in again), 22 failed{runner_terminal}
+# (retries spent), 2 usage, and 3 (fsm is failed{*}: inspect, then run
+# once with --fresh). Don't restart on a done{*}: the next run starts
+# fresh, zeroing the cost and wallclock totals [budget] counts.
+Restart=always
+RestartSec=300
+RestartPreventExitStatus=0 2 3 10 11 12 20 21 22
+# Deliberate ends that need no attention; 143 is ralph exiting on the
+# SIGTERM from `systemctl stop`. 20-22 and 3 leave the unit failed.
+SuccessExitStatus=10 11 12 143
+# On stop, SIGTERM goes to ralph alone (mixed): it cancels the session,
+# stops that iteration's --user scope and exits 143. The default
+# (control-group) would also signal the gate, hooks and git/bd mid-call,
+# turning a clean stop into an error exit. Anything still running after
+# TimeoutStopSec gets SIGKILL.
+KillMode=mixed
+TimeoutStopSec=300
+# No ExecStopPost scope sweep: ralph stops its own scopes, and a glob
+# such as ralph-*.scope would also kill other repos' (and interactive)
+# runs owned by the same user.
+# Gate and state hooks run in THIS cgroup, not in the runner's scope, so cap
+# it too. Size it so this plus [loop] memory_limit_bytes fits in RAM with
+# room to spare (`ralph doctor` checks only the runner cap).
+MemoryAccounting=true
+MemoryMax=5G
+MemorySwapMax=0
+# A gate or hook that hits MemoryMax is OOM-killed and reads as a failed
+# gate; the default (stop) would stop the whole service instead, and the
+# restart would run the same session and gate into the same wall.
+OOMPolicy=continue
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

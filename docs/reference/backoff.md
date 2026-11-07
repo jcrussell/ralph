@@ -15,7 +15,7 @@ The two pure functions are `runner.Classify(*Session) Mode` and `backoff.Compute
 | `budget`           | Stderr/envelope mentions `credit balance` or `insufficient credit`.   | **yes** (`failed{runner_terminal}`) | `0` — loop exits |
 | `rate_limit`       | Stderr/envelope mentions `rate limit` or `too many requests`.         | no        | `Retry-After` if parsed, else exponential on `rate_limit_default` |
 | `model_overloaded` | Stderr/envelope mentions `overloaded`.                                | no        | constant `rate_limit_default` |
-| `oom`              | Exit code 137, or stderr mentions `out of memory` / `oom`.            | no        | `oom_secs` |
+| `oom`              | The scope ended `Result=oom-kill`, an unexplained `SIGKILL` (or exit 137 from a wrapper), or stderr mentions `out of memory` / `oom`. | no        | `oom_secs` |
 | `timeout`          | The runner was killed by ralph's session timeout (`session_timeout_secs`). | no  | `timeout_secs` |
 | `dead_session`     | Exit non-zero with no envelope, or envelope subtype `error_max_turns`. | no, but escalates | `unknown_secs` until threshold, then exponential |
 | `unknown`          | Anything else with a non-zero exit and no signal.                     | no        | `unknown_secs` |
@@ -27,6 +27,22 @@ The terminal mapping into `fsm.Reason` happens in the loop (`classifyToReason` i
 - `Mode.auth` → `fsm.ReasonAuth` → `failed{auth}`.
 - `Mode.budget` → `fsm.ReasonRunnerTerminal` → `failed{runner_terminal}`. Note the distinction: `fsm.ReasonBudget` is reserved for **ralph's own** cost cap (`[budget] max_cost_usd`), not the runner's.
 - `Mode.dead_session` once `streak >= dead_session_threshold` → `fsm.ReasonRunnerTerminal`.
+
+### Diagnosing a session
+
+Every iteration record (`summary.jsonl` row and `iter-NNNN-*.json`) that ran a session records how the runner process ended: `exit_code`, `signal` (e.g. `SIGKILL`, when a signal ended it), `oom_killed` (systemd recorded the runner's scope as `Result=oom-kill`: an OOM killer, the scope's cap or the host's, killed a process in it) and `killed_by_timeout`. Rows with any mode other than `ok` also carry `stderr_tail`, the last 1000 bytes of the runner's stderr. A `dead_session` narrative names the cause, e.g. `clean → clean: dead session (exit 1)`, and dead-streak and terminal-failure incidents repeat it. `ralph trace <iter>` shows the full record.
+
+`oom_killed` doesn't say which limit ran out (the kernel counts any OOM kill in the victim's cgroup); the kernel log does: `Memory cgroup out of memory` for a cgroup cap, `Out of memory: Killed process` for the host (see `ralph doctor`'s memory headroom check).
+
+### runner_terminal retries
+
+By default `failed{runner_terminal}` ends the run. With `[loop] runner_terminal_retries = N` (and not `--once` / `--dry-run`), the loop instead absorbs a dead-session streak's `runner_terminal` up to N times in a row (a runner-side `budget` or `quota` failure, which also maps to `runner_terminal`, still ends the run: a cooldown won't refill credits):
+
+1. The iteration routes as if the runner had not failed (to `clean`, `dirty`, or a terminal like `failed{budget}`, `done{deadline}` or `done{queue_empty}`, which then ends the run as usual) and is persisted with a narrative note such as `runner_terminal: retry 1/6 after 15m0s cooldown`.
+2. The loop sleeps `runner_terminal_cooldown_secs` (default 900), cut short at `--until` or by SIGINT/SIGTERM, with a `sleeping (runner cooldown)` badge in the TUI and a warning in `orchestrator.log`.
+3. The dead-session and failure streaks reset, and the next iteration starts over.
+
+Cost, session wallclock and commit totals carry over, so `[budget]` still bounds the whole run. A healthy (`ok`) session resets the retry count. The count and the cooldown's end (`cooldown_until`) are kept in `fsm.json`, so restarting ralph neither refills the count nor skips the rest of a cooldown (a restart mid-cooldown sleeps out the remainder first); `--fresh` and the automatic reset after a `done{*}` do. `auth` is never retried. Once the retries are spent, the run ends `failed{runner_terminal}` (exit 22).
 
 ## Backoff math
 

@@ -52,9 +52,9 @@ Then take one real iteration:
 ralph run --once
 ```
 
-For a full autonomous session, drop `--once`. The loop terminates on `done{queue_empty}`, `done{iter_cap}`, or one of the `failed{*}` outcomes. Full flags in [`ralph run`](../reference/ralph_run.md).
+For a full autonomous session, drop `--once`. The loop terminates on `done{queue_empty}`, `done{iter_cap}`, or one of the `failed{*}` outcomes. Each outcome has its own [exit code](../reference/exit-codes.md). Full flags in [`ralph run`](../reference/ralph_run.md).
 
-Since a long run is unattended, get pinged when it stops: edit `.ralph/hooks/notify` (scaffolded as a no-op) to send a Slack/desktop alert — it fires on every terminal outcome with `RALPH_STATE`, `RALPH_REASON`, and `RALPH_COST_USD` in the env. See [Hooks](../concepts/hooks.md).
+Since a long run is unattended, get pinged when it stops: edit `.ralph/hooks/notify` (scaffolded as a no-op) to send a Slack/desktop alert — it fires on every terminal outcome with `RALPH_STATE`, `RALPH_REASON`, and `RALPH_COST_USD` in the env. See [Hooks](../concepts/hooks.md). For runs that should survive crashes and reboots, see [unattended runs](unattended.md).
 
 ### Resuming and resetting
 

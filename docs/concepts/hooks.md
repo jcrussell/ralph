@@ -68,7 +68,7 @@ Conditional:
 
 - `RALPH_NEXT_STATE` — exit hooks only.
 - `RALPH_FAILURE_MODE` / `RALPH_FAILURE_REASON` — failure hook only.
-- `RALPH_REASON` — terminal reason for the `notify` hook (`queue_empty`, `iter_cap`, `idle`, `budget`, `auth`, `runner_terminal`).
+- `RALPH_REASON` — terminal reason for the `notify` hook (`queue_empty`, `iter_cap`, `idle`, `deadline`, `budget`, `auth`, `runner_terminal`).
 - `RALPH_COST_USD` / `RALPH_DURATION_SECS` — `notify` hook only: the run's cumulative cost and runner runtime in seconds, totaled across the whole run (omitted when zero).
 - `RALPH_REVIEW_BRANCH` / `RALPH_REVIEW_BASE` — review states only.
 

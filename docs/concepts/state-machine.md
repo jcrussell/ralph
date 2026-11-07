@@ -38,18 +38,21 @@ Render this against a real run with `ralph fsm graph` — that overlays observed
 | `dirty`          | loop     | Working tree dirty; assess & finish or accumulate streak.                                   |
 | `revert`         | one-shot | Auto-revert triggered (3 consecutive dirty iterations); `git checkout -- .` + `bd defer`. Suppressed in review mode. |
 | `review`         | loop     | Review-mode loop; agent decides ingest / fix / address-gate / file-merge per iteration.    |
-| `done{Reason}`   | terminal | Exit 0. Reasons: `QueueEmpty` (nothing left to do), `IterCap` (max iterations reached), `Idle` (too many consecutive no-op iterations). |
-| `failed{Reason}` | terminal | Exit 1. Reasons: `Budget`, `Auth`, `RunnerTerminal`. Runs `hooks/failure`.                 |
+| `done{Reason}`   | terminal | Reasons: `QueueEmpty` (nothing left to do), `IterCap` (max iterations reached), `Idle` (too many consecutive no-op iterations), `Deadline` (the run's `--until` time passed). |
+| `failed{Reason}` | terminal | Reasons: `Budget`, `Auth`, `RunnerTerminal`. Runs `hooks/failure`.                 |
+
+Each terminal outcome exits with its own code; see [exit codes](../reference/exit-codes.md).
 
 There is no `idle` *state* — `done{idle}` is a terminal reason, not a state. A state with no prompt and no hook is just a function call wearing a hat — routing is centralized in `selectNextState`.
 
 ## Routing
 
-After every iteration, `fsm.SelectNextState(ctx, in)` evaluates predicates in order and returns the next `Outcome`. Real source: `internal/fsm/select.go`. The eight-step decision tree:
+After every iteration, `fsm.SelectNextState(ctx, in)` evaluates predicates in order and returns the next `Outcome`. Real source: `internal/fsm/select.go`. The decision tree:
 
 ```
 1. RunnerFailure ∈ {auth, budget, runner_terminal}  -> failed{<reason>}
 2. BudgetExhausted                                  -> failed{budget}
+2.5 Now >= Deadline (--until, when set)             -> done{deadline}
 3. CapsExceeded                                     -> done{iter_cap}
 4. ReviewMode:
      if ReviewQueueEmpty && GitClean                -> done{queue_empty}
@@ -61,13 +64,14 @@ After every iteration, `fsm.SelectNextState(ctx, in)` evaluates predicates in or
 8. otherwise                                        -> clean
 ```
 
-`RunnerFailure` is a `fsm.Reason` — the loop maps `internal/runner.Mode` (auth, budget, dead_session-after-threshold) to a Reason before calling `SelectNextState`. This keeps `internal/fsm` independent of `internal/runner`.
+`RunnerFailure` is a `fsm.Reason` — the loop maps `internal/runner.Mode` (auth, budget, dead_session-after-threshold) to a Reason before calling `SelectNextState`. This keeps `internal/fsm` independent of `internal/runner`. When `[loop] runner_terminal_retries` is set, the loop absorbs a `runner_terminal` reason instead (routing as if the runner had not failed, then sleeping `runner_terminal_cooldown_secs`), up to that many times in a row; see [backoff](../reference/backoff.md#runner_terminal-retries).
 
 Notes on ordering:
 
 - **Failures first.** Terminal runner failure and budget exhaustion always win.
+- **Deadline after budget.** A run that overspent reports `failed{budget}` even past its deadline. The loop also checks the deadline before starting each iteration (so a resume, a quota wait or a runner cooldown can't start one past it) and cuts every wait short at it; an iteration already running finishes (runner, gate and hooks), so a run can end late by up to `session_timeout_secs` plus the gate timeout plus the other hooks' time (they have no timeout), unbounded if either timeout is 0.
 - **Caps before review/run.** A graceful exit on `max_iterations` takes precedence over re-entering a loop state.
-- **`done` requires `git_clean`.** Prevents exiting with uncommitted work.
+- **`done{queue_empty}` requires `git_clean`.** Prevents exiting "nothing left to do" with uncommitted work. The hard stops (`done{iter_cap}`, `done{deadline}`, `failed{budget}`) end the run whatever the tree holds; the next run starts by routing `start → dirty` and picks the work back up.
 - **Review uses label-scoped queue.** Otherwise an unrelated empty global queue would terminate review mid-stream.
 
 ## Predicates

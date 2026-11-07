@@ -16,11 +16,16 @@ The repo-level file is scaffolded by `ralph init` with every section present and
 |--------------------------|---------|---------|---------|
 | `max_iterations`         | int     | `30`    | Hard cap on iterations. `0` = unlimited (not recommended without a budget cap). When `fsm.Iter >= max_iterations`, the FSM routes to `done{iter_cap}`. CLI overrides (`run --max-iterations`, `run --unlimited`, `review --max-rounds`) apply to one invocation only; the effective value is recorded on the run manifest so `ralph status` reports the cap the loop is actually running under rather than the one on disk. |
 | `session_timeout_secs`   | int     | `3600`  | Per-iteration runner timeout. ralph kills the runner when exceeded; the iteration is classified as `timeout`. |
-| `memory_limit_bytes`     | string  | `"7G"`  | systemd-run memory cap for the runner cgroup. Suffixes `K`/`M`/`G`/`T` use 1024 multipliers; a trailing `B` is accepted. Empty or `"0"` disables the cap. |
+| `memory_limit_bytes`     | string  | `"7G"`  | systemd-run memory cap for the runner cgroup. Suffixes `K`/`M`/`G`/`T` use 1024 multipliers; a trailing `B` is accepted. Empty or `"0"` disables the cap. Leave at least 1G under the host's RAM (and any `MemoryMax` on your user slice); `ralph doctor` warns when it doesn't. |
 | `sleep_between_secs`     | int     | `5`     | Sleep between iterations. Backoff modes (rate-limit, OOM, timeout) override this with their own durations. |
 | `max_noop_iters`         | int     | `10`    | Exit `done{idle}` after this many consecutive no-op iterations (runner OK, zero commits, no bd diff, state unchanged). Guards against an endless spin when `bd ready` keeps reporting items the agent can't action. `0` disables the cap. |
 | `wait_on_quota`          | bool    | `false` | When `true`, a runner quota cap (the resettable 5-hour/weekly/monthly window, mode `quota`) sleeps `quota_wait_secs` and resumes the same state instead of exiting `failed{runner_terminal}`. Default `false` keeps quota terminal (fail fast). The `--wait-on-quota` flag enables it for one invocation. |
 | `quota_wait_secs`        | int     | `1800`  | Bounded blind-poll sleep between quota retries when `wait_on_quota` is set and the error carries no reset hint (capped at the backoff `MaxBackoff` of 80 min). When the envelope surfaces a `resets 10:30pm (UTC)` instant, the loop sleeps until then instead (capped at `MaxQuotaWait`, 6 h), ignoring this interval. The sleep is interruptible by SIGINT/SIGTERM. While waiting, the live `ralph run` header shows a `sleeping (quota)` badge counting down to the resume. |
+| `wait_for_beads`         | bool    | `false` | When `true`, `done{idle}` and `done{queue_empty}` park instead of exiting: the loop polls `bd ready` every `bead_poll_secs` and resumes when the set of ready issues changes. The `--wait-for-beads` flag enables it for one invocation. |
+| `bead_poll_secs`         | int     | `60`    | Poll interval while parked on `wait_for_beads`. |
+| `max_bead_wait_secs`     | int     | `0`     | Bound on one park; `0` parks indefinitely (or until `--until`). |
+| `runner_terminal_retries` | int    | `0`     | How many times in a row a run that would end `failed{runner_terminal}` on a dead-session streak instead cools down and carries on (runner `budget`/`quota` failures are not retried). Reset by a healthy session. `0` keeps it terminal. See [backoff](backoff.md#runner_terminal-retries). |
+| `runner_terminal_cooldown_secs` | int | `900` | Sleep before each such retry. |
 
 ## `[runner]`
 
