@@ -4,10 +4,7 @@ package isolation
 
 import (
 	"context"
-	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -54,53 +51,23 @@ func TestNewScopeNormalizesSuffix(t *testing.T) {
 	}
 }
 
-func TestOOMKilledFile(t *testing.T) {
-	cases := []struct {
-		name string
-		body string
-		want bool
+func TestParseState(t *testing.T) {
+	for _, c := range []struct {
+		out  string
+		want unitState
 	}{
-		{"no oom", "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n", false},
-		{"one oom kill", "low 0\nhigh 0\nmax 5\noom 2\noom_kill 1\n", true},
-		{"many oom kills", "oom_kill 7\n", true},
-		{"trailing whitespace", "oom_kill   3  \n", true},
-		{"no oom_kill line", "low 0\nhigh 0\n", false},
-		{"malformed value", "oom_kill notanumber\n", false},
-	}
-	for _, c := range cases {
-		path := filepath.Join(t.TempDir(), "memory.events")
-		if err := os.WriteFile(path, []byte(c.body), 0o644); err != nil {
-			t.Fatal(err)
+		{"LoadState=loaded\nActiveState=failed\nResult=oom-kill\n", unitState{loaded: true, settled: true, result: "oom-kill"}},
+		{"Result=exit-code\nActiveState=failed\nLoadState=loaded\n", unitState{loaded: true, settled: true, result: "exit-code"}},
+		// Still running down (or held open by orphans): not final yet.
+		{"LoadState=loaded\nActiveState=active\nResult=success\n", unitState{loaded: true}},
+		{"LoadState=loaded\nActiveState=deactivating\nResult=success\n", unitState{loaded: true}},
+		// Collected (clean exit) or never existed: settled, no verdict.
+		{"LoadState=not-found\nActiveState=inactive\nResult=success\n", unitState{settled: true}},
+		{"", unitState{settled: true}},
+	} {
+		if got := parseState(c.out); got != c.want {
+			t.Errorf("parseState(%q) = %+v, want %+v", c.out, got, c.want)
 		}
-		got, err := OOMKilledFile(path)
-		if err != nil {
-			t.Errorf("%s: err = %v", c.name, err)
-			continue
-		}
-		if got != c.want {
-			t.Errorf("%s: OOMKilledFile = %v, want %v\nbody:\n%s", c.name, got, c.want, c.body)
-		}
-	}
-}
-
-func TestOOMKilledFileMissing(t *testing.T) {
-	got, err := OOMKilledFile(filepath.Join(t.TempDir(), "does-not-exist"))
-	if err != nil {
-		t.Errorf("missing file err = %v, want nil", err)
-	}
-	if got {
-		t.Errorf("missing file = true, want false")
-	}
-}
-
-func TestEventsPathShape(t *testing.T) {
-	s := NewScope("ralph-test", "")
-	p := s.EventsPath()
-	if !strings.HasPrefix(p, "/sys/fs/cgroup/user.slice/") {
-		t.Errorf("EventsPath = %q, want /sys/fs/cgroup/user.slice prefix", p)
-	}
-	if !strings.HasSuffix(p, "/ralph-test.scope/memory.events") {
-		t.Errorf("EventsPath = %q, want suffix /ralph-test.scope/memory.events", p)
 	}
 }
 

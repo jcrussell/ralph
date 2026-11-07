@@ -54,14 +54,19 @@ func New(command string, args []string, model, memLimit string) *Runner {
 // from these fields and others.
 type Session struct {
 	ExitCode        int
+	Signal          string // terminating signal ("SIGKILL"); "" on a normal exit
 	Duration        time.Duration
 	KilledByTimeout bool
-	OOMSignal       bool // cgroup memory.events reported oom_kill > 0
+	OOMSignal       bool // the scope ended with systemd Result=oom-kill (hit MemoryMax)
 	Stdout          string
 	Stderr          string
 	StdoutTail      string
 	StderrTail      string
 	Envelope        *Envelope
+	// ScopeStopErr is non-nil when stopping the systemd scope after the
+	// run failed; processes may have outlived the session. Informational
+	// only — the session result itself stands.
+	ScopeStopErr error
 }
 
 // Envelope is the parsed view of claude's --output-format=json
@@ -125,7 +130,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOpts) (*Session, error) {
 
 	// Wrap argv with systemd-run --user --scope when memLimit is set so
 	// the child runs under a cgroup with MemoryMax + MemorySwapMax=0 and
-	// post-exec we can read cgroup memory.events for an OOM signal more
+	// post-exec we can read the unit's systemd Result for an OOM signal more
 	// reliable than ExitCode==137. memLimit="" skips this and execs
 	// command directly (test path, or operator opt-out via empty
 	// memory_limit_bytes).
@@ -165,6 +170,19 @@ func (r *Runner) Run(ctx context.Context, opts RunOpts) (*Session, error) {
 	runErr := cmd.Run()
 	dur := time.Since(start)
 
+	// End the scope: kill anything the runner left behind (the
+	// process-group kill on cancel misses descendants that left the
+	// group), read systemd's verdict for the unit — the cgroup and its
+	// memory.events are already gone, but a failed scope keeps
+	// Result=oom-kill until it is reset — then stop and reset it.
+	var oomKilled bool
+	var stopErr error
+	if r.memLimit != "" {
+		var res string
+		res, stopErr = scope.Cleanup(ctx)
+		oomKilled = res == isolation.ResultOOMKill
+	}
+
 	// Close before reading back so any buffered writes flush to disk.
 	_ = stdoutFile.Close()
 	_ = stderrFile.Close()
@@ -187,6 +205,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOpts) (*Session, error) {
 	errStr := string(errBytes)
 	s := &Session{
 		ExitCode:        cmd.ProcessState.ExitCode(),
+		Signal:          exitSignal(cmd.ProcessState),
 		Duration:        dur,
 		KilledByTimeout: timeoutKilled,
 		Stdout:          outStr,
@@ -195,15 +214,8 @@ func (r *Runner) Run(ctx context.Context, opts RunOpts) (*Session, error) {
 		StderrTail:      tail(errStr, 1000),
 	}
 	s.Envelope = parseEnvelope(outStr)
-	// Best-effort OOM probe: when wrapped, the cgroup memory.events file
-	// often still exists for a moment after the scope's child exits.
-	// A missing file (cleanup already happened) returns false — the
-	// ExitCode==137 fallback in Classify picks up the rest.
-	if r.memLimit != "" {
-		if oom, _ := isolation.OOMKilledFile(scope.EventsPath()); oom {
-			s.OOMSignal = true
-		}
-	}
+	s.OOMSignal = oomKilled
+	s.ScopeStopErr = stopErr
 	return s, nil
 }
 

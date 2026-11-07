@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunMissingHookIsNoOp(t *testing.T) {
@@ -204,5 +205,25 @@ func skipNonPOSIX(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("requires POSIX shell")
+	}
+}
+
+// A cancelled hook is killed with everything it started, so Run returns
+// promptly instead of waiting on a child that holds the output pipe.
+func TestRunCancelKillsHookTree(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gate")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nsleep 30\necho done\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, _ = Run(ctx, path, Env{Repo: dir}, nil, nil, nil)
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("Run took %s after cancel; the hook's child kept it waiting", elapsed)
 	}
 }

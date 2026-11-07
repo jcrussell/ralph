@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/jcrussell/ralph/internal/paths"
 )
@@ -120,6 +121,10 @@ func Run(ctx context.Context, path string, env Env, stdin io.Reader, stdout, std
 	}
 
 	cmd := exec.CommandContext(ctx, path)
+	killTreeOnCancel(cmd)
+	// Bound the wait for output pipes after the kill, in case something
+	// left the group and still holds them.
+	cmd.WaitDelay = 5 * time.Second
 	cmd.Dir = env.Repo
 	cmd.Env = buildEnv(env)
 	if stdin != nil {

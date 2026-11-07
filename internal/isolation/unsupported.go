@@ -25,9 +25,12 @@ func (s Scope) UnitBase() string { return s.Unit }
 func (s Scope) Argv(command string, args []string) []string {
 	return append([]string{command}, args...)
 }
-func (s Scope) EventsPath() string { return "" }
+func (s Scope) Stop(ctx context.Context) error              { return nil }
+func (s Scope) Cleanup(ctx context.Context) (string, error) { return "", nil }
 
-func OOMKilledFile(path string) (bool, error) { return false, ErrUnsupported }
+const ResultOOMKill = "oom-kill"
+
+func (s Scope) Result(ctx context.Context) (string, error) { return "", ErrUnsupported }
 
 func Available(ctx context.Context) error {
 	return errors.New("isolation: " + runtime.GOOS + " is not Linux; ralph requires systemd-run --user --scope")

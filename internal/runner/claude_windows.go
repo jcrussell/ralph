@@ -2,7 +2,10 @@
 
 package runner
 
-import "os/exec"
+import (
+	"os"
+	"os/exec"
+)
 
 // setupProcessGroup is a no-op on Windows. `ralph run` errors at
 // startup on non-Linux (isolation is Linux-only), so this cancel path
@@ -10,3 +13,6 @@ import "os/exec"
 // Cancel (cmd.Process.Kill) when none is set, which is sufficient for
 // cross-compile completeness.
 func setupProcessGroup(_ *exec.Cmd) {}
+
+// exitSignal is always "" on Windows: there are no POSIX signals.
+func exitSignal(_ *os.ProcessState) string { return "" }

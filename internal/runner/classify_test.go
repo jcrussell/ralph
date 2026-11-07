@@ -14,7 +14,7 @@ func TestClassifyTimeoutWins(t *testing.T) {
 }
 
 func TestClassifyOOMSignalBeatsExitCode(t *testing.T) {
-	// OOMSignal (cgroup memory.events oom_kill > 0) wins over the
+	// OOMSignal (scope Result=oom-kill) wins over the
 	// envelope, stderr scan, and ExitCode==137 fallback.
 	s := &Session{OOMSignal: true, ExitCode: 0, Envelope: &Envelope{}}
 	if got := Classify(s); got != ModeOOM {
@@ -276,6 +276,9 @@ func TestClassifyExitCodeFallbacks(t *testing.T) {
 		want Mode
 	}{
 		{"137 OOM signal", &Session{ExitCode: 137}, ModeOOM},
+		{"direct SIGKILL OOM signal", &Session{ExitCode: -1, Signal: "SIGKILL"}, ModeOOM},
+		{"other signal is a dead session", &Session{ExitCode: -1, Signal: "SIGSEGV"}, ModeDeadSession},
+		{"timeout SIGKILL stays timeout", &Session{ExitCode: -1, Signal: "SIGKILL", KilledByTimeout: true}, ModeTimeout},
 		{"non-zero no envelope dead", &Session{ExitCode: 2}, ModeDeadSession},
 		{"non-zero with envelope unknown", &Session{ExitCode: 2, Envelope: &Envelope{}}, ModeUnknown},
 		{"zero exit no envelope dead", &Session{ExitCode: 0}, ModeDeadSession},

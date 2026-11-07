@@ -118,7 +118,7 @@ func Classify(s *Session) Mode {
 		return ModeTimeout
 	}
 
-	// Cgroup memory.events from the systemd-run scope is authoritative
+	// The scope's systemd Result=oom-kill is authoritative
 	// when set — exit code 137 (the fallback below) can also mean
 	// "killed by some other SIGKILL", so prefer the in-kernel signal.
 	if s.OOMSignal {
@@ -196,9 +196,14 @@ func Classify(s *Session) Mode {
 		return ModeOOM
 	}
 
-	// Process-level OOM signal: SIGKILL surfaces as exit code 137.
-	// Only trust it when nothing else explained the failure.
-	if s.ExitCode == 137 {
+	// Process-level OOM signal: a SIGKILL nobody else explains is most
+	// likely the kernel OOM killer (the host or user slice ran out before
+	// the scope's own cap). A wrapper shell reports its child's SIGKILL
+	// as exit 137; a runner exec'd directly reports the signal itself (Go
+	// gives ExitCode -1 then). ralph's own kills are accounted for
+	// earlier: a session timeout is ModeTimeout, and a cancelled run
+	// unwinds before classifying.
+	if s.ExitCode == 137 || s.Signal == "SIGKILL" {
 		return ModeOOM
 	}
 

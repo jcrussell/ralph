@@ -3,12 +3,16 @@ package runner
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jcrussell/ralph/internal/isolation"
 )
 
 func TestRunSuccessParsesEnvelope(t *testing.T) {
@@ -395,6 +399,85 @@ echo '{}'
 	}
 }
 
+// fakeSystemdBin plants a systemd-run that drops its own flags and execs
+// the wrapped command, and a systemctl that appends its argv (one line
+// per call) to the returned file. Both go first on PATH.
+func fakeSystemdBin(t *testing.T) (systemctlLog string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell scripts require POSIX shell")
+	}
+	binDir := t.TempDir()
+	systemctlLog = filepath.Join(t.TempDir(), "systemctl.log")
+	run := `#!/bin/sh
+while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do shift; done
+shift
+exec "$@"
+`
+	// `show` prints $RALPH_TEST_SHOW (empty: the unit was collected).
+	ctl := `#!/bin/sh
+echo "$*" >> "$RALPH_TEST_SYSTEMCTL_LOG"
+[ "$2" = show ] && printf '%b' "$RALPH_TEST_SHOW"
+exit 0
+`
+	for name, body := range map[string]string{"systemd-run": run, "systemctl": ctl} {
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte(body), 0o755); err != nil {
+			t.Fatalf("write fake %s: %v", name, err)
+		}
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("RALPH_TEST_SYSTEMCTL_LOG", systemctlLog)
+	return systemctlLog
+}
+
+// TestRunStopsScope checks the systemctl calls that end a wrapped Run,
+// on a normal exit and when the context deadline kills the runner: a
+// collected unit (clean exit) only needs its state read; a failed one is
+// stopped and reset-failed. (Leftover processes are covered by the
+// real-systemd tests in claude_unix_test.go.)
+func TestRunStopsScope(t *testing.T) {
+	unit := fmt.Sprintf("ralph-%d-1.scope", os.Getpid())
+	show := "--user show --property=LoadState,ActiveState,Result " + unit + "\n"
+	for _, tc := range []struct {
+		name    string
+		body    string
+		timeout time.Duration
+		state   string
+		want    string
+	}{
+		{"collected", "#!/bin/sh\necho '{}'\n", time.Minute, "", show},
+		{"failed", "#!/bin/sh\nexit 1\n", time.Minute,
+			"LoadState=loaded\\nActiveState=failed\\nResult=exit-code\\n",
+			show + "--user stop " + unit + "\n--user reset-failed " + unit + "\n"},
+		{"timeout", "#!/bin/sh\nsleep 30\n", 250 * time.Millisecond,
+			"LoadState=loaded\\nActiveState=failed\\nResult=signal\\n",
+			show + "--user stop " + unit + "\n--user reset-failed " + unit + "\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := fakeSystemdBin(t)
+			t.Setenv("RALPH_TEST_SHOW", tc.state)
+			bin := writeScript(t, tc.body)
+			r := New(bin, nil, "", "1G")
+			ctx, cancel := context.WithTimeout(context.Background(), tc.timeout)
+			defer cancel()
+			s, err := runForTest(t, r, ctx, "", t.TempDir(), nil)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if s.ScopeStopErr != nil {
+				t.Errorf("ScopeStopErr = %v", s.ScopeStopErr)
+			}
+			got, err := os.ReadFile(log)
+			if err != nil {
+				t.Fatalf("systemctl never called: %v", err)
+			}
+			if string(got) != tc.want {
+				t.Errorf("systemctl calls = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func safeIdx(a []string, i int) string {
 	if i < 0 || i >= len(a) {
 		return "<oob>"
@@ -487,4 +570,60 @@ func runForTest(t *testing.T, r *Runner, ctx context.Context, prompt, cwd string
 		StdoutPath: filepath.Join(logs, "stdout"),
 		StderrPath: filepath.Join(logs, "stderr"),
 	})
+}
+
+// TestRunRecordsSignal confirms a runner killed by a signal reports the
+// signal's name; a normal exit reports none.
+func TestRunRecordsSignal(t *testing.T) {
+	bin := writeScript(t, "#!/bin/sh\nkill -9 $$\n")
+	s, err := runForTest(t, New(bin, nil, "", ""), context.Background(), "", t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if s.Signal != "SIGKILL" {
+		t.Errorf("Signal = %q, want SIGKILL", s.Signal)
+	}
+	bin = writeScript(t, "#!/bin/sh\nexit 3\n")
+	s, err = runForTest(t, New(bin, nil, "", ""), context.Background(), "", t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if s.Signal != "" || s.ExitCode != 3 {
+		t.Errorf("Signal = %q ExitCode = %d, want \"\" and 3", s.Signal, s.ExitCode)
+	}
+}
+
+// TestRunDetectsScopeOOM runs under the real user manager: a runner that
+// blows through a 64M MemoryMax is OOM-killed inside its scope, and Run
+// reports OOMSignal (from the unit's Result=oom-kill, since the cgroup
+// itself is gone by the time Run looks) and leaves no failed unit behind.
+func TestRunDetectsScopeOOM(t *testing.T) {
+	if testing.Short() {
+		t.Skip("needs systemd-run --user --scope")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := isolation.Available(ctx); err != nil {
+		t.Skipf("systemd-run --user --scope unavailable: %v", err)
+	}
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not installed")
+	}
+	bin := writeScript(t, "#!/bin/sh\nexec "+py+" -c 'b=[]\nwhile True: b.append(bytearray(8<<20))'\n")
+	s, err := runForTest(t, New(bin, nil, "", "64M"), context.Background(), "", t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !s.OOMSignal {
+		t.Errorf("OOMSignal = false; exit %d signal %q stderr %q", s.ExitCode, s.Signal, s.StderrTail)
+	}
+	if got := Classify(s); got != ModeOOM {
+		t.Errorf("Classify = %q, want oom", got)
+	}
+	unit := fmt.Sprintf("ralph-%d-1.scope", os.Getpid())
+	out, _ := exec.Command("systemctl", "--user", "show", "--property=LoadState", unit).Output()
+	if strings.TrimSpace(string(out)) == "LoadState=loaded" {
+		t.Errorf("%s still loaded after Run (want stopped and reset-failed)", unit)
+	}
 }
