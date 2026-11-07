@@ -109,15 +109,26 @@ func (o Outcome) String() string {
 	return fmt.Sprintf("%s{%s}", o.State, o.Reason)
 }
 
-// ExitCode is the process exit code a terminal outcome maps to: 0 for
-// done{*}, 1 for failed{*}. Non-terminal outcomes also return 0 — they
-// shouldn't reach an exit-mapping site in production, and a permissive
-// zero keeps test fixtures simple.
+// ExitCode is the process exit code `ralph run` / `ralph review` exit
+// with for o. Each terminal reason has its own code so a supervisor can
+// act on the outcome without parsing output; the table is a documented
+// contract (docs/reference/exit-codes.md) — never renumber an entry.
+// done{queue_empty} and non-terminal outcomes (--once) exit 0. Codes
+// 1-3 and 128+ are reserved for errors, usage, refusals and signals.
 func (o Outcome) ExitCode() int {
-	if o.State == StateFailed {
-		return 1
-	}
-	return 0
+	return exitCodes[o]
+}
+
+// exitCodes maps each terminal outcome to its exit code; anything not
+// listed (done{queue_empty}, non-terminal states) is 0. 1x are done
+// reasons, 2x failed reasons.
+var exitCodes = map[Outcome]int{
+	{State: StateDone, Reason: ReasonIdle}:             10,
+	{State: StateDone, Reason: ReasonIterCap}:          11,
+	{State: StateDone, Reason: ReasonDeadline}:         12,
+	{State: StateFailed, Reason: ReasonBudget}:         20,
+	{State: StateFailed, Reason: ReasonAuth}:           21,
+	{State: StateFailed, Reason: ReasonRunnerTerminal}: 22,
 }
 
 // Validate reports an error if o is malformed: an unknown state, a

@@ -100,7 +100,7 @@ func (v View) ExportData(fields []string) map[string]any {
 type View struct {
 	RunID                   string            `json:"run_id,omitempty"`
 	State                   string            `json:"state"`
-	Reason                  string            `json:"reason,omitempty"`
+	Reason                  string            `json:"reason"` // always present ("" off terminal) so .reason is never null
 	Iter                    int               `json:"iter"`
 	MaxIterations           int               `json:"max_iterations"`
 	ReviewMode              bool              `json:"review_mode"`
@@ -110,6 +110,7 @@ type View struct {
 	MaxCostUSD              float64           `json:"max_cost_usd"`
 	CumulativeWallclockSecs int               `json:"cumulative_wallclock_secs"`
 	MaxWallclockSecs        int               `json:"max_wallclock_secs"`
+	Until                   string            `json:"until,omitempty"` // open run's --until deadline, RFC 3339
 	ConsecutiveDirty        int               `json:"consecutive_dirty"`
 	LastGateResult          string            `json:"last_gate_result,omitempty"`
 	Transitions             []runs.Transition `json:"transitions,omitempty"`
@@ -184,6 +185,9 @@ func applyRunCaps(v *View, m *runs.Manifest) {
 	v.MaxIterations = m.Caps.MaxIterations
 	v.MaxCostUSD = m.Caps.MaxCostUSD
 	v.MaxWallclockSecs = m.Caps.MaxWallclockSecs
+	if m.Caps.Until != nil {
+		v.Until = m.Caps.Until.Format(time.RFC3339)
+	}
 }
 
 func tailN(all []runs.Transition, n int) []runs.Transition {
@@ -209,6 +213,9 @@ func writeText(w io.Writer, v View) error {
 	_, _ = fmt.Fprintf(w, "review:            %s\n", reviewLine(v))
 	_, _ = fmt.Fprintf(w, "cost:              %s\n", costLine(v.CumulativeCostUSD, v.MaxCostUSD))
 	_, _ = fmt.Fprintf(w, "wallclock:         %s\n", wallclockLine(v.CumulativeWallclockSecs, v.MaxWallclockSecs))
+	if v.Until != "" {
+		_, _ = fmt.Fprintf(w, "until:             %s\n", v.Until)
+	}
 	_, _ = fmt.Fprintf(w, "consecutive_dirty: %d\n", v.ConsecutiveDirty)
 	if v.LastGateResult != "" {
 		_, _ = fmt.Fprintf(w, "last_gate:         %s\n", v.LastGateResult)

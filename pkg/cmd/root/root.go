@@ -97,6 +97,7 @@ docs/concepts/configuration.md for the .ralph/config.toml schema.`,
 			if f.LogLevel != nil {
 				f.LogLevel.Set(lvl)
 			}
+			f.LogFormat = logFormat
 
 			logger := f.Logger
 			if logger == nil {

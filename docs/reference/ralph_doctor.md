@@ -6,11 +6,13 @@ Check ralph's runtime environment
 
 Verify that ralph's runtime dependencies are present and usable:
 Linux, systemd-run --user --scope, claude, bd, git, and the
-.ralph/ and .beads/ directories in the current repo.
+.ralph/ and .beads/ directories in the current repo, and that
+[loop] memory_limit_bytes leaves the host headroom.
 
 Run this after ralph init on a fresh machine, or when a run fails
 with an obscure spawn/exec error. Exit code is non-zero when any
-check fails; the failing rows are tagged FAIL.
+check fails; the failing rows are tagged FAIL. Rows tagged warn pass
+but deserve a look (exit code stays 0).
 
 ```
 ralph doctor [flags]

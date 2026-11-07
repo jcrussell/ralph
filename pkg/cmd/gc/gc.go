@@ -23,6 +23,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jcrussell/ralph/internal/config"
 	"github.com/jcrussell/ralph/internal/lock"
 	ralphlog "github.com/jcrussell/ralph/internal/log"
 	"github.com/jcrussell/ralph/internal/paths"
@@ -397,12 +398,12 @@ func writeText(w io.Writer, pl *Plan) error {
 		for _, t := range ts {
 			b += t.Bytes
 		}
-		_, _ = fmt.Fprintf(w, "%s (%d, %s):\n", name, len(ts), humanBytes(b))
+		_, _ = fmt.Fprintf(w, "%s (%d, %s):\n", name, len(ts), config.FormatBytes(b))
 		for _, t := range ts {
 			if t.Begun != "" {
-				_, _ = fmt.Fprintf(w, "  %-48s %9s  %s\n", t.Path, humanBytes(t.Bytes), t.Begun)
+				_, _ = fmt.Fprintf(w, "  %-48s %9s  %s\n", t.Path, config.FormatBytes(t.Bytes), t.Begun)
 			} else {
-				_, _ = fmt.Fprintf(w, "  %-48s %9s\n", t.Path, humanBytes(t.Bytes))
+				_, _ = fmt.Fprintf(w, "  %-48s %9s\n", t.Path, config.FormatBytes(t.Bytes))
 			}
 		}
 	}
@@ -410,9 +411,9 @@ func writeText(w io.Writer, pl *Plan) error {
 	section("iterations", pl.Iterations)
 	section("incidents", pl.Incidents)
 
-	_, _ = fmt.Fprintf(w, "\ntotal: %d items, %s\n", pl.TotalCount, humanBytes(pl.TotalBytes))
+	_, _ = fmt.Fprintf(w, "\ntotal: %d items, %s\n", pl.TotalCount, config.FormatBytes(pl.TotalBytes))
 	if pl.Applied {
-		_, _ = fmt.Fprintf(w, "deleted %d items, freed %s\n", pl.TotalCount, humanBytes(pl.TotalBytes))
+		_, _ = fmt.Fprintf(w, "deleted %d items, freed %s\n", pl.TotalCount, config.FormatBytes(pl.TotalBytes))
 	} else {
 		_, _ = fmt.Fprintf(w, "nothing deleted (dry-run); re-run with --force to apply\n")
 	}
@@ -433,20 +434,6 @@ func dirSize(dir string) int64 {
 		return nil
 	})
 	return total
-}
-
-// humanBytes formats n with 1024-based units (B, K, M, G, …).
-func humanBytes(n int64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%dB", n)
-	}
-	div, exp := int64(unit), 0
-	for m := n / unit; m >= unit; m /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f%c", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
 func relTo(repo, path string) string {

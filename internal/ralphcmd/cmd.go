@@ -17,14 +17,69 @@ import (
 // Run is the single error→exit-code mapping point. main.go is a one-liner;
 // everything else returns errors that flow up to here.
 func Run(args []string) int {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	// SIGINT/SIGTERM cancel the context with the signal as the cause, so
+	// a run unwinds its iteration and then exits 128+signo. After the
+	// first signal the default disposition is restored: a second one
+	// kills the process outright.
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigs)
+	go func() {
+		select {
+		case s := <-sigs:
+			signal.Stop(sigs)
+			cancel(signalInterrupt(s))
+		case <-ctx.Done():
+		}
+	}()
 
 	f := cmdutil.NewFactory()
 	cmd := root.NewCmdRoot(f)
 	cmd.SetArgs(args)
 
-	return mapErr(cmd.ExecuteContext(ctx), f.IOStreams.ErrOut)
+	return exitCode(ctx, cmd.ExecuteContext(ctx), f.IOStreams.ErrOut)
+}
+
+// signalInterrupt is the cancel cause for a received signal: exit
+// 128+signo (130 SIGINT, 143 SIGTERM).
+func signalInterrupt(sig os.Signal) *cmdutil.InterruptedError {
+	ie := &cmdutil.InterruptedError{By: sig.String(), Code: 1}
+	switch sig {
+	case os.Interrupt:
+		ie.By = "SIGINT"
+	case syscall.SIGTERM:
+		ie.By = "SIGTERM"
+	}
+	if n, ok := sig.(syscall.Signal); ok {
+		ie.Code = 128 + int(n)
+	}
+	return ie
+}
+
+// exitCode maps err to the process exit code. A run that was stopped on
+// purpose — the error carries a *cmdutil.InterruptedError, or a signal
+// cancelled the context — exits with the interrupt's code (130 SIGINT
+// or UI quit, 143 SIGTERM) and a one-line notice instead of "error:
+// ...". The error need not wrap context.Canceled: a subprocess the
+// cancel killed (bd, git, a hook) surfaces as "signal: killed", and the
+// notice names it. An outcome the command still reached
+// (*ExitCodeError) stands. Everything else goes through mapErr.
+func exitCode(ctx context.Context, err error, errOut io.Writer) int {
+	if err == nil || errors.As(err, new(*cmdutil.ExitCodeError)) {
+		return mapErr(err, errOut)
+	}
+	var ie *cmdutil.InterruptedError
+	if !errors.As(err, &ie) && !errors.As(context.Cause(ctx), &ie) {
+		return mapErr(err, errOut)
+	}
+	msg := ie.Error()
+	if !errors.Is(err, context.Canceled) && err.Error() != msg {
+		msg += " (" + strings.TrimPrefix(err.Error(), msg+": ") + ")"
+	}
+	_, _ = fmt.Fprintf(errOut, "ralph: %s\n", msg)
+	return ie.Code
 }
 
 // mapErr classifies err and writes any user-facing diagnostic to errOut.

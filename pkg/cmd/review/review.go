@@ -8,12 +8,13 @@ package review
 
 import (
 	"context"
-	"errors"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/jcrussell/ralph/internal/loop"
 	reviewlib "github.com/jcrussell/ralph/internal/review"
+	"github.com/jcrussell/ralph/pkg/cmd/loopexit"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 )
 
@@ -32,6 +33,9 @@ type Options struct {
 	DryRun   bool
 	Fresh    bool
 	Label    string
+	Until    string // --until date-time; "" = no deadline
+
+	until time.Time // Until, parsed by Validate
 }
 
 // Validate enforces flag-value invariants before any side effects.
@@ -43,6 +47,11 @@ func (o *Options) Validate() error {
 	if o.MaxRounds < 0 {
 		return cmdutil.FlagErrorf("--max-rounds must be >= 0, got %d", o.MaxRounds)
 	}
+	until, err := cmdutil.ParseDeadline(o.Until)
+	if err != nil {
+		return cmdutil.FlagErrorf("%v", err)
+	}
+	o.until = until
 	return nil
 }
 
@@ -66,7 +75,10 @@ else [review] base_branch from config; else "main". Reviewing the
 base against itself is rejected.
 
 --pr N is sugar for "gh pr checkout N" run before resolution; gh is
-not a hard dependency of ralph itself.`,
+not a hard dependency of ralph itself.
+
+Exit codes and the closing outcome line are the same as ralph run's
+(see docs/reference/exit-codes.md).`,
 		Example: `  # review the currently checked-out branch against [review] base_branch
   ralph review
 
@@ -98,6 +110,7 @@ not a hard dependency of ralph itself.`,
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "render prompts and route states without invoking the runner")
 	cmd.Flags().BoolVar(&opts.Fresh, "fresh", false, "reset fsm.json before starting (use when the prior run reached a terminal state)")
 	cmd.Flags().StringVar(&opts.Label, "label", "", "explicit iteration label (overrides the review:<branch> default)")
+	cmd.Flags().StringVar(&opts.Until, "until", "", "stop at this date-time (see ralph run --until); the run exits done{deadline}")
 	return cmd
 }
 
@@ -136,6 +149,7 @@ func runReview(ctx context.Context, opts *Options) error {
 	}
 
 	out, err := loop.Run(ctx, loop.Options{
+		Until:        opts.until,
 		Repo:         repo,
 		Cfg:          cfg,
 		IO:           opts.F.IOStreams,
@@ -148,16 +162,7 @@ func runReview(ctx context.Context, opts *Options) error {
 		DryRun:       opts.DryRun,
 		Fresh:        opts.Fresh,
 	})
-	if err != nil {
-		if errors.Is(err, loop.ErrTerminalState) {
-			return cmdutil.ErrSilent
-		}
-		return err
-	}
-	if code := out.ExitCode(); code != 0 {
-		return &cmdutil.ExitCodeError{Code: code}
-	}
-	return nil
+	return loopexit.Finish(ctx, opts.F.IOStreams.ErrOut, opts.F.LogFormat, repo, out, err)
 }
 
 // chooseLabel decides the iteration label:

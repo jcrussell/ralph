@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jcrussell/ralph/internal/config"
 	"github.com/jcrussell/ralph/internal/fsm"
@@ -34,6 +35,9 @@ func TestOptionsValidate(t *testing.T) {
 		{"unparseable memory", Options{MemoryLimit: "bogus"}, false},
 		{"unlimited alone ok", Options{Unlimited: true}, true},
 		{"unlimited with max-iterations conflicts", Options{Unlimited: true, MaxIterations: 5}, false},
+		{"until date-time ok", Options{Until: "2026-11-14T18:00"}, true},
+		{"until past ok (ends at once)", Options{Until: "2000-01-01"}, true},
+		{"until duration rejected", Options{Until: "7d"}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -341,7 +345,7 @@ func TestOrchestrateStartupFailure(t *testing.T) {
 	run := func(context.Context, loop.Options) (fsm.Outcome, error) {
 		return fsm.Outcome{}, fmt.Errorf("loop: acquire lock: %w", lock.ErrHeld)
 	}
-	err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{})
+	err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{}, "")
 	if !errors.Is(err, lock.ErrHeld) {
 		t.Fatalf("orchestrate = %v, want the lock error", err)
 	}
@@ -364,7 +368,7 @@ func TestOrchestrateMidRunErrorIsObserved(t *testing.T) {
 		o.Observer.Observe(loop.Snapshot{Iter: 3})
 		return fsm.Outcome{}, errors.New("bd exploded")
 	}
-	err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{})
+	err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{}, "")
 	if err == nil {
 		t.Fatal("orchestrate = nil, want the loop error")
 	}
@@ -381,7 +385,7 @@ func TestOrchestrateSeedSnapshotIsNotAnIteration(t *testing.T) {
 		o.Observer.Observe(loop.Snapshot{Iter: 0})
 		return fsm.Outcome{}, errors.New("died before iterating")
 	}
-	_ = orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{})
+	_ = orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{}, "")
 	if ui.finishObserved {
 		t.Error("Finish observed = true for an Iter 0 snapshot, want false")
 	}
@@ -396,19 +400,23 @@ func TestOrchestrateLoopCompletes(t *testing.T) {
 		run := func(context.Context, loop.Options) (fsm.Outcome, error) {
 			return fsm.Outcome{State: fsm.StateDone, Reason: fsm.ReasonQueueEmpty}, nil
 		}
-		if err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{}); err != nil {
+		if err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{}, ""); err != nil {
 			t.Errorf("orchestrate = %v, want nil", err)
 		}
 	})
-	t.Run("failed -> exit code 1", func(t *testing.T) {
+	t.Run("failed -> its reason's exit code", func(t *testing.T) {
 		ui := newFakeUI(false)
 		run := func(context.Context, loop.Options) (fsm.Outcome, error) {
 			return fsm.Outcome{State: fsm.StateFailed, Reason: fsm.ReasonBudget}, nil
 		}
-		err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{})
+		var stderr strings.Builder
+		err := orchestrate(context.Background(), ui, run, loop.Options{}, &stderr, "")
 		var ec *cmdutil.ExitCodeError
-		if !errors.As(err, &ec) || ec.Code != 1 {
-			t.Errorf("orchestrate = %v, want ExitCodeError{1}", err)
+		if !errors.As(err, &ec) || ec.Code != 20 {
+			t.Errorf("orchestrate = %v, want ExitCodeError{20}", err)
+		}
+		if want := "ralph: run ended: failed{budget} (exit 20)\n"; stderr.String() != want {
+			t.Errorf("stderr = %q, want %q", stderr.String(), want)
 		}
 	})
 }
@@ -425,13 +433,13 @@ func TestOrchestrateUIQuitCancelsLoop(t *testing.T) {
 		cancelled = true
 		return fsm.Outcome{State: fsm.StateFailed, Reason: fsm.ReasonBudget}, nil
 	}
-	err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{})
+	err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{}, "")
 	if !cancelled {
 		t.Fatal("loop was not cancelled / waited on after UI quit")
 	}
 	var ec *cmdutil.ExitCodeError
-	if !errors.As(err, &ec) || ec.Code != 1 {
-		t.Errorf("orchestrate = %v, want ExitCodeError{1} from the collected outcome", err)
+	if !errors.As(err, &ec) || ec.Code != 20 {
+		t.Errorf("orchestrate = %v, want ExitCodeError{20} from the collected outcome", err)
 	}
 }
 
@@ -443,14 +451,14 @@ func TestOrchestrateLoopPanic(t *testing.T) {
 	run := func(context.Context, loop.Options) (fsm.Outcome, error) {
 		panic("boom")
 	}
-	err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{})
+	err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{}, "")
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("orchestrate = %v, want error carrying the panic value", err)
 	}
 }
 
 // TestOrchestrateTerminalStateFlush is acceptance (d): an ErrTerminalState
-// early return maps to a silent non-zero exit, and the refusal the loop wrote
+// early return maps to exit 3 with no further output, and the refusal the loop wrote
 // to its redirected ErrOut is re-flushed to the real stderr so the operator
 // still sees it after the TUI tears down.
 func TestOrchestrateTerminalStateFlush(t *testing.T) {
@@ -461,11 +469,44 @@ func TestOrchestrateTerminalStateFlush(t *testing.T) {
 		return fsm.Outcome{}, loop.ErrTerminalState
 	}
 	var realErr strings.Builder
-	err := orchestrate(context.Background(), ui, run, loop.Options{}, &realErr)
-	if !errors.Is(err, cmdutil.ErrSilent) {
-		t.Errorf("orchestrate = %v, want ErrSilent", err)
+	err := orchestrate(context.Background(), ui, run, loop.Options{}, &realErr, "")
+	var ec *cmdutil.ExitCodeError
+	if !errors.As(err, &ec) || ec.Code != 3 {
+		t.Errorf("orchestrate = %v, want ExitCodeError{3}", err)
 	}
 	if !strings.Contains(realErr.String(), refusal) {
 		t.Errorf("real stderr = %q, want it to contain the refusal %q", realErr.String(), refusal)
+	}
+}
+
+// Validate keeps the parsed --until so runRun doesn't parse it again.
+func TestValidateParsesUntil(t *testing.T) {
+	o := Options{Until: "2026-11-14T18:00Z"}
+	if err := o.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, 11, 14, 18, 0, 0, 0, time.UTC); !o.until.Equal(want) {
+		t.Errorf("until = %v, want %v", o.until, want)
+	}
+}
+
+// Quitting the UI while the loop runs cancels it with uiQuit as the
+// cause; whatever error that surfaces as, the command returns the
+// interrupt (exit 130 via ralphcmd), not a plain error.
+func TestOrchestrateUIQuitMidRunIsInterrupt(t *testing.T) {
+	for _, loopErr := range []func(context.Context) error{
+		func(ctx context.Context) error { return fmt.Errorf("loop: %w", ctx.Err()) },
+		func(context.Context) error { return errors.New("loop: pre-iteration: signal: killed") },
+	} {
+		ui := newFakeUI(true)
+		run := func(ctx context.Context, _ loop.Options) (fsm.Outcome, error) {
+			<-ctx.Done()
+			return fsm.Outcome{State: fsm.StateClean}, loopErr(ctx)
+		}
+		err := orchestrate(context.Background(), ui, run, loop.Options{}, &strings.Builder{}, "")
+		var ie *cmdutil.InterruptedError
+		if !errors.As(err, &ie) || ie.Code != 130 {
+			t.Errorf("orchestrate = %v, want an InterruptedError{130}", err)
+		}
 	}
 }

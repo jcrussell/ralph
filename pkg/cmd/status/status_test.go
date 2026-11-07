@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jcrussell/ralph/internal/fsm"
 	"github.com/jcrussell/ralph/internal/runs"
@@ -198,6 +199,39 @@ func TestStatusJQ(t *testing.T) {
 	}
 }
 
+// reason is always in the JSON (empty off a terminal state), so a
+// supervisor's `--jq .reason` reads "" rather than null, and --template
+// prints it bare.
+func TestStatusJSONAlwaysHasReason(t *testing.T) {
+	state := fsm.Fresh()
+	state.State = fsm.StateClean
+	repo := scaffold(t, state, true, nil)
+	f, bufs := newFactory(t, repo)
+
+	e, err := cmdutil.NewExporter("state,reason", ".reason", "", statusFields)
+	if err != nil {
+		t.Fatalf("NewExporter: %v", err)
+	}
+	if rerr := runStatus(context.Background(), &Options{F: f, Exporter: e, Tail: 5}); rerr != nil {
+		t.Fatalf("runStatus: %v", rerr)
+	}
+	if got := strings.TrimSpace(bufs.Out.String()); got != `""` {
+		t.Errorf("--jq '.reason' = %q, want \"\"", got)
+	}
+
+	f, bufs = newFactory(t, repo)
+	e, err = cmdutil.NewExporter("state,reason", "", "{{.state}}|{{.reason}}", statusFields)
+	if err != nil {
+		t.Fatalf("NewExporter: %v", err)
+	}
+	if rerr := runStatus(context.Background(), &Options{F: f, Exporter: e, Tail: 5}); rerr != nil {
+		t.Fatalf("runStatus: %v", rerr)
+	}
+	if got := strings.TrimSpace(bufs.Out.String()); got != "clean|" {
+		t.Errorf("--template = %q, want clean|", got)
+	}
+}
+
 // TestStatusJSONFieldSubset verifies --json state,iter emits only those keys.
 func TestStatusJSONFieldSubset(t *testing.T) {
 	state := fsm.Fresh()
@@ -303,6 +337,35 @@ func TestStatusPrefersOpenRunCaps(t *testing.T) {
 	}
 	if out := bufs.Out.String(); !strings.Contains(out, "iter:              7 / unlimited") {
 		t.Errorf("want the run's uncapped iter line, got:\n%s", out)
+	}
+}
+
+// An open run's --until deadline shows in the text view and the JSON.
+func TestStatusShowsOpenRunDeadline(t *testing.T) {
+	state := fsm.Fresh()
+	state.State = fsm.StateClean
+	repo := scaffold(t, state, true, nil)
+	until := time.Date(2026, 11, 14, 18, 0, 0, 0, time.UTC)
+	stampCaps(t, repo, &runs.Caps{MaxIterations: 30, Until: &until}, false)
+
+	f, bufs := newFactory(t, repo)
+	if err := runStatus(context.Background(), &Options{F: f, Tail: 5}); err != nil {
+		t.Fatalf("runStatus: %v", err)
+	}
+	if out := bufs.Out.String(); !strings.Contains(out, "until:             2026-11-14T18:00:00Z") {
+		t.Errorf("want an until line, got:\n%s", out)
+	}
+
+	f, bufs = newFactory(t, repo)
+	e, err := cmdutil.NewExporter("until", ".until", "", statusFields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runStatus(context.Background(), &Options{F: f, Exporter: e, Tail: 5}); err != nil {
+		t.Fatalf("runStatus: %v", err)
+	}
+	if got := strings.TrimSpace(bufs.Out.String()); got != `"2026-11-14T18:00:00Z"` {
+		t.Errorf("--jq .until = %q", got)
 	}
 }
 

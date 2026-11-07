@@ -20,6 +20,9 @@ base against itself is rejected.
 --pr N is sugar for "gh pr checkout N" run before resolution; gh is
 not a hard dependency of ralph itself.
 
+Exit codes and the closing outcome line are the same as ralph run's
+(see docs/reference/exit-codes.md).
+
 ```
 ralph review [flags]
 ```
@@ -54,6 +57,7 @@ ralph review [flags]
       --once                  run one iteration then exit
       --pr gh pr checkout N   run gh pr checkout N before resolving the branch
       --skip-gate             skip the per-state gate hook
+      --until string          stop at this date-time (see ralph run --until); the run exits done{deadline}
 ```
 
 ### Options inherited from parent commands

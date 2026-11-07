@@ -31,6 +31,12 @@ type Factory struct {
 	// may leave this nil; the verbosity wiring no-ops when so.
 	LogLevel *slog.LevelVar
 
+	// LogFormat is the resolved --log-format value ("" or "text", or
+	// "json"), set by the root command's PersistentPreRunE. Commands
+	// that emit a machine-readable record of their own (run's closing
+	// outcome line) match it.
+	LogFormat string
+
 	// RepoRoot returns the absolute path to the nearest ancestor of
 	// the current working directory containing a .ralph or .git
 	// directory. Memoized after the first successful call.

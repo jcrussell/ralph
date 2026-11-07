@@ -55,3 +55,15 @@ func WithHint(err error, hint string) error {
 	}
 	return &ErrHint{Err: err, Hint: hint}
 }
+
+// InterruptedError says a run was stopped on purpose: by a signal
+// (ralphcmd cancels the root context with one as its cause) or by
+// quitting the live UI. It is both a context cancel cause and an error
+// a command can return; internal/ralphcmd maps either to Code with a
+// one-line "ralph: interrupted by <By>" notice instead of "error: ...".
+type InterruptedError struct {
+	By   string // "SIGTERM", "SIGINT", "the live UI"
+	Code int    // exit code: 128+signo, or 130 for a UI quit
+}
+
+func (e *InterruptedError) Error() string { return "interrupted by " + e.By }

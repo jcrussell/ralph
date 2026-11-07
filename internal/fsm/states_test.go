@@ -101,24 +101,52 @@ func TestOutcomeString(t *testing.T) {
 }
 
 func TestOutcomeExitCode(t *testing.T) {
+	// The contract table (docs/reference/exit-codes.md). Renumbering an
+	// entry breaks every supervisor keyed on it.
 	cases := []struct {
 		o    Outcome
 		want int
 	}{
-		// Terminal done{*} → 0.
 		{Outcome{State: StateDone, Reason: ReasonQueueEmpty}, 0},
-		{Outcome{State: StateDone, Reason: ReasonIterCap}, 0},
-		// Terminal failed{*} → 1.
-		{Outcome{State: StateFailed, Reason: ReasonBudget}, 1},
-		{Outcome{State: StateFailed, Reason: ReasonAuth}, 1},
-		{Outcome{State: StateFailed, Reason: ReasonRunnerTerminal}, 1},
-		// Non-terminal — permissive zero by design.
+		{Outcome{State: StateDone, Reason: ReasonIdle}, 10},
+		{Outcome{State: StateDone, Reason: ReasonIterCap}, 11},
+		{Outcome{State: StateDone, Reason: ReasonDeadline}, 12},
+		{Outcome{State: StateFailed, Reason: ReasonBudget}, 20},
+		{Outcome{State: StateFailed, Reason: ReasonAuth}, 21},
+		{Outcome{State: StateFailed, Reason: ReasonRunnerTerminal}, 22},
+		// Non-terminal (--once) exits 0.
 		{Outcome{State: StateClean}, 0},
 		{Outcome{State: StateReview}, 0},
 	}
 	for _, c := range cases {
 		if got := c.o.ExitCode(); got != c.want {
 			t.Errorf("Outcome %s: ExitCode() = %d, want %d", c.o, got, c.want)
+		}
+	}
+}
+
+// Every terminal outcome other than the success case done{queue_empty}
+// gets its own code, clear of the reserved 1-3 (error, usage, refusal)
+// and 128+ (signals). A new reason without a table entry fails here.
+func TestOutcomeExitCodesDistinct(t *testing.T) {
+	seen := map[int]Outcome{}
+	for _, st := range []State{StateDone, StateFailed} {
+		for _, r := range st.ValidReasons() {
+			o := Outcome{State: st, Reason: r}
+			code := o.ExitCode()
+			if o == (Outcome{State: StateDone, Reason: ReasonQueueEmpty}) {
+				if code != 0 {
+					t.Errorf("%s: ExitCode() = %d, want 0", o, code)
+				}
+				continue
+			}
+			if code < 10 || code >= 128 {
+				t.Errorf("%s: ExitCode() = %d, want a code in 10..127", o, code)
+			}
+			if prev, dup := seen[code]; dup {
+				t.Errorf("%s and %s share exit code %d", prev, o, code)
+			}
+			seen[code] = o
 		}
 	}
 }

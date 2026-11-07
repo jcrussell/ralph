@@ -44,7 +44,7 @@ ralph status [flags]
 ```
   -h, --help              help for status
       --jq string         filter --json output with a jq expression
-      --json string       output JSON with the given comma-separated fields (available: run_id,state,reason,iter,max_iterations,review_mode,review_branch,review_base,cumulative_cost_usd,max_cost_usd,cumulative_wallclock_secs,max_wallclock_secs,consecutive_dirty,last_gate_result,transitions)
+      --json string       output JSON with the given comma-separated fields (available: run_id,state,reason,iter,max_iterations,review_mode,review_branch,review_base,cumulative_cost_usd,max_cost_usd,cumulative_wallclock_secs,max_wallclock_secs,until,consecutive_dirty,last_gate_result,transitions)
       --tail int          number of recent transitions to render (default 5)
       --template string   format --json output with a Go template
 ```

@@ -2,9 +2,11 @@ package ralphcmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/jcrussell/ralph/pkg/cmdutil"
@@ -157,5 +159,66 @@ func TestClassifyUsageErrorLeavesUnrelated(t *testing.T) {
 	var fe *cmdutil.FlagError
 	if errors.As(got, &fe) {
 		t.Errorf("non-usage error must not be wrapped, got %v", got)
+	}
+}
+
+// A command cancelled by a signal exits 128+signo with a short notice;
+// the same cancellation without a signal cause is an ordinary error.
+func TestExitCodeInterrupted(t *testing.T) {
+	cancelled := fmt.Errorf("loop: %w", context.Canceled)
+	for _, tc := range []struct {
+		sig  syscall.Signal
+		want int
+	}{
+		{syscall.SIGTERM, 143},
+		{syscall.SIGINT, 130},
+	} {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(signalInterrupt(tc.sig))
+		var buf bytes.Buffer
+		if got := exitCode(ctx, cancelled, &buf); got != tc.want {
+			t.Errorf("%v: exit = %d, want %d", tc.sig, got, tc.want)
+		}
+		if strings.Contains(buf.String(), "error:") || !strings.Contains(buf.String(), "interrupted by SIG") {
+			t.Errorf("%v: stderr = %q", tc.sig, buf.String())
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var buf bytes.Buffer
+	if got := exitCode(ctx, cancelled, &buf); got != 1 {
+		t.Errorf("no signal cause: exit = %d, want 1", got)
+	}
+	// A subprocess killed by the cancel doesn't wrap context.Canceled;
+	// the stop still exits 143.
+	tctx, tcancel := context.WithCancelCause(context.Background())
+	tcancel(signalInterrupt(syscall.SIGTERM))
+	buf.Reset()
+	if got := exitCode(tctx, errors.New("loop: select next state: bd ready: signal: killed"), &buf); got != 143 {
+		t.Errorf("killed subprocess after SIGTERM: exit = %d, want 143", got)
+	}
+	if strings.Contains(buf.String(), "error:") || !strings.Contains(buf.String(), "signal: killed") {
+		t.Errorf("stderr = %q, want the interrupt notice naming the cause", buf.String())
+	}
+	// An outcome reached after the signal stands.
+	sctx, scancel := context.WithCancelCause(context.Background())
+	scancel(signalInterrupt(syscall.SIGTERM))
+	if got := exitCode(sctx, &cmdutil.ExitCodeError{Code: 22}, &buf); got != 22 {
+		t.Errorf("outcome after signal: exit = %d, want 22", got)
+	}
+}
+
+// An interrupt carried in the error (a UI quit) maps like a signal,
+// whatever the underlying error says.
+func TestExitCodeInterruptInError(t *testing.T) {
+	ui := &cmdutil.InterruptedError{By: "the live UI", Code: 130}
+	err := fmt.Errorf("%w: %w", ui, errors.New("loop: pre-iteration: signal: killed"))
+	var buf bytes.Buffer
+	if got := exitCode(context.Background(), err, &buf); got != 130 {
+		t.Errorf("exit = %d, want 130", got)
+	}
+	if want := "ralph: interrupted by the live UI (loop: pre-iteration: signal: killed)\n"; buf.String() != want {
+		t.Errorf("stderr = %q, want %q", buf.String(), want)
 	}
 }

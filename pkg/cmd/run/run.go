@@ -7,10 +7,10 @@ package run
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"sync/atomic"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -20,6 +20,7 @@ import (
 	"github.com/jcrussell/ralph/internal/loop"
 	"github.com/jcrussell/ralph/internal/ralphcmd/build"
 	"github.com/jcrussell/ralph/internal/tui"
+	"github.com/jcrussell/ralph/pkg/cmd/loopexit"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 	"github.com/jcrussell/ralph/pkg/iostreams"
 )
@@ -41,6 +42,9 @@ type Options struct {
 	MaxIterations  int    // 0 = use config
 	SessionTimeout int    // seconds; 0 = use config
 	MemoryLimit    string // "" = use config
+	Until          string // --until date-time; "" = no deadline
+
+	until time.Time // Until, parsed by Validate
 }
 
 // Validate enforces flag-value invariants before any side effects.
@@ -58,6 +62,11 @@ func (o *Options) Validate() error {
 	if _, err := config.ParseBytes(o.MemoryLimit); err != nil {
 		return cmdutil.FlagErrorf("--memory: %v", err)
 	}
+	until, err := cmdutil.ParseDeadline(o.Until)
+	if err != nil {
+		return cmdutil.FlagErrorf("%v", err)
+	}
+	o.until = until
 	return nil
 }
 
@@ -89,9 +98,22 @@ path is byte-identical to the pre-TUI behavior. Either way the artifact
 files under .ralph/ (summary.jsonl, the orchestrator log) stay the
 durable data sink — the TUI is a view, not a record.
 
-Exit codes: 0 on done{*}; 1 on failed{*}; non-zero infrastructure
-errors (lock contention, disk full, malformed config) print to stderr
-and exit 1.`,
+The run ends with one line on stderr naming the outcome and exit code,
+"ralph: run ended: failed{runner_terminal} (exit 22)", or a JSON
+object under --log-format json.
+
+Exit codes (a stable contract; see docs/reference/exit-codes.md):
+  0    done{queue_empty}, or --once / --dry-run stopped mid-run
+  1    infrastructure error (lock contention, disk full, bad config)
+  2    usage error
+  3    refused: fsm is in failed{*}; pass --fresh
+  10   done{idle}
+  11   done{iter_cap}
+  12   done{deadline} (--until reached)
+  20   failed{budget}
+  21   failed{auth}
+  22   failed{runner_terminal}
+  130  interrupted by SIGINT; 143 by SIGTERM`,
 		Example: `  # normal autonomous run, using all .ralph/config.toml defaults
   ralph run
 
@@ -134,6 +156,7 @@ and exit 1.`,
 	cmd.Flags().BoolVar(&opts.Unlimited, "unlimited", false, "disable the iteration cap for this invocation (sets [loop] max_iterations = 0); not recommended without a budget cap")
 	cmd.Flags().IntVar(&opts.SessionTimeout, "timeout", 0, "override [loop] session_timeout_secs (0 = config)")
 	cmd.Flags().StringVar(&opts.MemoryLimit, "memory", "", "override [loop] memory_limit_bytes ('' = config)")
+	cmd.Flags().StringVar(&opts.Until, "until", "", "stop at this date-time (2026-11-14T18:00, local unless it carries a zone): no iteration starts after it, waits end at it, and the run exits done{deadline}")
 	return cmd
 }
 
@@ -151,8 +174,8 @@ func runRun(ctx context.Context, opts *Options) error {
 	// Refuse a second concurrent orchestrator before anything visible happens.
 	// loop.Run would refuse too, but only after the TUI has taken over the
 	// terminal — and the TUI can't show the reason until the operator quits.
-	if err := cmdutil.CheckRepoFree(repo); err != nil {
-		return err
+	if ferr := cmdutil.CheckRepoFree(repo); ferr != nil {
+		return ferr
 	}
 
 	lopts := loop.Options{
@@ -163,6 +186,7 @@ func runRun(ctx context.Context, opts *Options) error {
 		SkipGate: opts.SkipGate,
 		DryRun:   opts.DryRun,
 		Fresh:    opts.Fresh,
+		Until:    opts.until,
 	}
 
 	if shouldUseTUI(opts.F.IOStreams, opts) {
@@ -194,14 +218,15 @@ func runRun(ctx context.Context, opts *Options) error {
 			caps.MaxBytes = int(b)
 		}
 		ui := tui.New(opts.F.IOStreams, seed, hdr, caps)
-		return orchestrate(ctx, ui, loop.Run, lopts, opts.F.IOStreams.ErrOut)
+		return orchestrate(ctx, ui, loop.Run, lopts, opts.F.IOStreams.ErrOut, opts.F.LogFormat)
 	}
 
 	// Non-TTY / --no-tui: the original synchronous path. loop.Run streams the
 	// one-line-per-iteration narrative straight to the operator streams, and
 	// the result maps byte-identically to the pre-TUI behavior.
 	lopts.IO = opts.F.IOStreams
-	return mapLoopResult(loop.Run(ctx, lopts))
+	out, runErr := loop.Run(ctx, lopts)
+	return loopexit.Finish(ctx, opts.F.IOStreams.ErrOut, opts.F.LogFormat, repo, out, runErr)
 }
 
 // shouldUseTUI is the activation gate (ralph-g3s.1): the live UI auto-enables
@@ -242,6 +267,9 @@ func (o observedObserver) Observe(s loop.Snapshot) {
 	o.inner.Observe(s)
 }
 
+// uiQuit is the cancel cause when the operator quits the live UI.
+var uiQuit = &cmdutil.InterruptedError{By: "the live UI", Code: 130}
+
 // loopFn is loop.Run's signature, injected into orchestrate so tests stand in
 // a fake loop (immediate return, ctx-blocking, or panicking) without acquiring
 // the repo lock or touching disk.
@@ -261,8 +289,9 @@ type runResult struct {
 // context (a no-op if the loop already returned), wait for the loop to unwind
 // and report, then map the exit code. The loop's IO and Observer come from the
 // UI so its output streams into the pane.
-func orchestrate(ctx context.Context, ui liveUI, run loopFn, lopts loop.Options, realErr io.Writer) error {
-	ctx, cancel := context.WithCancel(ctx)
+func orchestrate(parent context.Context, ui liveUI, run loopFn, lopts loop.Options, realErr io.Writer, logFormat string) error {
+	ctx, cancelCause := context.WithCancelCause(parent)
+	cancel := func() { cancelCause(uiQuit) }
 	defer cancel()
 
 	var observed atomic.Bool
@@ -289,8 +318,19 @@ func orchestrate(ctx context.Context, ui liveUI, run loopFn, lopts loop.Options,
 	}()
 
 	uiErr := ui.Run()
-	cancel()          // quit -> cancel: unwind a still-running loop
-	res := <-resultCh // -> wait: never exit mid-iteration
+	// quit -> cancel: unwind a still-running loop. Only a loop that was
+	// still running is interrupted by the quit; one that already returned
+	// keeps its own result.
+	var res runResult
+	quitMidRun := false
+	select {
+	case res = <-resultCh:
+	default:
+		quitMidRun = true
+		cancel()
+		res = <-resultCh // -> wait: never exit mid-iteration
+	}
+	cancel()
 
 	// The TUI renders inline and clears its frame on quit; an early return or
 	// panic can race the first paint, so its notices may never have shown.
@@ -305,25 +345,15 @@ func orchestrate(ctx context.Context, ui liveUI, run loopFn, lopts loop.Options,
 	if uiErr != nil {
 		return uiErr
 	}
-	return mapLoopResult(res.outcome, res.err)
-}
-
-// mapLoopResult folds a loop.Run outcome+error into the command's return: the
-// ErrTerminalState refusal becomes a silent non-zero exit (its notice already
-// reached ErrOut), other errors propagate, and a terminal failed{*} maps to
-// its exit code. Shared by the synchronous and TUI paths so both exit
-// identically.
-func mapLoopResult(out fsm.Outcome, err error) error {
-	if err != nil {
-		if errors.Is(err, loop.ErrTerminalState) {
-			return cmdutil.ErrSilent
-		}
-		return err
+	// Quitting the UI mid-run (q, or Ctrl-C, which the TUI reads as a
+	// key) cancelled the loop with uiQuit as the cause. Whatever error
+	// that surfaced as (context.Canceled, or a hook/bd/git child the
+	// cancel killed), report it as the interrupt it is, through the same
+	// mapping as a signal. A real signal is reported by its own cause.
+	if quitMidRun && res.err != nil && parent.Err() == nil {
+		return fmt.Errorf("%w: %w", uiQuit, res.err)
 	}
-	if code := out.ExitCode(); code != 0 {
-		return &cmdutil.ExitCodeError{Code: code}
-	}
-	return nil
+	return loopexit.Finish(ctx, realErr, logFormat, lopts.Repo, res.outcome, res.err)
 }
 
 // applyOverrides folds non-zero CLI flag values onto cfg. Zero/empty

@@ -19,6 +19,8 @@ func TestOptionsValidate(t *testing.T) {
 		{"positive overrides ok", Options{PR: 123, MaxRounds: 10}, true},
 		{"negative pr", Options{PR: -1}, false},
 		{"negative max-rounds", Options{MaxRounds: -1}, false},
+		{"until date-time ok", Options{Until: "2026-11-14 18:00"}, true},
+		{"until duration rejected", Options{Until: "36h"}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

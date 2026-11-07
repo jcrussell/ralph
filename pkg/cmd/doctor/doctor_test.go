@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jcrussell/ralph/internal/config"
 	"github.com/jcrussell/ralph/pkg/cmdutil"
 	"github.com/jcrussell/ralph/pkg/iostreams"
 )
@@ -33,6 +34,19 @@ func stubProbes(t *testing.T) Probes {
 		SystemdRun: func(ctx context.Context) error {
 			return nil
 		},
+		ReadFile:    fakeFiles(map[string]string{"/proc/meminfo": "MemTotal:       16777216 kB\n"}),
+		Getuid:      func() int { return 1000 },
+		MemoryLimit: func() (int64, error) { return 7 << 30, nil },
+	}
+}
+
+// fakeFiles serves ReadFile from a map; a missing path is ErrNotExist.
+func fakeFiles(files map[string]string) func(string) ([]byte, error) {
+	return func(path string) ([]byte, error) {
+		if c, ok := files[path]; ok {
+			return []byte(c), nil
+		}
+		return nil, fs.ErrNotExist
 	}
 }
 
@@ -47,7 +61,7 @@ func TestRunChecksAllGreen(t *testing.T) {
 	}
 	wantNames := []string{
 		"os", "systemd-run", "systemd-run probe",
-		"claude", "bd", "git", ".ralph", ".beads",
+		"claude", "bd", "git", ".ralph", ".beads", "memory cap",
 	}
 	if len(results) != len(wantNames) {
 		t.Fatalf("got %d checks, want %d", len(results), len(wantNames))
@@ -195,5 +209,76 @@ func TestStatNotExist(t *testing.T) {
 	_, err := os.Stat(filepath.Join(t.TempDir(), "nope"))
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("Stat err = %v, want fs.ErrNotExist", err)
+	}
+}
+
+func TestCheckMemoryHeadroom(t *testing.T) {
+	const meminfo8G = "MemTotal:        8388608 kB\nMemFree: 1 kB\n"
+	const slice = "/sys/fs/cgroup/user.slice/user-1000.slice/memory.max"
+	const svc = "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/memory.max"
+	for _, tc := range []struct {
+		name     string
+		limit    string
+		limitErr error
+		files    map[string]string
+		wantOK   bool
+		wantWarn bool
+		want     string
+	}{
+		{name: "headroom ok", limit: "6G", files: map[string]string{"/proc/meminfo": meminfo8G},
+			wantOK: true, want: "cap 6.0G, 2.0G free under host RAM 8.0G"},
+		{name: "512M free", limit: "7680M", files: map[string]string{"/proc/meminfo": meminfo8G},
+			wantOK: true, wantWarn: true, want: "leaves 512.0M under host RAM 8.0G, so the host can run out of memory before the runner hits its cap; set it to 7G or less"},
+		{name: "cap equals RAM", limit: "8G", files: map[string]string{"/proc/meminfo": meminfo8G},
+			wantOK: true, wantWarn: true, want: "leaves 0B under host RAM 8.0G"},
+		{name: "exactly 1G free is enough", limit: "7G", files: map[string]string{"/proc/meminfo": meminfo8G},
+			wantOK: true, want: "cap 7.0G, 1.0G free"},
+		{name: "user slice tighter than RAM", limit: "4G", files: map[string]string{
+			"/proc/meminfo": meminfo8G, slice: "4294967296\n", svc: "max\n"},
+			wantOK: true, wantWarn: true, want: "under user-1000.slice MemoryMax 4.0G"},
+		{name: "user service tighter still", limit: "2G", files: map[string]string{
+			"/proc/meminfo": meminfo8G, slice: "4294967296\n", svc: "3221225472\n"},
+			wantOK: true, wantWarn: false, want: "free under user@1000.service MemoryMax 3.0G"},
+		{name: "cap disabled", limit: "", files: map[string]string{"/proc/meminfo": meminfo8G},
+			wantOK: true, wantWarn: true, want: "no memory cap"},
+		{name: "cap zero", limit: "0", files: map[string]string{"/proc/meminfo": meminfo8G},
+			wantOK: true, wantWarn: true, want: "no memory cap"},
+		{name: "no repo config", limitErr: errors.New("not in a ralph repo"),
+			wantOK: true, want: "skipped: no repo config"},
+		{name: "no meminfo", limit: "6G", files: map[string]string{},
+			wantOK: true, want: "skipped: read /proc/meminfo"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := stubProbes(t)
+			p.ReadFile = fakeFiles(tc.files)
+			p.MemoryLimit = func() (int64, error) {
+				n, err := config.ParseBytes(tc.limit)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return n, tc.limitErr
+			}
+			r := checkMemoryHeadroom(p)
+			if r.OK != tc.wantOK || r.Warn != tc.wantWarn {
+				t.Errorf("OK=%v Warn=%v, want OK=%v Warn=%v (%s)", r.OK, r.Warn, tc.wantOK, tc.wantWarn, r.Detail)
+			}
+			if !strings.Contains(r.Detail, tc.want) {
+				t.Errorf("Detail = %q, want it to contain %q", r.Detail, tc.want)
+			}
+		})
+	}
+}
+
+// A warning is printed as "warn" and leaves doctor's exit at 0.
+func TestDoctorRunWarnIsNotFailure(t *testing.T) {
+	io, bufs := iostreams.Test()
+	f := &cmdutil.Factory{IOStreams: io}
+	p := stubProbes(t)
+	p.MemoryLimit = func() (int64, error) { return 0, nil }
+	if err := doctorRun(context.Background(), &Options{F: f, Probes: p}); err != nil {
+		t.Fatalf("doctorRun: %v", err)
+	}
+	if !strings.Contains(bufs.Out.String(), "[warn] memory cap") {
+		t.Errorf("Out = %q, want a warn row for memory cap", bufs.Out.String())
 	}
 }

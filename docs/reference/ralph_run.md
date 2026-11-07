@@ -26,9 +26,22 @@ path is byte-identical to the pre-TUI behavior. Either way the artifact
 files under .ralph/ (summary.jsonl, the orchestrator log) stay the
 durable data sink — the TUI is a view, not a record.
 
-Exit codes: 0 on done{*}; 1 on failed{*}; non-zero infrastructure
-errors (lock contention, disk full, malformed config) print to stderr
-and exit 1.
+The run ends with one line on stderr naming the outcome and exit code,
+"ralph: run ended: failed{runner_terminal} (exit 22)", or a JSON
+object under --log-format json.
+
+Exit codes (a stable contract; see docs/reference/exit-codes.md):
+  0    done{queue_empty}, or --once / --dry-run stopped mid-run
+  1    infrastructure error (lock contention, disk full, bad config)
+  2    usage error
+  3    refused: fsm is in failed{*}; pass --fresh
+  10   done{idle}
+  11   done{iter_cap}
+  12   done{deadline} (--until reached)
+  20   failed{budget}
+  21   failed{auth}
+  22   failed{runner_terminal}
+  130  interrupted by SIGINT; 143 by SIGTERM
 
 ```
 ralph run [flags]
@@ -73,6 +86,7 @@ ralph run [flags]
       --skip-gate                 skip the per-state gate hook
       --timeout int               override [loop] session_timeout_secs (0 = config)
       --unlimited                 disable the iteration cap for this invocation (sets [loop] max_iterations = 0); not recommended without a budget cap
+      --until string              stop at this date-time (2026-11-14T18:00, local unless it carries a zone): no iteration starts after it, waits end at it, and the run exits done{deadline}
       --wait-for-beads bd ready   on done{idle} or done{queue_empty}, park polling bd ready and resume when the queue changes instead of exiting (overrides [loop] wait_for_beads)
       --wait-on-quota             on a runner quota cap, sleep until it resets and resume instead of exiting failed (overrides [loop] wait_on_quota)
 ```
