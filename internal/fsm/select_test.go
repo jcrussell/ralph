@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jcrussell/ralph/internal/bd"
 	"github.com/jcrussell/ralph/internal/config"
@@ -150,6 +151,41 @@ func TestSelectNextStateBudgetBeforeCaps(t *testing.T) {
 	}
 	if (out != Outcome{State: StateFailed, Reason: ReasonBudget}) {
 		t.Errorf("out = %+v, want failed{budget}", out)
+	}
+}
+
+// The deadline ends the run after budget (an overspend still reports
+// failed{budget}) and before the iteration cap; a zero deadline or one
+// still ahead routes normally.
+func TestSelectNextStateDeadline(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
+	cfg := config.Defaults()
+	cfg.Loop.MaxIterations = 5
+	cfg.Budget.MaxCostUSD = 1.0
+
+	f := Fresh()
+	f.Iter = 5 // also past the cap: the deadline wins
+	out, err := SelectNextState(ctx, RouteInput{FSM: f, Cfg: cfg, BD: &stubBD{}, Deadline: now, Now: now})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if (out != Outcome{State: StateDone, Reason: ReasonDeadline}) {
+		t.Errorf("at deadline: out = %v, want done{deadline}", out)
+	}
+
+	f.CumulativeCostUSD = 2.0
+	out, _ = SelectNextState(ctx, RouteInput{FSM: f, Cfg: cfg, BD: &stubBD{}, Deadline: now, Now: now.Add(time.Hour)})
+	if (out != Outcome{State: StateFailed, Reason: ReasonBudget}) {
+		t.Errorf("over budget past deadline: out = %v, want failed{budget}", out)
+	}
+
+	f.CumulativeCostUSD = 0
+	for _, dl := range []time.Time{{}, now.Add(time.Second)} {
+		out, _ = SelectNextState(ctx, RouteInput{FSM: f, Cfg: cfg, BD: &stubBD{}, Deadline: dl, Now: now})
+		if (out != Outcome{State: StateDone, Reason: ReasonIterCap}) {
+			t.Errorf("deadline %v: out = %v, want done{iter_cap}", dl, out)
+		}
 	}
 }
 

@@ -3,6 +3,7 @@ package fsm
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jcrussell/ralph/internal/config"
 )
@@ -26,6 +27,16 @@ type RouteInput struct {
 	// it reaches Cfg.Loop.MaxNoopIters the route is done{idle}. Mirrors
 	// how the loop feeds deadStreak in via RunnerFailure.
 	NoopStreak int
+	// Deadline, when non-zero, is the run's --until time: once Now is at
+	// or past it the route is done{deadline}. Now is the loop clock's
+	// reading, passed in so routing stays pure.
+	Deadline time.Time
+	Now      time.Time
+}
+
+// DeadlinePassed reports whether a non-zero deadline is at or before now.
+func DeadlinePassed(deadline, now time.Time) bool {
+	return !deadline.IsZero() && !now.Before(deadline)
 }
 
 // SelectNextState returns the next Outcome given the current FSM,
@@ -37,6 +48,7 @@ type RouteInput struct {
 //
 //  1. terminal runner failure  -> failed{<runner reason>}
 //  2. budget exhausted          -> failed{budget}
+//     2.5 deadline passed          -> done{deadline}
 //  3. caps exceeded             -> done{iter_cap}
 //  4. review mode on            -> done{queue_empty} when empty + clean, else review
 //  5. dirty streak exceeded     -> revert (suppressed in review mode by step 4)
@@ -67,7 +79,13 @@ func SelectNextState(ctx context.Context, in RouteInput) (Outcome, error) {
 		return Outcome{State: StateFailed, Reason: ReasonBudget}, nil
 	}
 
-	// 3. Iteration cap — graceful exit, code 0.
+	// 2.5 Wall-clock deadline (--until). Below the budget so a run that
+	// overspent still reports failed{budget}.
+	if DeadlinePassed(in.Deadline, in.Now) {
+		return Outcome{State: StateDone, Reason: ReasonDeadline}, nil
+	}
+
+	// 3. Iteration cap — graceful exit.
 	if CapsExceeded(in.FSM, in.Cfg) {
 		return Outcome{State: StateDone, Reason: ReasonIterCap}, nil
 	}

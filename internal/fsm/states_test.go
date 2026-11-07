@@ -62,7 +62,7 @@ func TestStateValidReasons(t *testing.T) {
 	}{
 		{StateStart, 1, []Reason{ReasonNone}},
 		{StateClean, 1, []Reason{ReasonNone}},
-		{StateDone, 3, []Reason{ReasonQueueEmpty, ReasonIterCap, ReasonIdle}},
+		{StateDone, 4, []Reason{ReasonQueueEmpty, ReasonIterCap, ReasonIdle, ReasonDeadline}},
 		{StateFailed, 3, []Reason{ReasonBudget, ReasonAuth, ReasonRunnerTerminal}},
 	}
 	for _, c := range cases {

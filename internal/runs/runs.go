@@ -74,6 +74,8 @@ type Caps struct {
 	MaxIterations    int     `json:"max_iterations"`
 	MaxCostUSD       float64 `json:"max_cost_usd"`
 	MaxWallclockSecs int     `json:"max_wallclock_secs"`
+	// Until is the invocation's --until deadline (UTC); nil when unset.
+	Until *time.Time `json:"until,omitempty"`
 }
 
 // Transition is one row in transitions.jsonl.

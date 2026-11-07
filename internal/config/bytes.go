@@ -45,3 +45,18 @@ func ParseBytes(s string) (int64, error) {
 	}
 	return v * mul, nil
 }
+
+// FormatBytes renders n with the 1024-based units ParseBytes reads:
+// "512B", "1.5K", "7.0G".
+func FormatBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%dB", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f%c", float64(n)/float64(div), "KMGTPE"[exp])
+}

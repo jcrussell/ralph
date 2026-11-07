@@ -37,6 +37,15 @@ type Input struct {
 	// FailureMode, when set on a terminal transition into failed{},
 	// adds a trailing "failure: <mode>" segment. Ignored otherwise.
 	FailureMode string
+	// DeadSession, when set, is how a dead runner session ended
+	// ("exit 1", "SIGKILL, oom"). It extends the failure segment on a
+	// terminal transition and adds a "dead session (...)" segment
+	// otherwise.
+	DeadSession string
+	// Retry, when set, notes that the runner_terminal retry policy
+	// absorbed this iteration's failure ("runner_terminal: retry 1/6
+	// after 15m0s cooldown"). Rendered as the last segment.
+	Retry string
 }
 
 // Compose renders in as a single-line narrative. The prefix
@@ -72,8 +81,18 @@ func Compose(in Input) string {
 	if g := gateLabel(in.Gate); g != "" {
 		segs = append(segs, g)
 	}
-	if in.Next.State == fsm.StateFailed && in.FailureMode != "" {
-		segs = append(segs, "failure: "+in.FailureMode)
+	switch {
+	case in.Next.State == fsm.StateFailed && in.FailureMode != "":
+		seg := "failure: " + in.FailureMode
+		if in.DeadSession != "" {
+			seg += " (" + in.DeadSession + ")"
+		}
+		segs = append(segs, seg)
+	case in.DeadSession != "":
+		segs = append(segs, "dead session ("+in.DeadSession+")")
+	}
+	if in.Retry != "" {
+		segs = append(segs, in.Retry)
 	}
 
 	if len(segs) == 0 {

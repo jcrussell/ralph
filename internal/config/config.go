@@ -67,6 +67,15 @@ type LoopConfig struct {
 	// envelope does surface a "resets ...pm (UTC)" instant, the loop sleeps
 	// until then instead (capped at MaxQuotaWait), ignoring this interval.
 	QuotaWaitSecs int `toml:"quota_wait_secs"`
+	// RunnerTerminalRetries is how many times a run that would end
+	// failed{runner_terminal} because of a dead-session streak instead
+	// sleeps RunnerTerminalCooldownSecs and carries on routing as if the
+	// runner had not failed. The count resets after a healthy session.
+	// 0 (default) keeps runner_terminal terminal. Runner budget/quota
+	// failures (also runner_terminal) and auth are never retried.
+	RunnerTerminalRetries int `toml:"runner_terminal_retries"`
+	// RunnerTerminalCooldownSecs is the sleep before each such retry.
+	RunnerTerminalCooldownSecs int `toml:"runner_terminal_cooldown_secs"`
 }
 
 // RunnerConfig holds the [runner] section.
@@ -144,6 +153,9 @@ func Defaults() *Config {
 			WaitForBeads:       false,
 			BeadPollSecs:       60,
 			MaxBeadWaitSecs:    0,
+
+			RunnerTerminalRetries:      0,
+			RunnerTerminalCooldownSecs: 900,
 		},
 		Runner: RunnerConfig{
 			Command: "claude",
@@ -310,6 +322,12 @@ func (l *LoopConfig) Validate() error {
 	}
 	if l.MaxBeadWaitSecs < 0 {
 		return fmt.Errorf("max_bead_wait_secs must be >= 0, got %d", l.MaxBeadWaitSecs)
+	}
+	if l.RunnerTerminalRetries < 0 {
+		return fmt.Errorf("runner_terminal_retries must be >= 0, got %d", l.RunnerTerminalRetries)
+	}
+	if l.RunnerTerminalCooldownSecs < 0 {
+		return fmt.Errorf("runner_terminal_cooldown_secs must be >= 0, got %d", l.RunnerTerminalCooldownSecs)
 	}
 	if _, err := ParseBytes(l.MemoryLimit); err != nil {
 		return fmt.Errorf("memory_limit_bytes: %w", err)

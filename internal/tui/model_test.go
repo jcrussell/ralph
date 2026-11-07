@@ -790,3 +790,20 @@ func TestBeadWaitBadgeAdvancesElapsed(t *testing.T) {
 		t.Errorf("badge should drop the countdown at zero:\n%s", view)
 	}
 }
+
+// The runner_terminal cooldown reports through Snapshot.Wait with Kind
+// "cooldown" and gets its own label on the sleep badge.
+func TestCooldownWaitBadge(t *testing.T) {
+	m := sized(t, 120, 24)
+	s := fullSnapshot()
+	s.Wait = &loop.WaitState{Kind: "cooldown", Remaining: 15 * time.Minute}
+	m, _ = step(t, m, metricsMsg{s: s})
+
+	view := m.View()
+	if !strings.Contains(view, "sleeping (runner cooldown) — resuming in 15m0s") {
+		t.Errorf("header should show the cooldown badge:\n%s", view)
+	}
+	if strings.Contains(view, "sleeping (quota)") {
+		t.Errorf("cooldown must not read as a quota wait:\n%s", view)
+	}
+}

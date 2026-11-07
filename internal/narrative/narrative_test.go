@@ -82,6 +82,21 @@ func TestCompose(t *testing.T) {
 			want: "clean → done{queue_empty}",
 		},
 		{
+			name: "dead session cause on a non-terminal transition",
+			in:   Input{Prev: clean, Next: clean, DeadSession: "SIGKILL, oom"},
+			want: "clean → clean: dead session (SIGKILL, oom)",
+		},
+		{
+			name: "dead session cause extends the failure segment",
+			in: Input{
+				Prev:        clean,
+				Next:        fsm.Outcome{State: fsm.StateFailed, Reason: fsm.ReasonRunnerTerminal},
+				FailureMode: "dead_session",
+				DeadSession: "exit 1",
+			},
+			want: "clean → failed{runner_terminal}: failure: dead_session (exit 1)",
+		},
+		{
 			name: "gate red",
 			in:   Input{Prev: dirty, Next: clean, Gate: GateFailed},
 			want: "dirty → clean: gate red",

@@ -47,6 +47,15 @@ type IterRecord struct {
 	PromptFile     string   `json:"prompt_file,omitempty"`
 	Skipped        string   `json:"skipped,omitempty"`
 	QuotaWaitSecs  int      `json:"quota_wait_secs,omitempty"`
+	// Runner process diagnostics, set whenever a session ran. ExitCode
+	// is a pointer so a clean 0 is distinct from "no session". The
+	// stderr tail is kept only for non-ok runner modes (it says why a
+	// dead_session died), so healthy rows stay small.
+	ExitCode        *int   `json:"exit_code,omitempty"`
+	Signal          string `json:"signal,omitempty"`
+	OOMKilled       bool   `json:"oom_killed,omitempty"`
+	KilledByTimeout bool   `json:"killed_by_timeout,omitempty"`
+	StderrTail      string `json:"stderr_tail,omitempty"`
 }
 
 // iterPaths bundles the per-iteration artifact paths. Computed
@@ -136,6 +145,9 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 
 	// 5. Gate hook (post-runner, pre-routing) + commit count for the tick.
 	gate, commits := runGatePhase(ctx, rc, prev, beforeHead)
+	// A gate that finished before any stop is a real verdict; one a stop
+	// killed (it reads as failed) is not.
+	gated := ctx.Err() == nil && (gate.Result == narrative.GatePassed || gate.Result == narrative.GateFailed)
 
 	// 6. Write the iter JSON (post-iteration sees this on stdin + env).
 	preJSON := composeIterRecord(rc, prev, prev, sess, mode, gate, bd.Diff{}, commits, now, beforeHead)
@@ -146,6 +158,15 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 	// 7. Global post-iteration hook (stdin = iter json).
 	runPostIterationHook(ctx, rc)
 
+	// A stop during the gate or post-iteration hook killed them through
+	// ctx: their results are not real (a killed gate reads as failed), so
+	// unwind here, before routing records them. The session's spend was
+	// already added in runRunnerPhase.
+	if cerr := ctx.Err(); cerr != nil {
+		recordInterrupted(ctx, rc, prev, sess, beforeHead, true, gated)
+		return prev, cerr
+	}
+
 	// 8–14. Route to the next state, persist FSM + summary + transition +
 	// incident. This is where a live-run Observer would be notified.
 	next, err := routeAndPersist(ctx, rc, prev, beforeBD, sess, mode, gate, commits, now)
@@ -153,7 +174,12 @@ func runIteration(ctx context.Context, rc *runContext) (fsm.Outcome, error) {
 		return next, err
 	}
 
-	// 15. Backoff sleep — skipped on terminal so Run can exit cleanly.
+	// 15. Backoff sleep — skipped on terminal so Run can exit cleanly. A
+	// runner_terminal the retry policy absorbed sleeps its cooldown instead.
+	if rc.pendingCooldown {
+		coolDown(ctx, rc, next, mode, sess)
+		return next, nil
+	}
 	sleepBackoff(ctx, rc, next, mode, sess)
 
 	return next, nil
@@ -229,6 +255,19 @@ func runRunnerPhase(ctx context.Context, rc *runContext, prev fsm.Outcome, befor
 	if err != nil {
 		return nil, runner.ModeOK, fmt.Errorf("loop: runner start: %w", err)
 	}
+	// The run was cancelled (SIGINT/SIGTERM, TUI quit) while the session
+	// ran: the runner was killed by us, not dead. Unwind the iteration
+	// instead of classifying and routing it, or a `systemctl stop` would
+	// count as a dead session and could persist failed{runner_terminal}.
+	// The session's spend still counts toward [budget]. A session timeout
+	// cancels only sessCtx, so it still routes below.
+	if cerr := ctx.Err(); cerr != nil {
+		recordInterrupted(ctx, rc, prev, sess, beforeHead, false, false)
+		return nil, runner.ModeOK, cerr
+	}
+	if sess.ScopeStopErr != nil {
+		rc.log.WarnContext(ctx, "runner scope not stopped; processes may outlive the iteration", "err", sess.ScopeStopErr)
+	}
 	mode := runner.Classify(sess)
 	updateStreaks(rc, mode)
 	updateCumulatives(rc, sess)
@@ -245,7 +284,19 @@ func runGatePhase(ctx context.Context, rc *runContext, prev fsm.Outcome, beforeH
 			commits = n
 		}
 	}
-	return runGate(ctx, rc, prev, commits), commits
+	// The commits-only decision also counts commits an interrupted
+	// iteration left ungated (fsm.GateBase). They are not this tick's
+	// commits for the record and totals, which stay `commits`.
+	// A base that can't be counted (gone after a reset, or a transient git
+	// error) contributes nothing this tick but is kept: routing clears it
+	// once a gate really runs.
+	gateCommits := commits
+	if base := rc.fsm.GateBase; base != "" {
+		if n, cerr := git.CountCommits(ctx, rc.repo, base, "HEAD"); cerr == nil {
+			gateCommits = max(n, commits)
+		}
+	}
+	return runGate(ctx, rc, prev, gateCommits), commits
 }
 
 // runPostIterationHook fires the global post-iteration hook with the iter
@@ -293,11 +344,13 @@ func routeAndPersist(ctx context.Context, rc *runContext, prev fsm.Outcome, befo
 
 	// Route to the next state.
 	runnerFailure := classifyToReason(mode, rc.deadStreak, rc.cfg.Backoff.DeadSessionThreshold)
-	next, err := fsm.SelectNextState(ctx, fsm.RouteInput{
-		FSM:           rc.fsm,
-		Cfg:           rc.cfg,
-		BD:            rc.bdClient,
-		Repo:          rc.repo,
+	// Retry policy: absorb a runner_terminal outcome into a cooldown
+	// (slept after this iteration is persisted) instead of ending the run.
+	retry := runnerFailure == fsm.ReasonRunnerTerminal && mode == runner.ModeDeadSession && canRetryTerminal(rc)
+	if retry {
+		runnerFailure = fsm.ReasonNone
+	}
+	next, err := rc.route(ctx, fsm.RouteInput{
 		RunnerFailure: runnerFailure,
 		NoopStreak:    rc.consecNoops,
 	})
@@ -320,6 +373,18 @@ func routeAndPersist(ctx context.Context, rc *runContext, prev fsm.Outcome, befo
 	// persistence — so a queue that refills never lands a terminal done{} in
 	// fsm.json and the transition row reads as an ordinary hop.
 	next = waitThenReroute(ctx, rc, next)
+	next = keepStateIfStopped(ctx, prev, next)
+	// A retry that routes to a terminal anyway (budget, deadline, cap,
+	// drained queue) just ends there; otherwise cool down after persisting.
+	// A stop that landed meanwhile (bead park) gets no cooldown either.
+	rc.pendingCooldown = retry && !next.State.Terminal() && ctx.Err() == nil
+	if rc.pendingCooldown {
+		// Count the retry and record the cooldown's end only once it
+		// happens; both ride the FSM Save below, so a crash can't spend
+		// the retry without the cooldown.
+		rc.fsm.RunnerTerminalRetries++
+		rc.fsm.CooldownUntil = rc.clock.Now().Add(cooldownDuration(rc)).UTC().Format(time.RFC3339)
+	}
 
 	// Update counters *before* assigning the new state.
 	rc.fsm.ObserveTransition(next.State)
@@ -342,6 +407,9 @@ func routeAndPersist(ctx context.Context, rc *runContext, prev fsm.Outcome, befo
 	rc.fsm.CumulativeCommits += commits
 	if gate.Result != "" {
 		rc.fsm.LastGateResult = gate.Result
+	}
+	if gate.Result == narrative.GatePassed || gate.Result == narrative.GateFailed {
+		rc.fsm.GateBase = "" // carried commits are gated now
 	}
 	// Track the gate-failure streak. Only passed/failed are real "the gate
 	// ran" signals; skipped/not-run leave the streak untouched.
@@ -376,7 +444,7 @@ func routeAndPersist(ctx context.Context, rc *runContext, prev fsm.Outcome, befo
 	}
 
 	// Write an incident if this transition triggers one.
-	if werr := writeIncidentIfNeeded(rc, prev, next, mode, gate.Result, rec.IterID); werr != nil {
+	if werr := writeIncidentIfNeeded(rc, prev, next, sess, mode, gate.Result, rec.IterID); werr != nil {
 		rc.log.ErrorContext(ctx, "incident write failed", "err", werr)
 	}
 	rc.lastGateResult = gate.Result
@@ -392,7 +460,7 @@ func sleepBackoff(ctx context.Context, rc *runContext, next fsm.Outcome, mode ru
 		return
 	}
 	if d := composeBackoff(rc, mode, sess); d > 0 {
-		rc.clock.Sleep(ctx, d)
+		rc.sleep(ctx, d)
 	}
 }
 
@@ -434,7 +502,7 @@ func waitOnQuota(ctx context.Context, rc *runContext, prev fsm.Outcome, sess *ru
 	if err := rc.fsm.Save(rc.repo); err != nil {
 		return prev, fmt.Errorf("loop: save fsm during quota wait: %w", err)
 	}
-	rc.clock.Sleep(ctx, d)
+	rc.sleep(ctx, d)
 	return prev, nil
 }
 
@@ -490,13 +558,18 @@ func waitThenReroute(ctx context.Context, rc *runContext, out fsm.Outcome) fsm.O
 		out, poll))
 
 	for {
-		notifyWait(rc, &WaitState{Kind: "beads", Elapsed: rc.clock.Now().Sub(start), Remaining: poll})
-		rc.clock.Sleep(ctx, poll)
+		notifyWait(rc, &WaitState{Kind: "beads", Elapsed: rc.clock.Now().Sub(start), Remaining: rc.clampToDeadline(poll)})
+		rc.sleep(ctx, poll)
 		// Sleep returns immediately once ctx is done, so without this check the
 		// loop would spin through `bd ready` subprocesses until maxWait.
 		if ctx.Err() != nil {
 			rc.log.InfoContext(ctx, "bead wait cancelled", "waited", rc.clock.Now().Sub(start).String())
 			return out
+		}
+		if rc.deadlinePassed() {
+			rc.log.InfoContext(ctx, "bead wait reached the deadline; exiting", "outcome", out.String())
+			emitChatter(rc, fmt.Sprintf("ralph: deadline %s reached while waiting for beads", rc.opts.Until.Format(time.RFC3339)))
+			return fsm.Outcome{State: fsm.StateDone, Reason: fsm.ReasonDeadline}
 		}
 		if maxWait > 0 && rc.clock.Now().Sub(start) >= maxWait {
 			rc.log.InfoContext(ctx, "bead wait exceeded max_bead_wait_secs; exiting", "outcome", out.String())
@@ -516,12 +589,7 @@ func waitThenReroute(ctx context.Context, rc *runContext, out fsm.Outcome) fsm.O
 		}
 
 		rc.consecNoops = 0
-		next, rerr := fsm.SelectNextState(ctx, fsm.RouteInput{
-			FSM:  rc.fsm,
-			Cfg:  rc.cfg,
-			BD:   rc.bdClient,
-			Repo: rc.repo,
-		})
+		next, rerr := rc.route(ctx, fsm.RouteInput{})
 		if rerr != nil {
 			rc.log.WarnContext(ctx, "bead wait: reroute failed; exiting", "err", rerr)
 			return out
@@ -537,6 +605,18 @@ func waitThenReroute(ctx context.Context, rc *runContext, out fsm.Outcome) fsm.O
 		emitChatter(rc, fmt.Sprintf("ralph: bead queue changed — resuming at %s", next))
 		return next
 	}
+}
+
+// keepStateIfStopped undoes a waitable terminal the run was stopped on:
+// a SIGTERM/SIGINT while parked for beads (or arriving just as the
+// route ended done{idle}/done{queue_empty}) must not persist done{*} —
+// the operator stopped the run, it didn't drain. prev is kept and the
+// loop exits on its next ctx check (exit 130/143).
+func keepStateIfStopped(ctx context.Context, prev, next fsm.Outcome) fsm.Outcome {
+	if ctx.Err() != nil && waitable(next) {
+		return prev
+	}
+	return next
 }
 
 // defaultBeadPoll is the poll interval used when bead_poll_secs is 0. Matches
@@ -636,6 +716,61 @@ func recordQuotaWait(rc *runContext, prev fsm.Outcome, d time.Duration) error {
 	}
 	emitIterLine(rc, rec)
 	return nil
+}
+
+// recordInterrupted keeps the accounting for an iteration the run's own
+// cancellation cut short: the session's cost and wallclock (unless
+// accrued already) and any commits it made go into the FSM totals —
+// saved, since routing (which normally saves) is skipped — and a
+// summary row marked skipped "interrupted" records them and how the
+// runner ended. The state does not advance; the commits stay in git,
+// and fsm.GateBase makes the next gate cover them. Best-effort: the run is already
+// unwinding, so failures are logged, not returned.
+func recordInterrupted(ctx context.Context, rc *runContext, prev fsm.Outcome, sess *runner.Session, beforeHead string, accrued, gated bool) {
+	if !accrued {
+		updateCumulatives(rc, sess)
+	}
+	commits := 0
+	if beforeHead != "" {
+		// ctx is cancelled; the count is a quick local git call.
+		if n, err := git.CountCommits(context.WithoutCancel(ctx), rc.repo, beforeHead, "HEAD"); err == nil {
+			commits = n
+		}
+	}
+	rc.fsm.CumulativeCommits += commits
+	switch {
+	case gated:
+		// The gate ran to a verdict before the stop: these commits (and
+		// any carried ones it counted) are gated.
+		rc.fsm.GateBase = ""
+	case commits > 0 && rc.fsm.GateBase == "":
+		// The commits skipped their gate; the next gate covers them. An
+		// existing base is older and already covers them.
+		rc.fsm.GateBase = beforeHead
+	}
+	narr := fmt.Sprintf("%s: interrupted; session discarded", prev.State)
+	if commits > 0 {
+		narr += fmt.Sprintf(" (its %d commit(s) kept)", commits)
+	}
+	rec := IterRecord{
+		Iter:      rc.fsm.Iter,
+		IterID:    rc.paths.stem,
+		Timestamp: rc.clock.Now().UTC().Format(time.RFC3339),
+		State:     string(prev.State),
+		PrevState: string(prev.State),
+		Narrative: narr,
+		Skipped:   "interrupted",
+		Commits:   commits,
+	}
+	// The session was cut short, not classified: keep its stderr tail.
+	applySession(&rec, sess, true)
+	if err := rc.sum.Write(rec); err != nil {
+		rc.log.ErrorContext(ctx, "write interrupted row failed", "err", err)
+	}
+	emitIterLine(rc, rec)
+	if err := rc.fsm.Save(rc.repo); err != nil {
+		rc.log.ErrorContext(ctx, "save fsm after interrupt failed", "err", err)
+	}
 }
 
 // recordSkippedIteration writes a minimal summary record for ticks the
@@ -941,13 +1076,93 @@ func classifyToReason(mode runner.Mode, deadStreak, threshold int) fsm.Reason {
 	return fsm.ReasonNone
 }
 
+// canRetryTerminal reports whether the runner_terminal retry policy
+// still has budget. The caller only asks for a dead-session streak: a
+// runner out of credit (budget) or capped without wait_on_quota (quota)
+// won't recover in a cooldown. --once and --dry-run are not unattended
+// runs and keep runner_terminal terminal.
+func canRetryTerminal(rc *runContext) bool {
+	return rc.cfg.Loop.RunnerTerminalRetries > rc.fsm.RunnerTerminalRetries && !rc.opts.Once && !rc.opts.DryRun
+}
+
+// coolDown sleeps the runner_terminal cooldown (cut short at the
+// deadline or on cancel), then clears the failure streaks so the next
+// iteration starts over: the run resumes from the state this iteration
+// already routed to, with its cost, wallclock and commit totals intact
+// so [budget] still bounds the whole run.
+func coolDown(ctx context.Context, rc *runContext, next fsm.Outcome, mode runner.Mode, sess *runner.Session) {
+	rc.pendingCooldown = false
+	d := cooldownDuration(rc)
+	cause := string(mode)
+	if diag := sessionDiag(sess); diag != "" {
+		cause += ": " + diag
+	}
+	msg := fmt.Sprintf("ralph: runner failed terminally (%s); retry %d/%d after a %s cooldown",
+		cause, rc.fsm.RunnerTerminalRetries, rc.cfg.Loop.RunnerTerminalRetries, d)
+	emitChatter(rc, msg)
+	rc.log.WarnContext(ctx, "runner_terminal absorbed by retry policy; cooling down",
+		"mode", string(mode), "retry", rc.fsm.RunnerTerminalRetries, "max", rc.cfg.Loop.RunnerTerminalRetries,
+		"cooldown", d.String(), "resume_state", string(next.State))
+	sleepCooldown(ctx, rc, d)
+}
+
+func cooldownDuration(rc *runContext) time.Duration {
+	return time.Duration(rc.cfg.Loop.RunnerTerminalCooldownSecs) * time.Second
+}
+
+// sleepCooldown sleeps a runner_terminal cooldown of d (cut short at the
+// deadline or on cancel). fsm.CooldownUntil is already saved, so a
+// restart mid-cooldown finishes it (resumeCooldown) instead of starting
+// the next session early. Afterwards the failure streaks clear and the
+// live view drops the badge.
+func sleepCooldown(ctx context.Context, rc *runContext, d time.Duration) {
+	d = rc.clampToDeadline(d)
+	notifyWait(rc, &WaitState{Kind: "cooldown", Remaining: d})
+	rc.clock.Sleep(ctx, d)
+	if ctx.Err() != nil {
+		return // keep CooldownUntil: the next start finishes the wait
+	}
+	rc.fsm.CooldownUntil = ""
+	if err := rc.fsm.Save(rc.repo); err != nil {
+		rc.log.WarnContext(ctx, "clear cooldown end failed", "err", err)
+	}
+	rc.deadStreak = 0
+	rc.consecFailures = 0
+	rc.consecNoops = 0
+	notifyWait(rc, nil)
+}
+
+// resumeCooldown finishes a cooldown a previous process was in when it
+// stopped, capped at the cooldown now configured. --once and --dry-run
+// don't wait (they're not unattended runs; the field is left for the
+// next real run). A cooldown already over, garbled, or with the retry
+// policy since turned off just clears.
+func resumeCooldown(ctx context.Context, rc *runContext) {
+	if rc.fsm.CooldownUntil == "" || rc.opts.Once || rc.opts.DryRun {
+		return
+	}
+	until, err := time.Parse(time.RFC3339, rc.fsm.CooldownUntil)
+	left := time.Duration(0)
+	if err == nil {
+		left = min(until.Sub(rc.clock.Now()), cooldownDuration(rc))
+	}
+	if left <= 0 || rc.cfg.Loop.RunnerTerminalRetries == 0 {
+		rc.fsm.CooldownUntil = ""
+		return
+	}
+	emitChatter(rc, fmt.Sprintf("ralph: resuming the runner cooldown (%s left)", left.Round(time.Second)))
+	sleepCooldown(ctx, rc, left)
+}
+
 // updateStreaks bumps loop-owned counters based on this iteration's
-// runner outcome.
+// runner outcome. A healthy session also refills the runner_terminal
+// retry budget.
 func updateStreaks(rc *runContext, mode runner.Mode) {
 	switch mode {
 	case runner.ModeOK:
 		rc.consecFailures = 0
 		rc.deadStreak = 0
+		rc.fsm.RunnerTerminalRetries = 0
 	case runner.ModeDeadSession:
 		rc.consecFailures++
 		rc.deadStreak++
@@ -988,6 +1203,15 @@ func composeIterRecord(rc *runContext, prev, next fsm.Outcome, sess *runner.Sess
 	if next.State == fsm.StateFailed {
 		failureMode = string(mode)
 	}
+	deadSession := ""
+	if mode == runner.ModeDeadSession {
+		deadSession = sessionDiag(sess)
+	}
+	retry := ""
+	if rc.pendingCooldown {
+		retry = fmt.Sprintf("runner_terminal: retry %d/%d after %s cooldown", rc.fsm.RunnerTerminalRetries,
+			rc.cfg.Loop.RunnerTerminalRetries, time.Duration(rc.cfg.Loop.RunnerTerminalCooldownSecs)*time.Second)
+	}
 	narrText := narrative.Compose(narrative.Input{
 		Prev:        prev,
 		Next:        next,
@@ -995,6 +1219,8 @@ func composeIterRecord(rc *runContext, prev, next fsm.Outcome, sess *runner.Sess
 		Commits:     commits,
 		Gate:        gate.Result,
 		FailureMode: failureMode,
+		DeadSession: deadSession,
+		Retry:       retry,
 	})
 	rec := IterRecord{
 		Iter:       rc.fsm.Iter,
@@ -1016,12 +1242,7 @@ func composeIterRecord(rc *runContext, prev, next fsm.Outcome, sess *runner.Sess
 	if gate.StderrFile != "" {
 		rec.GateStderrFile = relPathOrAbs(rc.repo, gate.StderrFile)
 	}
-	if sess != nil {
-		if sess.Envelope != nil {
-			rec.CostUSD = sess.Envelope.TotalCostUSD
-		}
-		rec.DurationSecs = sess.Duration.Seconds()
-	}
+	applySession(&rec, sess, mode != runner.ModeOK)
 	if !diffIsEmpty(diff) {
 		d := diff
 		rec.BDDiff = &d
@@ -1032,12 +1253,12 @@ func composeIterRecord(rc *runContext, prev, next fsm.Outcome, sess *runner.Sess
 // writeIncidentIfNeeded fires incidents.Write when a transition matches
 // one of the four trigger kinds. Priority: terminal-failure > revert >
 // gate-regression > dead-streak.
-func writeIncidentIfNeeded(rc *runContext, prev, next fsm.Outcome, mode runner.Mode, gateResult, iterID string) error {
+func writeIncidentIfNeeded(rc *runContext, prev, next fsm.Outcome, sess *runner.Session, mode runner.Mode, gateResult, iterID string) error {
 	_ = prev // explicit: not all triggers consult prev today
 	switch {
 	case next.State == fsm.StateFailed:
 		return writeIncident(rc, incidents.KindTerminalFailure, iterID,
-			fmt.Sprintf("terminal failure: %s", next.Reason))
+			fmt.Sprintf("terminal failure: %s%s", next.Reason, diagSuffix(mode, sess)))
 	case next.State == fsm.StateRevert:
 		return writeIncident(rc, incidents.KindRevert, iterID,
 			fmt.Sprintf("auto-revert after %d consecutive dirty iterations", rc.fsm.ConsecutiveDirty))
@@ -1046,9 +1267,62 @@ func writeIncidentIfNeeded(rc *runContext, prev, next fsm.Outcome, mode runner.M
 			fmt.Sprintf("gate regressed from passed to failed at iter %d", rc.fsm.Iter))
 	case mode == runner.ModeDeadSession && rc.cfg.Backoff.DeadSessionThreshold > 0 && rc.deadStreak == rc.cfg.Backoff.DeadSessionThreshold:
 		return writeIncident(rc, incidents.KindDeadStreak, iterID,
-			fmt.Sprintf("dead session #%d hit threshold %d", rc.deadStreak, rc.cfg.Backoff.DeadSessionThreshold))
+			fmt.Sprintf("dead session #%d hit threshold %d%s", rc.deadStreak, rc.cfg.Backoff.DeadSessionThreshold, diagSuffix(mode, sess)))
 	}
 	return nil
+}
+
+// applySession copies a session's cost, duration and process
+// diagnostics into rec — the one mapping every record that ran a session
+// uses. withTail adds the stderr tail (kept off healthy rows to keep
+// summary.jsonl small). A nil session leaves rec untouched.
+func applySession(rec *IterRecord, sess *runner.Session, withTail bool) {
+	if sess == nil {
+		return
+	}
+	if sess.Envelope != nil {
+		rec.CostUSD = sess.Envelope.TotalCostUSD
+	}
+	rec.DurationSecs = sess.Duration.Seconds()
+	code := sess.ExitCode
+	rec.ExitCode = &code
+	rec.Signal = sess.Signal
+	rec.OOMKilled = sess.OOMSignal
+	rec.KilledByTimeout = sess.KilledByTimeout
+	if withTail {
+		rec.StderrTail = sess.StderrTail
+	}
+}
+
+// sessionDiag summarizes how the runner process ended: "SIGKILL, oom",
+// "exit 1", "exit 0, timeout". The signal replaces the exit code when
+// present (Go reports -1 for a signalled process). "" for no session.
+func sessionDiag(sess *runner.Session) string {
+	if sess == nil {
+		return ""
+	}
+	var parts []string
+	if sess.Signal != "" {
+		parts = append(parts, sess.Signal)
+	} else {
+		parts = append(parts, fmt.Sprintf("exit %d", sess.ExitCode))
+	}
+	if sess.OOMSignal {
+		parts = append(parts, "oom")
+	}
+	if sess.KilledByTimeout {
+		parts = append(parts, "timeout")
+	}
+	return strings.Join(parts, ", ")
+}
+
+// diagSuffix renders " (dead_session: SIGKILL, oom)" for an incident
+// summary when a non-ok session ran, else "".
+func diagSuffix(mode runner.Mode, sess *runner.Session) string {
+	if sess == nil || mode == runner.ModeOK {
+		return ""
+	}
+	return fmt.Sprintf(" (%s: %s)", mode, sessionDiag(sess))
 }
 
 // writeIncident persists a single incident at the current iteration.

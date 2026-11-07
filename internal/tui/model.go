@@ -494,9 +494,13 @@ func (m model) waitBadge() seg {
 			text += ", next check in " + dur(m.waitRemaining)
 		}
 	} else {
-		text = "sleeping (quota) — resuming…"
+		kind := "quota"
+		if m.waitKind == "cooldown" {
+			kind = "runner cooldown"
+		}
+		text = "sleeping (" + kind + ") — resuming…"
 		if m.waitRemaining > 0 {
-			text = "sleeping (quota) — resuming in " + dur(m.waitRemaining)
+			text = "sleeping (" + kind + ") — resuming in " + dur(m.waitRemaining)
 		}
 	}
 	yellow := func(s string) string { return m.r.NewStyle().Foreground(lipgloss.Color("3")).Render(s) }

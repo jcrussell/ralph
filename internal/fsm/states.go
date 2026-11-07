@@ -31,13 +31,14 @@ const (
 type Reason string
 
 // Terminal-state reasons. ReasonNone is used by non-terminal states;
-// ReasonQueueEmpty/ReasonIterCap/ReasonIdle pair with StateDone; ReasonBudget,
+// ReasonQueueEmpty/ReasonIterCap/ReasonIdle/ReasonDeadline pair with StateDone; ReasonBudget,
 // ReasonAuth, and ReasonRunnerTerminal pair with StateFailed.
 const (
 	ReasonNone           Reason = ""
 	ReasonQueueEmpty     Reason = "queue_empty"
 	ReasonIterCap        Reason = "iter_cap"
 	ReasonIdle           Reason = "idle"
+	ReasonDeadline       Reason = "deadline" // the run's --until time passed
 	ReasonBudget         Reason = "budget"
 	ReasonAuth           Reason = "auth"
 	ReasonRunnerTerminal Reason = "runner_terminal"
@@ -83,7 +84,7 @@ func (s State) Valid() bool {
 func (s State) ValidReasons() []Reason {
 	switch s {
 	case StateDone:
-		return []Reason{ReasonQueueEmpty, ReasonIterCap, ReasonIdle}
+		return []Reason{ReasonQueueEmpty, ReasonIterCap, ReasonIdle, ReasonDeadline}
 	case StateFailed:
 		return []Reason{ReasonBudget, ReasonAuth, ReasonRunnerTerminal}
 	default:

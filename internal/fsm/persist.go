@@ -37,6 +37,19 @@ type FSM struct {
 	CumulativeCommits       int     `json:"cumulative_commits"`
 	LastGateResult          string  `json:"last_gate_result,omitempty"`
 	ConsecutiveGateFail     int     `json:"consecutive_gate_fail"`
+	// RunnerTerminalRetries counts runner_terminal outcomes absorbed by
+	// [loop] runner_terminal_retries since the last healthy session.
+	// Persisted so a process restart doesn't refill the retry budget;
+	// reset by a healthy session, --fresh, and the done{*} auto-reset.
+	RunnerTerminalRetries int `json:"runner_terminal_retries,omitempty"`
+	// CooldownUntil (RFC 3339) is set while a runner_terminal cooldown
+	// sleeps, so a restart finishes it rather than starting early.
+	CooldownUntil string `json:"cooldown_until,omitempty"`
+	// GateBase is the HEAD before commits an interrupted iteration made
+	// without reaching its gate. While set, the commits-only gate counts
+	// commits from here rather than from the current iteration's start,
+	// so those commits still get gated. Cleared once a gate runs.
+	GateBase string `json:"gate_base,omitempty"`
 }
 
 // Path is the on-disk location of fsm.json under repoRoot.

@@ -39,6 +39,10 @@ type Options struct {
 	SkipGate bool
 	DryRun   bool
 	Fresh    bool
+	// Until, when non-zero, is the run's wall-clock deadline (--until):
+	// no iteration starts at or after it, waits are cut short at it, and
+	// the run ends done{deadline}. An iteration in flight finishes.
+	Until time.Time
 
 	Runner Runner
 	BD     BDClient
@@ -53,8 +57,8 @@ type Options struct {
 // ErrTerminalState is returned by Run when fsm.json is already in a
 // terminal state (done{*} or failed{*}) and Options.Fresh is false. The
 // human-facing notice is written to Options.IO.ErrOut before the error
-// is returned, so command wrappers should map this to cmdutil.ErrSilent
-// (silent exit, non-zero code) rather than printing again.
+// is returned, so command wrappers map it (via pkg/cmd/loopexit) to exit
+// code 3 without printing again.
 var ErrTerminalState = errors.New("loop: fsm is in terminal state without --fresh")
 
 // runContext is the per-Run scratch space passed to iteration helpers.
@@ -86,7 +90,12 @@ type runContext struct {
 	// consecNoops counts consecutive no-op iterations (runner OK, zero
 	// commits, empty bd diff, unchanged state). Fed into RouteInput so
 	// SelectNextState can exit done{idle} once it reaches MaxNoopIters.
-	consecNoops      int
+	consecNoops int
+	// pendingCooldown asks runIteration to sleep the runner_terminal
+	// cooldown after the current iteration is persisted. The retry count
+	// itself lives on the FSM (RunnerTerminalRetries) so it survives a
+	// restart.
+	pendingCooldown  bool
 	lastEnteredState fsm.State
 	lastGateResult   string
 	// lastGateStdoutFile is the absolute path of the previous
@@ -119,7 +128,7 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 		return fsm.Outcome{}, err
 	}
 	if opts.Runner == nil {
-		opts.Runner = runner.New(opts.Cfg.Runner.Command, opts.Cfg.Runner.Args, opts.Cfg.Runner.Model, opts.Cfg.Loop.MemoryLimit)
+		opts.Runner = runner.New(opts.Cfg.Runner.Command, opts.Cfg.Runner.Args, opts.Cfg.Runner.Model, runnerMemLimit(opts.Cfg.Loop.MemoryLimit))
 	}
 	if opts.BD == nil {
 		opts.BD = bd.New("", opts.Repo, bd.WithExcludeTypes(opts.Cfg.Beads.ExcludeTypes...))
@@ -187,6 +196,10 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 			MaxCostUSD:       opts.Cfg.Budget.MaxCostUSD,
 			MaxWallclockSecs: opts.Cfg.Budget.MaxWallclockSecs,
 		}
+		if !opts.Until.IsZero() {
+			u := opts.Until.UTC()
+			m.Caps.Until = &u
+		}
 	}); err != nil {
 		return fsm.Outcome{}, fmt.Errorf("loop: stamp caps: %w", err)
 	}
@@ -246,6 +259,11 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 		finalOutcome = rc.fsm.Outcome
 	}
 
+	// Finish a runner cooldown an earlier process was stopped in.
+	if !rc.fsm.State.Terminal() {
+		resumeCooldown(ctx, rc)
+	}
+
 	// Main loop — terminates when the FSM enters a terminal state, ctx
 	// is cancelled, or --once after one non-terminal iteration.
 	for !rc.fsm.State.Terminal() {
@@ -253,12 +271,28 @@ func Run(ctx context.Context, opts Options) (fsm.Outcome, error) {
 			finalOutcome = rc.fsm.Outcome
 			return rc.fsm.Outcome, err
 		}
+		// Routing catches the deadline after a normal iteration; this
+		// catches it on resume and after a wait that doesn't route
+		// (quota wait, skipped tick, runner cooldown).
+		if rc.deadlinePassed() {
+			if err := endAtDeadline(ctx, rc); err != nil {
+				finalOutcome = rc.fsm.Outcome
+				return rc.fsm.Outcome, err
+			}
+			finalOutcome = rc.fsm.Outcome
+			break
+		}
 		next, err := runIteration(ctx, rc)
 		if err != nil {
 			finalOutcome = next
 			return next, err
 		}
 		finalOutcome = next
+		// A stop that landed in the backoff sleep ends the run as a stop,
+		// --once or not.
+		if cerr := ctx.Err(); cerr != nil && !next.State.Terminal() {
+			return next, cerr
+		}
 		if rc.opts.Once && !next.State.Terminal() {
 			return next, nil
 		}
@@ -349,12 +383,7 @@ func loadAndPrepareFSM(opts Options, errOut io.Writer) (*fsm.FSM, error) {
 // no hooks, no prompt — just one SelectNextState call.
 func handleStartState(ctx context.Context, rc *runContext) error {
 	prev := rc.fsm.Outcome
-	next, err := fsm.SelectNextState(ctx, fsm.RouteInput{
-		FSM:  rc.fsm,
-		Cfg:  rc.cfg,
-		BD:   rc.bdClient,
-		Repo: rc.repo,
-	})
+	next, err := rc.route(ctx, fsm.RouteInput{})
 	if err != nil {
 		return fmt.Errorf("loop: start route: %w", err)
 	}
@@ -362,22 +391,11 @@ func handleStartState(ctx context.Context, rc *runContext) error {
 	// which is the most common way an unattended run ends — so the park has to
 	// apply here too, not only in routeAndPersist.
 	next = waitThenReroute(ctx, rc, next)
-	rc.fsm.ObserveTransition(next.State)
-	rc.fsm.Outcome = next
-	if err := rc.fsm.Save(rc.repo); err != nil {
-		return fmt.Errorf("loop: start save: %w", err)
+	next = keepStateIfStopped(ctx, prev, next)
+	if next == prev {
+		return nil // stopped during the startup park: nothing moved
 	}
-	now := rc.clock.Now().UTC()
-	if err := rc.run.AppendTransition(runs.Transition{
-		TS:     now,
-		Iter:   rc.fsm.Iter,
-		From:   string(prev.State),
-		To:     string(next.State),
-		Reason: string(next.Reason),
-	}); err != nil {
-		rc.log.ErrorContext(ctx, "start: append transition", "err", err)
-	}
-	return nil
+	return commitTransition(ctx, rc, prev, next)
 }
 
 // openOrBeginRun returns the runs.Run the loop will write to. When the
@@ -440,5 +458,89 @@ func validateOptions(opts *Options) error {
 			return fmt.Errorf("loop: ReviewBranch %q must differ from ReviewBase", opts.ReviewBranch)
 		}
 	}
+	return nil
+}
+
+// runnerMemLimit is the systemd MemoryMax the runner's scope gets. A
+// limit that parses to zero ("0", "0G") disables the cap as documented,
+// rather than reaching systemd as MemoryMax=0, which would OOM the
+// runner on its first allocation. Config validation has already
+// rejected malformed values.
+func runnerMemLimit(s string) string {
+	if n, err := config.ParseBytes(s); err == nil && n == 0 {
+		return ""
+	}
+	return s
+}
+
+// route calls fsm.SelectNextState with the run's FSM, config, bd client,
+// repo and deadline filled in; in carries the per-call fields
+// (RunnerFailure, NoopStreak).
+func (rc *runContext) route(ctx context.Context, in fsm.RouteInput) (fsm.Outcome, error) {
+	in.FSM, in.Cfg, in.BD, in.Repo = rc.fsm, rc.cfg, rc.bdClient, rc.repo
+	in.Deadline, in.Now = rc.opts.Until, rc.clock.Now()
+	return fsm.SelectNextState(ctx, in)
+}
+
+// deadlinePassed reports whether the run's --until time has been reached.
+func (rc *runContext) deadlinePassed() bool {
+	return fsm.DeadlinePassed(rc.opts.Until, rc.clock.Now())
+}
+
+// sleep sleeps d on the run's clock, cut short at the deadline so a
+// long wait (quota, bead park, runner cooldown) can't overrun --until.
+// Callers re-check rc.deadlinePassed() afterwards.
+func (rc *runContext) sleep(ctx context.Context, d time.Duration) {
+	rc.clock.Sleep(ctx, rc.clampToDeadline(d))
+}
+
+// clampToDeadline shortens d so it ends no later than the deadline, for
+// sleeps and for the wait the live view counts down.
+func (rc *runContext) clampToDeadline(d time.Duration) time.Duration {
+	if !rc.opts.Until.IsZero() {
+		d = max(min(d, rc.opts.Until.Sub(rc.clock.Now())), 0)
+	}
+	return d
+}
+
+// commitTransition applies a transition that has no iteration record of
+// its own (the start route, ending at the deadline): counters, the new
+// outcome saved to fsm.json, and a transitions.jsonl row. routeAndPersist
+// does the same inline alongside the iteration's summary row.
+func commitTransition(ctx context.Context, rc *runContext, prev, next fsm.Outcome) error {
+	rc.fsm.ObserveTransition(next.State)
+	rc.fsm.Outcome = next
+	if err := rc.fsm.Save(rc.repo); err != nil {
+		return fmt.Errorf("loop: save fsm (%s → %s): %w", prev, next, err)
+	}
+	if err := rc.run.AppendTransition(runs.Transition{
+		TS:     rc.clock.Now().UTC(),
+		Iter:   rc.fsm.Iter,
+		From:   string(prev.State),
+		To:     string(next.State),
+		Reason: string(next.Reason),
+	}); err != nil {
+		rc.log.ErrorContext(ctx, "append transition", "err", err)
+	}
+	return nil
+}
+
+// endAtDeadline moves a non-terminal FSM to done{deadline} between
+// iterations and records the transition.
+func endAtDeadline(ctx context.Context, rc *runContext) error {
+	prev := rc.fsm.Outcome
+	next := fsm.Outcome{State: fsm.StateDone, Reason: fsm.ReasonDeadline}
+	emitChatter(rc, fmt.Sprintf("ralph: deadline %s reached; stopping", rc.opts.Until.Format(time.RFC3339)))
+	rc.log.InfoContext(ctx, "deadline reached; ending run", "until", rc.opts.Until.Format(time.RFC3339), "state", string(prev.State))
+	// Leave prev the way routeAndPersist would: its exit hook fires.
+	env := buildHookEnv(rc, hooks.PhaseExit, string(next.State))
+	if _, hErr := hooks.Run(ctx, hooks.StatePath(rc.repo, string(prev.State), hooks.PhaseExit), env, nil, nil, nil); hErr != nil {
+		rc.log.WarnContext(ctx, "exit hook error", "state", prev.State, "err", hErr)
+	}
+	if err := commitTransition(ctx, rc, prev, next); err != nil {
+		return err
+	}
+	// Push the terminal state to the live view (and clear any wait badge).
+	notifyWait(rc, nil)
 	return nil
 }

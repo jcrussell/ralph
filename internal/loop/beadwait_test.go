@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -109,6 +110,8 @@ func TestBeadWaitGivesUpAtMaxWait(t *testing.T) {
 // A cancelled context must end the park immediately and must NOT spin: the
 // clock's Sleep returns at once when ctx is done, so a missing ctx check would
 // hammer `bd ready` until max_bead_wait_secs. The call count is the assertion.
+// The cancel is a stop, not a drain: the run returns the cancellation and the
+// done{queue_empty} the park sat on is not persisted.
 func TestBeadWaitCancelStopsWithoutSpinning(t *testing.T) {
 	repo := scaffoldRepo(t)
 	opts := beadWaitOpts(t, repo)
@@ -120,11 +123,11 @@ func TestBeadWaitCancelStopsWithoutSpinning(t *testing.T) {
 	cancel() // already cancelled when the park begins
 
 	out, err := Run(ctx, opts)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run err = %v, want context.Canceled", err)
 	}
-	if (out != fsm.Outcome{State: fsm.StateDone, Reason: fsm.ReasonQueueEmpty}) {
-		t.Errorf("outcome = %s, want the original done{queue_empty}", out)
+	if out.State.Terminal() {
+		t.Errorf("outcome = %s, want the pre-park state, not a persisted terminal", out)
 	}
 	// Baseline + the start-state route's own queries; a spin would be hundreds.
 	if fb.ReadyCalls > 6 {

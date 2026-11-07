@@ -206,6 +206,8 @@ func TestValidateRejectsBadValues(t *testing.T) {
 		{"loop memory_limit_bytes garbage", func(c *Config) { c.Loop.MemoryLimit = "abc" }, "memory_limit_bytes"},
 		{"loop quota_wait_secs negative", func(c *Config) { c.Loop.QuotaWaitSecs = -1 }, "quota_wait_secs"},
 		{"loop max_noop_iters negative", func(c *Config) { c.Loop.MaxNoopIters = -1 }, "max_noop_iters"},
+		{"loop runner_terminal_retries negative", func(c *Config) { c.Loop.RunnerTerminalRetries = -1 }, "runner_terminal_retries"},
+		{"loop runner_terminal_cooldown_secs negative", func(c *Config) { c.Loop.RunnerTerminalCooldownSecs = -1 }, "runner_terminal_cooldown_secs"},
 		{"runner command empty", func(c *Config) { c.Runner.Command = "" }, "command is required"},
 		{"gate timeout_secs negative", func(c *Config) { c.Gate.TimeoutSecs = -1 }, "timeout_secs"},
 		{"gate run_when typo", func(c *Config) { c.Gate.RunWhen = "commits_only" }, "run_when"},
@@ -375,5 +377,13 @@ log_scrollback_lines = 12345
 	}
 	if cfg.UI.LogScrollbackBytes != "16M" {
 		t.Errorf("UI.LogScrollbackBytes = %q, want 16M (default preserved)", cfg.UI.LogScrollbackBytes)
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	for n, want := range map[int64]string{0: "0B", 512: "512B", 1536: "1.5K", 512 << 20: "512.0M", 7 << 30: "7.0G"} {
+		if got := FormatBytes(n); got != want {
+			t.Errorf("FormatBytes(%d) = %q, want %q", n, got, want)
+		}
 	}
 }
